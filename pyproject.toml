@@ -1,0 +1,32 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "scarlet-archive"
+version = "0.1.0"
+description = "Personal CLI that archives Scarlet Ink posts the user subscribes to as structured JSON"
+requires-python = ">=3.11"
+dependencies = [
+    "requests>=2.31",
+    "trafilatura>=1.12",
+    "beautifulsoup4>=4.12",
+    "lxml>=5.0",
+    "typer>=0.12",
+    "pyyaml>=6.0",
+    "python-dotenv>=1.0",
+    "jsonschema>=4.20",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=8.0", "pytest-cov>=5.0"]
+
+[project.scripts]
+archive = "scarlet_archive.cli:app"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/scarlet_archive"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+markers = ["slow: uses the real clock (seconds of waiting)"]
