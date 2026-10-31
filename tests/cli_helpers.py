@@ -7,13 +7,13 @@ from pathlib import Path
 import pytest
 from typer.testing import CliRunner
 
-import scarlet_archive.cli as cli
-from scarlet_archive.http import Client
+import newsletter_archive.cli as cli
+from newsletter_archive.http import Client
 
 from .conftest import TEST_COOKIE
 from .fakes import FakeClock, FakeTransport
 
-BASE = "https://www.scarletink.com"
+BASE = "https://www.example.com"
 
 
 class CliEnv:
@@ -22,7 +22,7 @@ class CliEnv:
         self.data = tmp_path / "data"
         self.config = tmp_path / "config.yaml"
         self.config.write_text(f"base_url: {BASE}\noutput_dir: data\n", encoding="utf-8")
-        (tmp_path / ".env").write_text(f"SCARLETINK_COOKIE={cookie}\n", encoding="utf-8")
+        (tmp_path / ".env").write_text(f"NEWSLETTER_COOKIE={cookie}\n", encoding="utf-8")
         self.clock = FakeClock()
         self.transport = FakeTransport(clock=self.clock)
         monkeypatch.setattr(

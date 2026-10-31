@@ -1,11 +1,11 @@
 ## Context
 
-Scarlet Ink is a paid newsletter site. The user is a subscriber and wants a personal, offline, structured copy of every post to feed a later search/Q&A phase. The tool runs on the user's Mac, uses only their own login cookie, and must be polite to the site. Category tags are not reliably shown on post pages, so category listing pages are the source of truth.
+The target is a paid newsletter site built on Ghost. The user is a subscriber and wants a personal, offline, structured copy of every post to feed a later search/Q&A phase. The tool runs on the user's Mac, uses only their own login cookie, and must be polite to the site. Category tags are not reliably shown on post pages, so category listing pages are the source of truth.
 
 ## Site findings (inspected 2026-10-31)
 
 - The site runs on **Ghost**. Login is two cookies: `ghost-members-ssr` and `ghost-members-ssr.sig` (expire around May 2027). Stripe cookies are not needed.
-- `sitemap.xml` is an index of `sitemap-pages.xml`, `sitemap-posts.xml` (252 posts), `sitemap-authors.xml` and `sitemap-tags.xml`. Post URLs are `https://www.scarletink.com/<slug>/`.
+- `sitemap.xml` is an index of `sitemap-pages.xml`, `sitemap-posts.xml` (252 posts), `sitemap-authors.xml` and `sitemap-tags.xml`. Post URLs are `https://www.example.com/<slug>/`.
 - `/categories/` links to 9 categories at `/t/<slug>`, which 301 to `/tag/<slug>/`. Listings show 12 posts per page and link the next page with `<link rel="next" href=".../tag/<slug>/page/2/">`. Tags `newsletter` and `page` exist but are not categories.
 - Post body is `article.gh-article .gh-content`. The article element also carries `tag-<slug>` classes.
 - Signed-in pages contain `data-portal="account"`; signed-out pages contain `data-portal="signin"` and the paywall box `.gh-post-upgrade-cta` ("This post is for paying subscribers only").
@@ -28,7 +28,7 @@ Scarlet Ink is a paid newsletter site. The user is a subscriber and wants a pers
 
 ### Package layout
 ```
-src/scarlet_archive/
+src/newsletter_archive/
   cli.py         # typer app: discover, fetch, extract, run
   config.py      # load config.yaml + .env into a frozen dataclass
   http.py        # Session wrapper: cookie, UA, timeout, delay, retries
@@ -64,7 +64,7 @@ The manifest stores normalized URLs (no trailing slash) for dedupe and ids, but 
 Write to `<path>.tmp` in the same directory, `fsync`, then `os.replace`. Applies to post JSON and `manifest.json`.
 
 ### Config precedence
-`config.yaml` defaults, overridden by CLI flags. Cookie only from environment / `.env` (`SCARLETINK_COOKIE`). Missing cookie fails `fetch` with a clear message; `discover` does not need it.
+`config.yaml` defaults, overridden by CLI flags. Cookie only from environment / `.env` (`NEWSLETTER_COOKIE`). Missing cookie fails `fetch` with a clear message; `discover` does not need it.
 
 ## Risks / Trade-offs
 
@@ -80,4 +80,4 @@ New project; nothing to migrate. Rollout: build with offline tests → user fill
 
 ## Open Questions
 
-- None blocking. Repo location (`~/Workspace/scarlet-ink-archive`) is confirmed; free/paid detection is dropped by the user's decision.
+- None blocking. Repo location (`~/Workspace/newsletter-archive`) is confirmed; free/paid detection is dropped by the user's decision.

@@ -13,16 +13,16 @@ from dotenv import dotenv_values
 from . import __version__
 from .errors import ConfigError
 
-COOKIE_ENV = "SCARLETINK_COOKIE"
+COOKIE_ENV = "NEWSLETTER_COOKIE"
 
 DEFAULTS: dict[str, Any] = {
-    "base_url": "https://www.scarletink.com",
+    "base_url": None,  # required: the newsletter site, set in config.yaml
     "delay_seconds": 2,
     "max_retries": 3,
     "timeout_seconds": 30,
     "min_word_count": 300,
-    "output_dir": "../scarlet-ink-archive-data",  # next to the repo, outside git
-    "user_agent": f"scarlet-ink-archive/{__version__} (personal archive; one request every 2s)",
+    "output_dir": "../newsletter-archive-data",  # next to the repo, outside git
+    "user_agent": f"newsletter-archive/{__version__} (personal archive; one request every 2s)",
 }
 
 MIN_DELAY_SECONDS = 2
@@ -173,6 +173,10 @@ def load_config(
     if not output_dir.is_absolute():
         output_dir = (base_dir / output_dir).resolve()
 
+    if not values["base_url"]:
+        raise ConfigError(
+            f"base_url is not set; copy config.example.yaml to {path} and set the newsletter's address"
+        )
     try:
         cfg = Config(
             base_url=str(values["base_url"]).rstrip("/"),

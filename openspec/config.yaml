@@ -1,7 +1,7 @@
 schema: spec-driven
 
 context: |
-  Project: Scarlet Ink Archive — a private, local archive of posts on https://www.scarletink.com
+  Project: Newsletter Archive — a private, local archive of posts on https://www.example.com
   that the user subscribes to. Personal use only; never shared or published.
   Tech stack: Python 3.11+, pyproject.toml, console entry point `archive`.
   Site: Ghost CMS; login cookies ghost-members-ssr + ghost-members-ssr.sig; categories are Ghost tags.

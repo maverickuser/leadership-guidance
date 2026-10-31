@@ -9,7 +9,7 @@
 
 ## Spec
 
-<!-- Requirements / scenarios from openspec/changes/add-scarlet-ink-archive/specs/ implemented here -->
+<!-- Requirements / scenarios from openspec/changes/add-newsletter-archive/specs/ implemented here -->
 
 ## Tests
 

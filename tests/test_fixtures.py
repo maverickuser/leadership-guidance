@@ -44,7 +44,7 @@ def test_tag_pagination_fixtures():
 
 
 def test_categories_page_lists_nine_categories():
-    hrefs = re.findall(r'href="https://www\.scarletink\.com/t/([^"]+)"', fixture_text("categories.html"))
+    hrefs = re.findall(r'href="https://www\.example\.com/t/([^"]+)"', fixture_text("categories.html"))
     assert len(set(hrefs)) == 9
 
 

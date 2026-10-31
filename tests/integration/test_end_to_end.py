@@ -8,8 +8,8 @@ import time
 
 import pytest
 
-from scarlet_archive.errors import NOT_SIGNED_IN_MESSAGE
-from scarlet_archive.schema import validate_post
+from newsletter_archive.errors import NOT_SIGNED_IN_MESSAGE
+from newsletter_archive.schema import validate_post
 
 from ..conftest import SECRET_PARTS, TEST_COOKIE
 from .conftest import SLUGS, Harness
@@ -127,7 +127,7 @@ def test_real_clock_spacing(tmp_path, monkeypatch):
     with FixtureSite(["post-1", "post-2"], {}, TEST_COOKIE) as site:
         h = Harness(tmp_path, monkeypatch, site, real_clock=True)
         stamps = []
-        import scarlet_archive.http as http_mod
+        import newsletter_archive.http as http_mod
 
         real_follow = http_mod.Client._follow
 

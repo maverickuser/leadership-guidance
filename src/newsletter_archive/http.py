@@ -20,7 +20,7 @@ import requests
 from .config import BACKOFF_SECONDS, Config
 from .errors import FetchError
 
-log = logging.getLogger("scarlet_archive.http")
+log = logging.getLogger("newsletter_archive.http")
 
 MAX_REDIRECTS = 5
 MAX_RESPONSE_BYTES = 10 * 1024 * 1024  # a post page is well under 1 MB

@@ -3,9 +3,9 @@ requires = ["hatchling>=1.27"]
 build-backend = "hatchling.build"
 
 [project]
-name = "scarlet-archive"
+name = "newsletter-archive"
 dynamic = ["version"]
-description = "Personal CLI that archives Scarlet Ink posts the user subscribes to as structured JSON"
+description = "Personal CLI that archives newsletter posts the user subscribes to as structured JSON"
 readme = "README.md"
 license = "MIT"
 license-files = ["LICENSE"]
@@ -48,13 +48,13 @@ Repository = "https://github.com/maverickuser/leadership-guidance"
 Issues = "https://github.com/maverickuser/leadership-guidance/issues"
 
 [project.scripts]
-archive = "scarlet_archive.cli:app"
+archive = "newsletter_archive.cli:app"
 
 [tool.hatch.version]
-path = "src/scarlet_archive/__init__.py"
+path = "src/newsletter_archive/__init__.py"
 
 [tool.hatch.build.targets.wheel]
-packages = ["src/scarlet_archive"]
+packages = ["src/newsletter_archive"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
@@ -80,7 +80,7 @@ ignore = [
 ]
 
 [tool.ruff.lint.per-file-ignores]
-"src/scarlet_archive/cli.py" = ["UP007", "UP045"]  # typer reads Optional[...] reliably on 3.11
+"src/newsletter_archive/cli.py" = ["UP007", "UP045"]  # typer reads Optional[...] reliably on 3.11
 "tests/**" = ["E501"]  # inline HTML snippets read better unwrapped
 
 [tool.mypy]

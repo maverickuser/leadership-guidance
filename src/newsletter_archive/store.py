@@ -20,7 +20,7 @@ from .extract import extract_post
 from .models import Extracted, Manifest, ManifestEntry, PostCallback, iso_utc, no_callback, utc_now_iso
 from .schema import SCHEMA_VERSION, validate_post
 
-log = logging.getLogger("scarlet_archive.store")
+log = logging.getLogger("newsletter_archive.store")
 
 MANIFEST_VERSION = 1
 

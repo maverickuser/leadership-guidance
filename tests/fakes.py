@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
-from scarlet_archive.http import RawResponse, TransportConnectionError, TransportTimeout
+from newsletter_archive.http import RawResponse, TransportConnectionError, TransportTimeout
 
 
 class FakeClock:

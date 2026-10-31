@@ -1,6 +1,6 @@
 ## Why
 
-The user pays for Scarlet Ink and wants every post they can read (free and paid) saved locally as clean, structured JSON, so a later phase can add semantic and keyword search and LLM Q&A over the archive. Today there is no local copy, and the site's pages mix the article with navigation, comments, images and subscribe boxes.
+The user pays for a newsletter and wants every post they can read (free and paid) saved locally as clean, structured JSON, so a later phase can add semantic and keyword search and LLM Q&A over the archive. Today there is no local copy, and the site's pages mix the article with navigation, comments, images and subscribe boxes.
 
 ## What Changes
 
@@ -30,7 +30,7 @@ None (new project).
 
 ## Impact
 
-- New repository at `~/Workspace/scarlet-ink-archive` (location may change; see design open questions).
+- New repository at `~/Workspace/newsletter-archive` (location may change; see design open questions).
 - New dependencies: requests, trafilatura, beautifulsoup4, lxml, typer, pyyaml, python-dotenv, pytest.
-- External system: https://www.scarletink.com, accessed politely with the user's own subscription.
+- External system: https://www.example.com, accessed politely with the user's own subscription.
 - Local data under `data/` (git-ignored) holding copyrighted content for personal use only.

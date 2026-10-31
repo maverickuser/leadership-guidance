@@ -10,7 +10,7 @@ from .conftest import fixture_text
 def tag_page(title: str, slugs: list[str], next_href: str | None = None) -> str:
     """A tag listing with the real Ghost card markup, listing the given post slugs."""
     soup = BeautifulSoup(fixture_text("tag-career-growth-p1.html"), "lxml")
-    soup.title.string = f"{title} - Scarlet Ink"
+    soup.title.string = f"{title} - Example Newsletter"
     for link in soup.find_all("link", rel="next"):
         link.decompose()
     if next_href:

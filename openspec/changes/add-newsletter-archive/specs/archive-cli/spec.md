@@ -19,7 +19,7 @@ Every subcommand SHALL accept `--limit N` (process at most N posts), `--refresh`
 - **THEN** the list of posts that would be fetched is printed and no post requests are made and no files are written to `data/raw/` or `data/posts/`
 
 ### Requirement: Configuration
-The system SHALL read settings from `config.yaml` (`base_url`, `delay_seconds`, `max_retries`, `timeout_seconds`, `min_word_count`, `output_dir`, `user_agent`) with the defaults given in the project spec, and SHALL read `SCARLETINK_COOKIE` from `.env`. The repository SHALL include `config.yaml`, `.env.example` and a `.gitignore` that lists `.env` and `data/`.
+The system SHALL read settings from `config.yaml` (`base_url`, `delay_seconds`, `max_retries`, `timeout_seconds`, `min_word_count`, `output_dir`, `user_agent`) with the defaults given in the project spec, and SHALL read `NEWSLETTER_COOKIE` from `.env`. The repository SHALL include `config.yaml`, `.env.example` and a `.gitignore` that lists `.env` and `data/`.
 
 #### Scenario: Custom delay
 - **WHEN** `config.yaml` sets `delay_seconds: 5`

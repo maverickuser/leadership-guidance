@@ -20,9 +20,9 @@ from pathlib import Path
 
 from bs4 import BeautifulSoup, Comment, NavigableString
 
-from scarlet_archive.extract import BOILERPLATE_PREFIXES
+from newsletter_archive.extract import BOILERPLATE_PREFIXES
 
-BASE = "https://www.scarletink.com"
+BASE = "https://www.example.com"
 FILLER_WORDS = [
     "team",
     "plan",
@@ -208,7 +208,7 @@ def build_categories(src: Path, out: Path) -> list[str]:
     )
     page = f"""<!DOCTYPE html>
 <html lang="en">
-<head><meta charset="utf-8"><title>Categories - Scarlet Ink</title></head>
+<head><meta charset="utf-8"><title>Categories - Example Newsletter</title></head>
 <body>
   <nav class="gh-navigation">
     <a href="{BASE}/">Home</a>

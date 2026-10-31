@@ -1,24 +1,35 @@
 import pytest
 
-from scarlet_archive.config import DEFAULTS, Secret, clean_cookie, load_config
-from scarlet_archive.errors import ConfigError
+from newsletter_archive.config import DEFAULTS, Secret, clean_cookie, load_config
+from newsletter_archive.errors import ConfigError
 
 from .conftest import TEST_COOKIE
 
+SITE = {"base_url": "https://www.example.com"}
+
 
 def write(path, text):
+    """Write a config file; every config needs base_url, so add it unless the test sets one."""
+    if path.suffix == ".yaml" and "base_url" not in text:
+        text = "base_url: https://www.example.com\n" + text
     path.write_text(text, encoding="utf-8")
     return path
 
 
+def test_base_url_is_required(tmp_path):
+    assert DEFAULTS["base_url"] is None
+    with pytest.raises(ConfigError, match="base_url is not set"):
+        load_config(tmp_path / "missing.yaml", tmp_path / ".env")
+
+
 def test_defaults_when_no_config_file(tmp_path):
-    cfg = load_config(tmp_path / "missing.yaml", tmp_path / ".env")
-    assert cfg.base_url == DEFAULTS["base_url"]
+    cfg = load_config(tmp_path / "missing.yaml", tmp_path / ".env", overrides=SITE)
+    assert cfg.base_url == "https://www.example.com"
     assert cfg.delay_seconds == 2
     assert cfg.max_retries == 3
     assert cfg.timeout_seconds == 30
     assert cfg.min_word_count == 300
-    assert cfg.output_dir.name == "scarlet-ink-archive-data"
+    assert cfg.output_dir.name == "newsletter-archive-data"
     assert not cfg.cookie
 
 
@@ -73,14 +84,14 @@ def test_with_overrides_revalidates(cfg):
 
 
 def test_cookie_from_env_file(tmp_path):
-    env = write(tmp_path / ".env", f"SCARLETINK_COOKIE={TEST_COOKIE}\n")
-    assert load_config(tmp_path / "none.yaml", env).cookie.reveal() == TEST_COOKIE
+    env = write(tmp_path / ".env", f"NEWSLETTER_COOKIE={TEST_COOKIE}\n")
+    assert load_config(tmp_path / "none.yaml", env, overrides=SITE).cookie.reveal() == TEST_COOKIE
 
 
 def test_environment_variable_beats_env_file(tmp_path, monkeypatch):
-    env = write(tmp_path / ".env", "SCARLETINK_COOKIE=from-file\n")
-    monkeypatch.setenv("SCARLETINK_COOKIE", "from-env")
-    assert load_config(tmp_path / "none.yaml", env).cookie.reveal() == "from-env"
+    env = write(tmp_path / ".env", "NEWSLETTER_COOKIE=from-file\n")
+    monkeypatch.setenv("NEWSLETTER_COOKIE", "from-env")
+    assert load_config(tmp_path / "none.yaml", env, overrides=SITE).cookie.reveal() == "from-env"
 
 
 @pytest.mark.parametrize(

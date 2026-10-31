@@ -1,7 +1,7 @@
 import logging
 
-from scarlet_archive.config import Secret
-from scarlet_archive.runlog import RedactFilter, RunSummary, close_logging, log_post, setup_logging
+from newsletter_archive.config import Secret
+from newsletter_archive.runlog import RedactFilter, RunSummary, close_logging, log_post, setup_logging
 
 from .conftest import TEST_COOKIE
 
@@ -26,7 +26,7 @@ def test_redacts_cookie_lines_and_ghost_cookies_even_if_unknown():
 
 def test_filter_redacts_args_and_exceptions(cfg):
     path = setup_logging(cfg, verbose=True)
-    log = logging.getLogger("scarlet_archive.test")
+    log = logging.getLogger("newsletter_archive.test")
     log.info("cookie is %s", TEST_COOKIE)
     try:
         raise ValueError(f"bad {TEST_COOKIE}")

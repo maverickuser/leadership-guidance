@@ -4,16 +4,16 @@ import os
 
 import pytest
 
-import scarlet_archive.store as store
-from scarlet_archive.errors import ExtractError
-from scarlet_archive.models import Extracted, Manifest, ManifestEntry, Section
-from scarlet_archive.schema import validate_post
-from scarlet_archive.store import build_record, load_manifest, run_extract, write_text_atomic
+import newsletter_archive.store as store
+from newsletter_archive.errors import ExtractError
+from newsletter_archive.models import Extracted, Manifest, ManifestEntry, Section
+from newsletter_archive.schema import validate_post
+from newsletter_archive.store import build_record, load_manifest, run_extract, write_text_atomic
 
 from .conftest import fixture_text
 from .sitebuilder import post_page
 
-BASE = "https://www.scarletink.com"
+BASE = "https://www.example.com"
 
 
 def seed(cfg, slugs, html=None, categories=None):

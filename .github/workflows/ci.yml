@@ -27,7 +27,7 @@ jobs:
           cache: pip
           cache-dependency-path: requirements-dev.lock
       - run: pip install -r requirements-dev.lock && pip install --no-deps -e .
-      - run: pytest -q -m "slow or not slow" --cov=scarlet_archive --cov-report=term-missing
+      - run: pytest -q -m "slow or not slow" --cov=newsletter_archive --cov-report=term-missing
 
   lint:
     runs-on: ubuntu-latest

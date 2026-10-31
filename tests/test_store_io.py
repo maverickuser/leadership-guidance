@@ -3,9 +3,9 @@ import os
 
 import pytest
 
-from scarlet_archive.errors import ArchiveError
-from scarlet_archive.models import Manifest, ManifestEntry
-from scarlet_archive.store import load_manifest, save_manifest, write_json_atomic, write_text_atomic
+from newsletter_archive.errors import ArchiveError
+from newsletter_archive.models import Manifest, ManifestEntry
+from newsletter_archive.store import load_manifest, save_manifest, write_json_atomic, write_text_atomic
 
 
 def test_manifest_round_trip_keeps_order_and_fields(tmp_path):

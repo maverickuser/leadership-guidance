@@ -2,7 +2,7 @@ import json
 
 import pytest
 
-from scarlet_archive.discover import (
+from newsletter_archive.discover import (
     category_slugs,
     collect_sitemap_urls,
     crawl_categories,
@@ -13,16 +13,16 @@ from scarlet_archive.discover import (
     run_discover,
     slug_from_url,
 )
-from scarlet_archive.errors import ArchiveError
-from scarlet_archive.http import Client
-from scarlet_archive.models import Manifest, ManifestEntry
-from scarlet_archive.store import load_manifest, save_manifest
+from newsletter_archive.errors import ArchiveError
+from newsletter_archive.http import Client
+from newsletter_archive.models import Manifest, ManifestEntry
+from newsletter_archive.store import load_manifest, save_manifest
 
 from .conftest import fixture_text
 from .fakes import FakeClock, FakeTransport
 from .sitebuilder import categories_page, sitemap_index, sitemap_urlset, tag_page
 
-BASE = "https://www.scarletink.com"
+BASE = "https://www.example.com"
 
 
 @pytest.fixture
@@ -91,11 +91,11 @@ def test_filter_and_dedupe_mixed_sitemap(cfg, clock):
 @pytest.mark.parametrize(
     "raw, expected",
     [
-        ("https://www.scarletink.com/foo/?utm_source=x#top", "https://www.scarletink.com/foo"),
-        ("https://www.scarletink.com/foo", "https://www.scarletink.com/foo"),
-        ("HTTPS://WWW.ScarletInk.com/foo/", "https://www.scarletink.com/foo"),
-        ("https://www.scarletink.com/foo/?ref=nl&b=2&a=1", "https://www.scarletink.com/foo?a=1&b=2"),
-        ("https://www.scarletink.com/foo/?UTM_Medium=e&fbclid=z", "https://www.scarletink.com/foo"),
+        ("https://www.example.com/foo/?utm_source=x#top", "https://www.example.com/foo"),
+        ("https://www.example.com/foo", "https://www.example.com/foo"),
+        ("HTTPS://WWW.Example.com/foo/", "https://www.example.com/foo"),
+        ("https://www.example.com/foo/?ref=nl&b=2&a=1", "https://www.example.com/foo?a=1&b=2"),
+        ("https://www.example.com/foo/?UTM_Medium=e&fbclid=z", "https://www.example.com/foo"),
         ("http://127.0.0.1:8001/foo/", "http://127.0.0.1:8001/foo"),
     ],
 )
@@ -106,16 +106,16 @@ def test_normalize_url(raw, expected):
 @pytest.mark.parametrize(
     "url, ok",
     [
-        ("https://www.scarletink.com/why-promotions-stall", True),
-        ("https://scarletink.com/why-promotions-stall", True),
-        ("https://www.scarletink.com/tag/career-growth", False),
-        ("https://www.scarletink.com/author/david", False),
-        ("https://www.scarletink.com/categories", False),
-        ("https://www.scarletink.com/about", False),
-        ("https://www.scarletink.com", False),
-        ("https://www.scarletink.com/a/b", False),
+        ("https://www.example.com/why-promotions-stall", True),
+        ("https://example.com/why-promotions-stall", True),
+        ("https://www.example.com/tag/career-growth", False),
+        ("https://www.example.com/author/david", False),
+        ("https://www.example.com/categories", False),
+        ("https://www.example.com/about", False),
+        ("https://www.example.com", False),
+        ("https://www.example.com/a/b", False),
         ("https://other.example/post", False),
-        ("https://www.scarletink.com:8443/post", False),
+        ("https://www.example.com:8443/post", False),
     ],
 )
 def test_is_post_url(url, ok):
@@ -124,10 +124,10 @@ def test_is_post_url(url, ok):
 
 # spec: post-discovery / Slug from URL
 def test_slug_from_url():
-    assert slug_from_url("https://www.scarletink.com/why-promotions-stall/") == "why-promotions-stall"
-    assert slug_from_url("https://www.scarletink.com/Caf%C3%A9_Notes") == "caf-notes"
+    assert slug_from_url("https://www.example.com/why-promotions-stall/") == "why-promotions-stall"
+    assert slug_from_url("https://www.example.com/Caf%C3%A9_Notes") == "caf-notes"
     with pytest.raises(ValueError):
-        slug_from_url("https://www.scarletink.com/")
+        slug_from_url("https://www.example.com/")
 
 
 # -- categories --------------------------------------------------------------
@@ -286,7 +286,7 @@ def test_discover_dry_run_writes_nothing(cfg, clock):
 
 
 def test_discover_does_not_need_cookie(tmp_path, clock):
-    from scarlet_archive.config import Secret
+    from newsletter_archive.config import Secret
 
     from .conftest import make_config
 
@@ -300,9 +300,9 @@ def test_discover_does_not_need_cookie(tmp_path, clock):
 @pytest.mark.parametrize(
     "url, ok",
     [
-        ("https://www.scarletink.com:443/post", True),  # explicit default port
-        ("https://www.scarletink.com:99999/post", False),  # malformed port: skipped, no crash
-        ("https://www.scarletink.com:abc/post", False),
+        ("https://www.example.com:443/post", True),  # explicit default port
+        ("https://www.example.com:99999/post", False),  # malformed port: skipped, no crash
+        ("https://www.example.com:abc/post", False),
     ],
 )
 def test_is_post_url_ports(url, ok):
@@ -311,7 +311,7 @@ def test_is_post_url_ports(url, ok):
 
 def test_bad_port_links_do_not_crash_category_crawl(cfg, clock):
     page = categories_page(BASE, ["career-growth"]).replace(
-        "</ul>", '<li><a href="https://www.scarletink.com:99999/t/x">bad</a></li></ul>'
+        "</ul>", '<li><a href="https://www.example.com:99999/t/x">bad</a></li></ul>'
     )
     assert category_slugs(page, BASE) == ["career-growth"]
-    assert normalize_url("https://www.scarletink.com:99999/foo/") == "https://www.scarletink.com:99999/foo"
+    assert normalize_url("https://www.example.com:99999/foo/") == "https://www.example.com:99999/foo"

@@ -1,14 +1,14 @@
 ## ADDED Requirements
 
 ### Requirement: Authenticate with the user's cookie
-The system SHALL send the value of `SCARLETINK_COOKIE` from `.env` as the `Cookie` header and the configured `user_agent` as `User-Agent` on every request to the site. The system MUST NOT attempt to bypass the paywall by any other means.
+The system SHALL send the value of `NEWSLETTER_COOKIE` from `.env` as the `Cookie` header and the configured `user_agent` as `User-Agent` on every request to the site. The system MUST NOT attempt to bypass the paywall by any other means.
 
 #### Scenario: Cookie present
-- **WHEN** `SCARLETINK_COOKIE` is set
+- **WHEN** `NEWSLETTER_COOKIE` is set
 - **THEN** each post request carries that value in the `Cookie` header
 
 #### Scenario: Cookie missing
-- **WHEN** `archive fetch` runs and `SCARLETINK_COOKIE` is empty or unset
+- **WHEN** `archive fetch` runs and `NEWSLETTER_COOKIE` is empty or unset
 - **THEN** the command exits non-zero with a message telling the user to fill in `.env`, and makes no requests
 
 ### Requirement: Polite rate limiting
@@ -70,5 +70,5 @@ Every fetched post page SHALL be checked for the signed-in marker `data-portal="
 The system SHALL request each post at its canonical form with a trailing slash, as listed in the sitemap, so the site does not answer with a redirect. Any redirect that does happen SHALL be followed and counted within the same rate-limited request slot.
 
 #### Scenario: Normalized URL in manifest
-- **WHEN** the manifest URL is `https://www.scarletink.com/foo`
-- **THEN** the request goes to `https://www.scarletink.com/foo/`
+- **WHEN** the manifest URL is `https://www.example.com/foo`
+- **THEN** the request goes to `https://www.example.com/foo/`

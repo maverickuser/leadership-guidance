@@ -26,14 +26,14 @@ The system SHALL keep only post page URLs and MUST drop tag, author, category an
 The system SHALL normalize every URL by removing tracking query parameters (such as `utm_*`, `ref`) and fragments and by removing any trailing slash, and MUST keep each normalized URL only once.
 
 #### Scenario: Duplicate with tracking params
-- **WHEN** the sitemap contains `https://www.scarletink.com/foo/?utm_source=x#top` and `https://www.scarletink.com/foo`
-- **THEN** the manifest holds one entry with URL `https://www.scarletink.com/foo`
+- **WHEN** the sitemap contains `https://www.example.com/foo/?utm_source=x#top` and `https://www.example.com/foo`
+- **THEN** the manifest holds one entry with URL `https://www.example.com/foo`
 
 ### Requirement: Derive a slug per post
 The system SHALL derive a stable, filesystem-safe slug from each post URL's final path segment and SHALL use it as the post id.
 
 #### Scenario: Slug from URL
-- **WHEN** the post URL is `https://www.scarletink.com/why-promotions-stall/`
+- **WHEN** the post URL is `https://www.example.com/why-promotions-stall/`
 - **THEN** the slug is `why-promotions-stall`
 
 ### Requirement: Build the post-to-categories map

@@ -1,7 +1,7 @@
 ## 1. Project setup
 
 - [x] 1.1 Confirm repo location and run `git init`
-- [x] 1.2 Create `pyproject.toml` (Python 3.11+, deps, `archive` entry point) and `src/scarlet_archive/` package
+- [x] 1.2 Create `pyproject.toml` (Python 3.11+, deps, `archive` entry point) and `src/newsletter_archive/` package
 - [x] 1.3 Add `config.yaml` with defaults and `.env.example`; `.gitignore` already lists `.env` and `data/`
 - [x] 1.4 Implement `config.py` loading `config.yaml` + `.env` into a config object
 

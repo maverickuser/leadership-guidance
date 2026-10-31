@@ -2,14 +2,14 @@ import logging
 
 import pytest
 
-from scarlet_archive.config import Secret
-from scarlet_archive.errors import FetchError
-from scarlet_archive.http import Client, RequestsTransport, TransportConnectionError, TransportTimeout
+from newsletter_archive.config import Secret
+from newsletter_archive.errors import FetchError
+from newsletter_archive.http import Client, RequestsTransport, TransportConnectionError, TransportTimeout
 
 from .conftest import TEST_COOKIE, make_config
 from .fakes import FakeClock, FakeTransport
 
-BASE = "https://www.scarletink.com"
+BASE = "https://www.example.com"
 
 
 def client(cfg, transport, clock):
@@ -121,7 +121,7 @@ def test_redirect_to_other_site_refused_and_never_requested(cfg, clock):
     assert t.urls() == [f"{BASE}/a/"]
 
 
-@pytest.mark.parametrize("target", ["http://www.scarletink.com/a/", "https://www.scarletink.com:8443/a/"])
+@pytest.mark.parametrize("target", ["http://www.example.com/a/", "https://www.example.com:8443/a/"])
 def test_redirect_to_other_scheme_or_port_refused(cfg, clock, target):
     t = FakeTransport(clock=clock).add(f"{BASE}/a/", ("redirect", target))
     with pytest.raises(FetchError):
@@ -153,10 +153,10 @@ def test_no_cookie_header_when_cookie_empty(tmp_path, clock):
 
 
 def test_debug_log_never_contains_headers(cfg, clock, caplog):
-    caplog.set_level(logging.DEBUG, logger="scarlet_archive")
+    caplog.set_level(logging.DEBUG, logger="newsletter_archive")
     t = FakeTransport(clock=clock).add(f"{BASE}/a/", 503, (200, "ok"))
     client(cfg, t, clock).get(f"{BASE}/a/")
-    assert "GET https://www.scarletink.com/a/ -> 200" in caplog.text
+    assert "GET https://www.example.com/a/ -> 200" in caplog.text
     assert "TESTSECRET123" not in caplog.text and "Cookie" not in caplog.text
 
 
@@ -168,6 +168,6 @@ def test_requests_transport_refuses_to_store_cookies():
 
 
 def test_malformed_redirect_is_a_fetch_error(cfg, clock):
-    t = FakeTransport(clock=clock).add(f"{BASE}/a/", ("redirect", "https://www.scarletink.com:99999/x"))
+    t = FakeTransport(clock=clock).add(f"{BASE}/a/", ("redirect", "https://www.example.com:99999/x"))
     with pytest.raises(FetchError, match="malformed redirect"):
         client(cfg, t, clock).get(f"{BASE}/a/")

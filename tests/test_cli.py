@@ -2,7 +2,7 @@ import json
 
 import pytest
 
-from scarlet_archive.errors import MISSING_COOKIE_MESSAGE, NOT_SIGNED_IN_MESSAGE
+from newsletter_archive.errors import MISSING_COOKIE_MESSAGE, NOT_SIGNED_IN_MESSAGE
 
 from .cli_helpers import BASE, CliEnv
 from .sitebuilder import ghost_site
@@ -108,13 +108,13 @@ def test_signed_out_exit_2(tmp_path, monkeypatch):
 
 
 def test_bad_config_exit_1(env):
-    env.config.write_text("delay_seconds: 0\n")
+    env.config.write_text(f"base_url: {BASE}\ndelay_seconds: 0\n")
     r = env.run("discover")
     assert r.exit_code == 1 and "delay_seconds" in r.output
 
 
 def test_keyboard_interrupt_exit_130(env, monkeypatch):
-    import scarlet_archive.cli as cli
+    import newsletter_archive.cli as cli
 
     def boom(*a, **k):
         raise KeyboardInterrupt
@@ -125,7 +125,7 @@ def test_keyboard_interrupt_exit_130(env, monkeypatch):
 
 
 def test_unexpected_error_exit_1_and_logged(env, monkeypatch):
-    import scarlet_archive.cli as cli
+    import newsletter_archive.cli as cli
 
     monkeypatch.setattr(cli, "run_discover", lambda *a, **k: 1 / 0)
     r = env.run("discover")
@@ -143,7 +143,7 @@ def test_per_post_lines_in_log_file(env):
 def test_version():
     from typer.testing import CliRunner
 
-    import scarlet_archive.cli as cli
+    import newsletter_archive.cli as cli
 
     r = CliRunner().invoke(cli.app, ["--version"])
     assert r.exit_code == 0 and r.output.strip() == "0.1.0"

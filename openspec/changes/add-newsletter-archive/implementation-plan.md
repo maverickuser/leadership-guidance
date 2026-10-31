@@ -1,9 +1,9 @@
-# Implementation plan: add-scarlet-ink-archive
+# Implementation plan: add-newsletter-archive
 
 How `lld.md` gets built: the PR stack, the tests in each PR, the review flow, and the guardrails for a public repo.
 
 - **Repo:** https://github.com/maverickuser/leadership-guidance (public)
-- **Package / CLI:** `scarlet_archive` / `archive` (unchanged from the specs)
+- **Package / CLI:** `newsletter_archive` / `archive` (unchanged from the specs)
 - **Sources:** `proposal.md`, `design.md`, `lld.md`, `specs/`, `tasks.md`
 
 ---
@@ -16,7 +16,7 @@ The code is public; the archive is not. These rules hold for every PR.
 |---|---|
 | `.env`, the cookie value, any `ghost-members-ssr=` value | `.gitignore`; CI `safety` job greps the tree; `test_secrets.py` |
 | `data/` (raw HTML, post JSON, manifest, logs, `data/inspect/`) | `.gitignore`; CI fails if any tracked path starts with `data/` |
-| Real article text from Scarlet Ink (paid or free) | Fixtures are **structure-only**: real Ghost markup, with article text replaced by deterministic filler (see §4) |
+| Real article text from the newsletter (paid or free) | Fixtures are **structure-only**: real Ghost markup, with article text replaced by deterministic filler (see §4) |
 | Member name, email, uuid, tokens from signed-in pages | Scrub step in `scripts/make_fixtures.py`; CI greps fixtures for `@` emails and uuid patterns |
 
 Post titles, slugs, URLs, category names and meta descriptions are public on the site and may appear in fixtures.
@@ -57,7 +57,7 @@ Target size: under about 400 changed lines of non-fixture code per PR. Every PR 
 - **Tasks:** 1.2, 1.3, 1.4
 - **Files:**
   - `pyproject.toml` (hatchling, deps incl. `jsonschema`, `[dev]` = pytest)
-  - `src/scarlet_archive/{__init__,config,errors,models}.py`
+  - `src/newsletter_archive/{__init__,config,errors,models}.py`
   - `config.yaml`, `.env.example`
   - `tests/conftest.py`: network block that allows loopback only, plus a `cfg` fixture
   - `.github/workflows/ci.yml`
@@ -249,7 +249,7 @@ The network block lives in `conftest.py`: `socket.socket.connect` raises unless 
 | I10 | `fetch --dry-run` | no post requests; `raw/` empty |
 
 ### Coverage target
-Aim for 90% or more line coverage on `src/scarlet_archive/`, reported in CI (`pytest --cov`, with `pytest-cov` in `[dev]`). This is not a hard gate.
+Aim for 90% or more line coverage on `src/newsletter_archive/`, reported in CI (`pytest --cov`, with `pytest-cov` in `[dev]`). This is not a hard gate.
 
 ## 6. PR workflow and review
 

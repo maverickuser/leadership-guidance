@@ -1,8 +1,0 @@
-# Scarlet Ink Archive settings. CLI flags override these.
-base_url: https://www.scarletink.com
-delay_seconds: 2          # minimum gap between requests; values below 2 are rejected
-max_retries: 3            # retries on timeout / connection error / 5xx (backoff 2s, 4s, 8s)
-timeout_seconds: 30
-min_word_count: 300       # posts with fewer words are marked "partial"
-output_dir: ../scarlet-ink-archive-data   # next to the repo, so archived posts can never be committed
-user_agent: "scarlet-ink-archive/0.1 (personal archive; one request every 2s)"

@@ -17,7 +17,7 @@ from .models import Manifest, ManifestEntry
 from .parsing import attr, parse_xml, xml_local_name
 from .store import save_manifest
 
-log = logging.getLogger("scarlet_archive.discover")
+log = logging.getLogger("newsletter_archive.discover")
 
 TRACKING_PARAMS = {"ref", "source", "fbclid", "gclid", "mc_cid", "mc_eid"}
 EXCLUDED_SEGMENTS = {

@@ -11,7 +11,7 @@ from pathlib import Path
 
 from .config import Config, Secret
 
-LOGGER = "scarlet_archive"
+LOGGER = "newsletter_archive"
 REDACTED = "[REDACTED]"
 COOKIE_LINE_RE = re.compile(r"(?i)\b(set-)?cookie\s*[:=]\s*[^\n]+")
 GHOST_COOKIE_RE = re.compile(r"ghost-members-ssr(\.sig)?=[^;\s]+")

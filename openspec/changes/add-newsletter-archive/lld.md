@@ -1,4 +1,4 @@
-# Low-level design: add-scarlet-ink-archive
+# Low-level design: add-newsletter-archive
 
 Implementation detail for `proposal.md`, `design.md` and `specs/`. Where this file and a spec disagree, the spec wins. Items marked **[decided]** are choices the specs left open. The user confirmed them on 2026-10-31.
 
@@ -11,9 +11,9 @@ Site facts below come from the saved pages in `data/inspect/` (2026-10-31).
 ```
 pyproject.toml
 config.yaml
-.env.example                 # SCARLETINK_COOKIE=
+.env.example                 # NEWSLETTER_COOKIE=
 README.md
-src/scarlet_archive/
+src/newsletter_archive/
   __init__.py                # __version__
   cli.py
   config.py
@@ -56,7 +56,7 @@ tests/
 - `requires-python = ">=3.11"`, build backend `hatchling`, src layout.
 - Runtime deps: `requests`, `trafilatura`, `beautifulsoup4`, `lxml`, `typer`, `pyyaml`, `python-dotenv`, `jsonschema`.
 - Dev deps (optional group `dev`): `pytest`, `pytest-cov`.
-- Entry point: `[project.scripts] archive = "scarlet_archive.cli:app"`.
+- Entry point: `[project.scripts] archive = "newsletter_archive.cli:app"`.
 
 **[decided]** `jsonschema` is added as a runtime dependency, on top of the agreed library list, to meet "every file MUST validate against this schema".
 
@@ -65,13 +65,13 @@ tests/
 ### config.yaml (defaults)
 
 ```yaml
-base_url: https://www.scarletink.com
+base_url: https://www.example.com
 delay_seconds: 2
 max_retries: 3
 timeout_seconds: 30
 min_word_count: 300
 output_dir: data
-user_agent: "scarlet-ink-archive/0.1 (personal archive; one request every 2s)"
+user_agent: "newsletter-archive/0.1 (personal archive; one request every 2s)"
 ```
 
 ### Types
@@ -107,7 +107,7 @@ def load_config(path: Path = Path("config.yaml"),
 ### Rules
 
 - Missing `config.yaml` means built-in defaults (same values as above). Unknown keys raise `ConfigError`.
-- Cookie: `os.environ["SCARLETINK_COOKIE"]` first, then `.env` via `dotenv_values` (never `load_dotenv`, so it doesn't leak into child processes). Strip whitespace. Strip a leading `Cookie:` if the user pasted the whole header line.
+- Cookie: `os.environ["NEWSLETTER_COOKIE"]` first, then `.env` via `dotenv_values` (never `load_dotenv`, so it doesn't leak into child processes). Strip whitespace. Strip a leading `Cookie:` if the user pasted the whole header line.
 - `delay_seconds < 2` raises `ConfigError("delay_seconds must be >= 2")`. This enforces the politeness hard rule.
 - `max_retries` must be in 0..3, because the backoff table has 3 steps. `timeout_seconds` must be > 0.
 - `Config` and `Secret` never put the cookie value into `repr`.
@@ -125,7 +125,7 @@ class ExtractError(ArchiveError): ...         # per-post, not fatal
 ```
 
 Messages, word for word:
-- Missing cookie: `SCARLETINK_COOKIE is not set. Copy your Cookie header into .env (see README).`
+- Missing cookie: `NEWSLETTER_COOKIE is not set. Copy your Cookie header into .env (see README).`
 - Not signed in: `Your cookie looks expired. Copy a fresh Cookie header into .env.`
 
 ## 5. Data models (`models.py`)
@@ -268,7 +268,7 @@ The Ghost sitemap index already keeps static pages out, because only `sitemap-po
 1. `GET {base}/categories/`. Collect `a[href]` whose path matches `^/t/([^/]+)/?$`, absolute or relative, deduped in page order. The current site has 9 categories. `dave` is one of them; it's on the page, so it counts. Tags not linked there, such as `newsletter` and `page`, are ignored.
 2. For each category: `url = {base}/t/<slug>`, `seen_pages = set()`, `posts_in_cat = set()`.
    - `GET url`. The client follows the redirect to `/tag/<slug>/`.
-   - On the first page, the name is `<title>` with a trailing ` - Scarlet Ink` removed (rsplit on `" - "`). If the title is missing, use the slug.
+   - On the first page, the name is `<title>` with a trailing ` - <site name>` removed (rsplit on `" - "`). If the title is missing, use the slug.
    - The post links are `article.gh-card a.gh-card-link[href]`, normalized and joined to the base. There are 12 per page.
    - Stop if the page has no new posts. Otherwise follow `link[rel=next][href]` if it exists and hasn't been seen. Stop at 200 pages as a safety cap.
 3. Build `post_url -> sorted(category names)`. Posts that appear in listings but not in the sitemap are ignored and logged at DEBUG.
@@ -417,13 +417,13 @@ Read links from `cleaned_body` (BeautifulSoup, not trafilatura):
 - Set `text = " ".join(a.get_text().split())` and skip links with empty text.
 - Dedupe on `(text, url)`, keeping the first occurrence.
 
-The URL is kept as written in the post: no tracking params are stripped, so `?ref=scarletink.com` stays.
+The URL is kept as written in the post: no tracking params are stripped, so `?ref=example.com` stays.
 
 ### 9.5 Metadata (first non-empty value wins)
 
 | Field | Sources in order |
 |---|---|
-| title | `meta[property=og:title]` → JSON-LD `headline` → `h1.gh-article-title` → first `h1` → `<title>` minus ` - Scarlet Ink` |
+| title | `meta[property=og:title]` → JSON-LD `headline` → `h1.gh-article-title` → first `h1` → `<title>` minus ` - <og:site_name>` |
 | subtitle | `p.gh-article-excerpt` → `null` |
 | author | JSON-LD `author.name` (a list is joined with `", "`) → `meta[name=author]` → `.gh-article-author-name` text → `"Unknown"` + warning |
 | published_date | `meta[property=article:published_time]` → JSON-LD `datePublished` → `time[datetime]` → raise `ExtractError("no published date")` |
@@ -520,7 +520,7 @@ Exit codes:
 
 ## 12. Logging and summary (`logging.py`)
 
-- The logger is named `scarlet_archive`.
+- The logger is named `newsletter_archive`.
 - Console: INFO, or DEBUG with `--verbose`. The format is `%(message)s`.
 - File: `{output_dir}/logs/run-{YYYYmmdd-HHMMSS}Z.log` at DEBUG level, format `%(asctime)s %(levelname)s %(message)s`.
 - `RedactFilter(secret)` sits on both handlers and rewrites `record.msg` and `args` after formatting. It replaces:

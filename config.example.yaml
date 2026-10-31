@@ -1,0 +1,8 @@
+# Newsletter Archive settings. Copy to config.yaml (git-ignored) and edit. CLI flags override these.
+base_url: https://www.example.com   # required: the Ghost newsletter site you subscribe to
+delay_seconds: 2          # minimum gap between requests; values below 2 are rejected
+max_retries: 3            # retries on timeout / connection error / 5xx (backoff 2s, 4s, 8s)
+timeout_seconds: 30
+min_word_count: 300       # posts with fewer words are marked "partial"
+output_dir: ../newsletter-archive-data   # next to the repo, so archived posts can never be committed
+user_agent: "newsletter-archive/0.1 (personal archive; one request every 2s)"

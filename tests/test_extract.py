@@ -4,9 +4,9 @@ import logging
 import pytest
 from bs4 import BeautifulSoup
 
-import scarlet_archive.extract as ex
-from scarlet_archive.errors import ExtractError
-from scarlet_archive.extract import (
+import newsletter_archive.extract as ex
+from newsletter_archive.errors import ExtractError
+from newsletter_archive.extract import (
     clean_body,
     extract_post,
     first_sentences,
@@ -17,7 +17,7 @@ from scarlet_archive.extract import (
 
 from .conftest import FIXTURES, fixture_text
 
-BASE = "https://www.scarletink.com"
+BASE = "https://www.example.com"
 POSTS = sorted(p.name for p in FIXTURES.glob("post-*.html"))
 
 
@@ -159,12 +159,22 @@ def test_metadata_fallbacks():
 
 def test_title_falls_back_to_title_tag_and_author_to_unknown(caplog):
     html = (
-        "<html><head><title>Only Title - Scarlet Ink</title>"
+        "<html><head><title>Only Title - Example Newsletter</title>"
+        '<meta property="og:site_name" content="Example Newsletter">'
         '<meta property="article:published_time" content="2024-01-02T00:00:00Z"></head>'
         '<body><article class="gh-article"><section class="gh-content"><p>Hi there.</p></section></article></body></html>'
     )
     e = extract_post(html, f"{BASE}/x")
     assert e.title == "Only Title" and e.author == "Unknown"
+
+
+def test_title_tag_kept_whole_without_a_site_name():
+    html = (
+        "<html><head><title>Plan A - Plan B</title>"
+        '<meta property="article:published_time" content="2024-01-02T00:00:00Z"></head>'
+        '<body><article class="gh-article"><section class="gh-content"><p>Hi there.</p></section></article></body></html>'
+    )
+    assert extract_post(html, f"{BASE}/x").title == "Plan A - Plan B"
 
 
 def test_missing_date_raises():
@@ -216,7 +226,7 @@ def test_paywall_cta_text_not_in_output():
 
 # fallback path
 def test_soup_walker_used_when_trafilatura_drops_headings(monkeypatch, caplog):
-    caplog.set_level(logging.WARNING, logger="scarlet_archive")
+    caplog.set_level(logging.WARNING, logger="newsletter_archive")
     monkeypatch.setattr(
         ex, "_trafilatura_xml", lambda html: "<doc><main><p>only one paragraph</p></main></doc>"
     )

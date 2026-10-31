@@ -7,7 +7,7 @@ from pathlib import Path
 
 import pytest
 
-from scarlet_archive.config import Config, Secret
+from newsletter_archive.config import Config, Secret
 
 FIXTURES = Path(__file__).parent / "fixtures"
 
@@ -46,12 +46,12 @@ def _block_network(monkeypatch):
     monkeypatch.setattr(socket.socket, "connect", _guarded_connect)
     monkeypatch.setattr(socket.socket, "connect_ex", _guarded_connect_ex)
     monkeypatch.setattr(socket, "getaddrinfo", _guarded_getaddrinfo)
-    monkeypatch.delenv("SCARLETINK_COOKIE", raising=False)
+    monkeypatch.delenv("NEWSLETTER_COOKIE", raising=False)
 
 
 def make_config(tmp_path: Path, **overrides) -> Config:
     values = dict(
-        base_url="https://www.scarletink.com",
+        base_url="https://www.example.com",
         delay_seconds=2.0,
         max_retries=3,
         timeout_seconds=30.0,

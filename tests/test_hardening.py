@@ -6,12 +6,12 @@ import socket
 import pytest
 import requests
 
-from scarlet_archive import http as http_mod
-from scarlet_archive.config import BACKOFF_SECONDS, load_config
-from scarlet_archive.config import MAX_RETRIES as CONFIG_MAX_RETRIES
-from scarlet_archive.discover import collect_sitemap_urls
-from scarlet_archive.errors import ArchiveError, ConfigError, FetchError
-from scarlet_archive.http import (
+from newsletter_archive import http as http_mod
+from newsletter_archive.config import BACKOFF_SECONDS, load_config
+from newsletter_archive.config import MAX_RETRIES as CONFIG_MAX_RETRIES
+from newsletter_archive.discover import collect_sitemap_urls
+from newsletter_archive.errors import ArchiveError, ConfigError, FetchError
+from newsletter_archive.http import (
     Client,
     RawResponse,
     RequestsTransport,
@@ -19,16 +19,16 @@ from scarlet_archive.http import (
     TransportTimeout,
     to_base_host,
 )
-from scarlet_archive.models import ManifestEntry, is_valid_slug
-from scarlet_archive.parsing import parse_xml
-from scarlet_archive.store import load_manifest, run_lock, write_text_atomic
+from newsletter_archive.models import ManifestEntry, is_valid_slug
+from newsletter_archive.parsing import parse_xml
+from newsletter_archive.store import load_manifest, run_lock, write_text_atomic
 
 from .cli_helpers import CliEnv
 from .conftest import TEST_COOKIE, make_config
 from .fakes import FakeClock, FakeTransport
 from .sitebuilder import sitemap_urlset
 
-BASE = "https://www.scarletink.com"
+BASE = "https://www.example.com"
 
 
 def index_of(*locs: str) -> str:
@@ -112,9 +112,9 @@ def test_from_dict_keeps_good_entries():
 
 @pytest.mark.parametrize("bad", [TEST_COOKIE + "\nX-Evil: 1", TEST_COOKIE + "\rX", TEST_COOKIE + "é"])
 def test_cookie_with_line_break_or_non_ascii_is_rejected(tmp_path, monkeypatch, bad):
-    monkeypatch.setenv("SCARLETINK_COOKIE", bad)
+    monkeypatch.setenv("NEWSLETTER_COOKIE", bad)
     with pytest.raises(ConfigError, match="line break or non-ASCII"):
-        load_config(tmp_path / "missing.yaml", tmp_path / ".env")
+        load_config(tmp_path / "missing.yaml", tmp_path / ".env", overrides={"base_url": BASE})
 
 
 def test_retry_limit_matches_backoff_table():
@@ -160,7 +160,7 @@ def test_non_www_child_sitemap_is_fetched_through_the_base_host(tmp_path):
     clock = FakeClock()
     t = (
         FakeTransport(clock=clock)
-        .add(f"{BASE}/sitemap.xml", (200, index_of("https://scarletink.com/sitemap-posts.xml")))
+        .add(f"{BASE}/sitemap.xml", (200, index_of("https://example.com/sitemap-posts.xml")))
         .add(f"{BASE}/sitemap-posts.xml", (200, sitemap_urlset(BASE, ["a"])))
     )
     client = Client(make_config(tmp_path), transport=t, sleep=clock.sleep, clock=clock.clock)
@@ -169,7 +169,7 @@ def test_non_www_child_sitemap_is_fetched_through_the_base_host(tmp_path):
 
 
 def test_to_base_host():
-    assert to_base_host("https://scarletink.com/x/?a=1#f", BASE) == f"{BASE}/x/?a=1"
+    assert to_base_host("https://example.com/x/?a=1#f", BASE) == f"{BASE}/x/?a=1"
 
 
 # -- XML parsing -----------------------------------------------------------

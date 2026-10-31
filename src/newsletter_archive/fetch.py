@@ -12,7 +12,7 @@ from .http import Client, to_base_host
 from .models import Manifest, ManifestEntry, PostCallback, no_callback, utc_now_iso
 from .store import save_manifest, write_text_atomic
 
-log = logging.getLogger("scarlet_archive.fetch")
+log = logging.getLogger("newsletter_archive.fetch")
 
 # Present only on pages rendered for a signed-in member.
 SIGNED_IN_MARKER = 'data-portal="account"'

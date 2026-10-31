@@ -1,17 +1,17 @@
 import pytest
 
-from scarlet_archive.config import Secret
-from scarlet_archive.errors import MissingCookieError, NotSignedInError
-from scarlet_archive.fetch import fetch_url, run_fetch
-from scarlet_archive.http import Client, TransportConnectionError
-from scarlet_archive.models import Manifest, ManifestEntry
-from scarlet_archive.store import load_manifest
+from newsletter_archive.config import Secret
+from newsletter_archive.errors import MissingCookieError, NotSignedInError
+from newsletter_archive.fetch import fetch_url, run_fetch
+from newsletter_archive.http import Client, TransportConnectionError
+from newsletter_archive.models import Manifest, ManifestEntry
+from newsletter_archive.store import load_manifest
 
 from .conftest import make_config
 from .fakes import FakeClock, FakeTransport
 from .sitebuilder import post_page
 
-BASE = "https://www.scarletink.com"
+BASE = "https://www.example.com"
 
 
 def manifest_of(*slugs):
@@ -129,7 +129,7 @@ def test_missing_cookie_makes_no_requests(tmp_path, clock):
     m = manifest_of("a")
     t, c = setup(cfg, clock, ["a"])
     for dry in (False, True):
-        with pytest.raises(MissingCookieError, match="SCARLETINK_COOKIE"):
+        with pytest.raises(MissingCookieError, match="NEWSLETTER_COOKIE"):
             run_fetch(c, cfg, m, dry_run=dry)
     assert t.calls == []
 
@@ -162,7 +162,7 @@ def test_failed_post_retried_next_run(cfg, clock):
 
 
 def test_manifest_saved_after_each_post(cfg, clock, monkeypatch):
-    import scarlet_archive.fetch as fetch_mod
+    import newsletter_archive.fetch as fetch_mod
 
     m = manifest_of("a", "b")
     _t, c = setup(cfg, clock, ["a", "b"])
@@ -184,7 +184,7 @@ def test_dry_run_makes_no_requests_and_writes_nothing(cfg, clock):
 
 def test_fetch_goes_through_base_host_for_non_www_urls(cfg, clock):
     m = Manifest()
-    m.entries["a"] = ManifestEntry(url="https://scarletink.com/a", slug="a")
+    m.entries["a"] = ManifestEntry(url="https://example.com/a", slug="a")
     t, c = setup(cfg, clock, ["a"])
     run_fetch(c, cfg, m)
     assert t.urls() == [f"{BASE}/a/"] and "Cookie" in t.calls[0].headers
