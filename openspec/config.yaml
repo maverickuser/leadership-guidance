@@ -1,0 +1,17 @@
+schema: spec-driven
+
+context: |
+  Project: Newsletter Archive — a private, local archive of posts on https://www.example.com
+  that the user subscribes to. Personal use only; never shared or published.
+  Tech stack: Python 3.11+, pyproject.toml, console entry point `archive`.
+  Site: Ghost CMS; login cookies ghost-members-ssr + ghost-members-ssr.sig; categories are Ghost tags.
+  Libraries: requests, trafilatura, beautifulsoup4 + lxml, typer, pyyaml, python-dotenv, pytest.
+  Runs locally on macOS. No cloud services.
+  Hard rules: polite scraping (one request at a time, >= 2s apart); subscriber cookie only,
+  never bypass the paywall; the cookie lives only in .env and is never printed, logged or committed.
+  Tests are offline (saved HTML fixtures, mocked HTTP).
+  Later phases (out of scope now): chunking, embeddings, vector/keyword search, LLM Q&A.
+
+rules:
+  tasks:
+    - Do not run a full crawl; the first live run is `archive run --limit 5`, after the user fills in .env
