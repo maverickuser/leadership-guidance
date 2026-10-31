@@ -33,9 +33,23 @@ def clutter():
 # spec: content-extraction / Post page with clutter
 @pytest.mark.parametrize(
     "junk",
-    ["NAVTEXT", "SHARETEXT", "SUBSCRIBETEXT", "RELATEDTEXT", "RELATEDCARD", "COMMENTTEXT",
-     "COMMENTROOT", "CAPTIONTEXT", "HEROCAPTION", "ALTTEXT", "HEROALT", "TITLETEXT", "FOOTERLINK",
-     "Subscribe", "Byline Author"],
+    [
+        "NAVTEXT",
+        "SHARETEXT",
+        "SUBSCRIBETEXT",
+        "RELATEDTEXT",
+        "RELATEDCARD",
+        "COMMENTTEXT",
+        "COMMENTROOT",
+        "CAPTIONTEXT",
+        "HEROCAPTION",
+        "ALTTEXT",
+        "HEROALT",
+        "TITLETEXT",
+        "FOOTERLINK",
+        "Subscribe",
+        "Byline Author",
+    ],
 )
 def test_clutter_removed(clutter, junk):
     blob = clutter.text + json.dumps([s.__dict__ for s in clutter.sections]) + json.dumps(clutter.links)
@@ -203,7 +217,9 @@ def test_paywall_cta_text_not_in_output():
 # fallback path
 def test_soup_walker_used_when_trafilatura_drops_headings(monkeypatch, caplog):
     caplog.set_level(logging.WARNING, logger="scarlet_archive")
-    monkeypatch.setattr(ex, "_trafilatura_xml", lambda html: "<doc><main><p>only one paragraph</p></main></doc>")
+    monkeypatch.setattr(
+        ex, "_trafilatura_xml", lambda html: "<doc><main><p>only one paragraph</p></main></doc>"
+    )
     e = extract_post(fixture_text("post-clutter.html"), f"{BASE}/why-promotions-stall")
     assert [s.heading for s in e.sections] == [None, "Why promotions stall", "Example"]
     assert "plain HTML walker" in caplog.text
@@ -212,7 +228,11 @@ def test_soup_walker_used_when_trafilatura_drops_headings(monkeypatch, caplog):
 def test_soup_walker_matches_trafilatura_shape():
     soup = BeautifulSoup(fixture_text("post-clutter.html"), "lxml")
     sections = sections_from_soup(clean_body(soup.select_one(".gh-content")))
-    assert [(s.heading, s.level) for s in sections] == [(None, 0), ("Why promotions stall", 2), ("Example", 3)]
+    assert [(s.heading, s.level) for s in sections] == [
+        (None, 0),
+        ("Why promotions stall", 2),
+        ("Example", 3),
+    ]
     assert "- First point\n- Second point" in sections[1].text
 
 
@@ -220,7 +240,9 @@ def test_whole_page_fallback_without_gh_content():
     html = (
         '<html><head><meta property="og:title" content="T">'
         '<meta property="article:published_time" content="2024-01-02T00:00:00Z"></head><body><main>'
-        + "<p>" + "Sentence with enough words to count as content. " * 20 + "</p></main></body></html>"
+        + "<p>"
+        + "Sentence with enough words to count as content. " * 20
+        + "</p></main></body></html>"
     )
     e = extract_post(html, f"{BASE}/x")
     assert e.word_count > 50 and e.links == []

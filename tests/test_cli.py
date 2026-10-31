@@ -43,7 +43,7 @@ def test_second_run_downloads_nothing(env):
 def test_one_client_shared_and_spacing_kept_across_stages(env):
     env.run("run", "--limit", "2")
     # every request after the first waited out the 2s gap (fake clock, no real waiting)
-    gaps = [b.at - a.at for a, b in zip(env.transport.calls, env.transport.calls[1:])]
+    gaps = [b.at - a.at for a, b in zip(env.transport.calls, env.transport.calls[1:], strict=False)]
     hops_in_same_slot = sum(1 for g in gaps if g == 0)  # /t/ -> /tag/ redirect hops
     assert hops_in_same_slot == 1
     assert all(g >= 2 for g in gaps if g != 0)

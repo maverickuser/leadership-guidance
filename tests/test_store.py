@@ -19,7 +19,9 @@ BASE = "https://www.scarletink.com"
 def seed(cfg, slugs, html=None, categories=None):
     m = Manifest()
     for s in slugs:
-        m.entries[s] = ManifestEntry(url=f"{BASE}/{s}", slug=s, categories=list(categories or []), status="fetched")
+        m.entries[s] = ManifestEntry(
+            url=f"{BASE}/{s}", slug=s, categories=list(categories or []), status="fetched"
+        )
         write_text_atomic(cfg.raw_dir / f"{s}.html", html or post_page(s))
     return m
 
@@ -27,9 +29,16 @@ def seed(cfg, slugs, html=None, categories=None):
 def sample_extracted(words=500, paywalled=False):
     text = " ".join(["word"] * words)
     return Extracted(
-        title="T", subtitle=None, author="A", published_date="2024-01-02", summary="S",
-        sections=[Section(None, 0, text)], text=text, links=[{"text": "x", "url": "https://x.test/"}],
-        word_count=words, paywalled=paywalled,
+        title="T",
+        subtitle=None,
+        author="A",
+        published_date="2024-01-02",
+        summary="S",
+        sections=[Section(None, 0, text)],
+        text=text,
+        links=[{"text": "x", "url": "https://x.test/"}],
+        word_count=words,
+        paywalled=paywalled,
     )
 
 
@@ -40,15 +49,35 @@ def test_record_validates_and_hash_matches():
     validate_post(rec)
     assert rec["content_hash"] == hashlib.sha256(rec["text"].encode()).hexdigest()
     assert list(rec) == [
-        "schema_version", "id", "url", "title", "subtitle", "author", "published_date", "categories",
-        "word_count", "summary", "sections", "text", "links", "content_hash", "fetched_at", "status",
+        "schema_version",
+        "id",
+        "url",
+        "title",
+        "subtitle",
+        "author",
+        "published_date",
+        "categories",
+        "word_count",
+        "summary",
+        "sections",
+        "text",
+        "links",
+        "content_hash",
+        "fetched_at",
+        "status",
     ]
     assert rec["status"] == "ok"
 
 
 @pytest.mark.parametrize(
     "words, paywalled, status",
-    [(120, False, "partial"), (2140, False, "ok"), (299, False, "partial"), (300, False, "ok"), (700, True, "partial")],
+    [
+        (120, False, "partial"),
+        (2140, False, "ok"),
+        (299, False, "partial"),
+        (300, False, "ok"),
+        (700, True, "partial"),
+    ],
 )
 def test_status_from_word_count_and_paywall(words, paywalled, status):
     entry = ManifestEntry(url=f"{BASE}/a", slug="a")
@@ -69,7 +98,9 @@ def test_status_from_word_count_and_paywall(words, paywalled, status):
     ],
 )
 def test_schema_rejects_bad_records(mutate):
-    rec = build_record(ManifestEntry(url=f"{BASE}/a", slug="a"), sample_extracted(), "2026-10-31T11:00:00Z", 300)
+    rec = build_record(
+        ManifestEntry(url=f"{BASE}/a", slug="a"), sample_extracted(), "2026-10-31T11:00:00Z", 300
+    )
     mutate(rec)
     with pytest.raises(ExtractError, match="schema"):
         validate_post(rec)

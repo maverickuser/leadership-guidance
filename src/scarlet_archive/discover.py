@@ -12,16 +12,30 @@ from lxml import etree
 
 from .config import Config
 from .errors import ArchiveError, FetchError
-from .http import Client, origin
+from .http import Client, origin, to_base_host
 from .models import Manifest, ManifestEntry
+from .parsing import attr, parse_xml, xml_local_name
 from .store import save_manifest
 
 log = logging.getLogger("scarlet_archive.discover")
 
 TRACKING_PARAMS = {"ref", "source", "fbclid", "gclid", "mc_cid", "mc_eid"}
 EXCLUDED_SEGMENTS = {
-    "tag", "t", "author", "categories", "page", "p", "rss", "about", "contact",
-    "subscribe", "signin", "signup", "account", "archive", "membership",
+    "tag",
+    "t",
+    "author",
+    "categories",
+    "page",
+    "p",
+    "rss",
+    "about",
+    "contact",
+    "subscribe",
+    "signin",
+    "signup",
+    "account",
+    "archive",
+    "membership",
 }
 GHOST_POSTS_SITEMAP = re.compile(r"/sitemap-posts(-\d+)?\.xml$")
 CATEGORY_PATH = re.compile(r"^/t/([^/]+)/?$")
@@ -83,28 +97,29 @@ def slug_from_url(url: str) -> str:
 # -- sitemap ---------------------------------------------------------------
 
 
-def _local(tag) -> str:
-    return etree.QName(tag).localname if isinstance(tag, str) else ""
-
-
 def _parse_sitemap(text: str, url: str) -> tuple[str, list[str]]:
     try:
-        root = etree.fromstring(text.encode("utf-8"), parser=etree.XMLParser(resolve_entities=False))
+        root = parse_xml(text)
     except etree.XMLSyntaxError as e:
         raise ArchiveError(f"could not parse sitemap {url}: {e}") from None
-    kind = _local(root.tag)
+    kind = xml_local_name(root.tag)
     locs = [
         el.text.strip()
         for el in root.iter()
-        if _local(el.tag) == "loc" and el.text and _local(el.getparent().tag) in ("url", "sitemap")
+        if xml_local_name(el.tag) == "loc"
+        and el.text
+        and (parent := el.getparent()) is not None
+        and xml_local_name(parent.tag) in ("url", "sitemap")
     ]
     return kind, locs
 
 
-def collect_sitemap_urls(client: Client, sitemap_url: str) -> list[str]:
+def collect_sitemap_urls(client: Client, sitemap_url: str, base_url: str | None = None) -> list[str]:
     """All page URLs reachable from a sitemap, following nested indexes.
 
     For a Ghost index (it lists sitemap-posts.xml), only the posts sitemaps are read.
+    With base_url, child sitemaps on other sites are skipped and the rest are
+    requested through base_url's host.
     """
     urls: list[str] = []
     visited: set[str] = set()
@@ -115,6 +130,11 @@ def collect_sitemap_urls(client: Client, sitemap_url: str) -> list[str]:
         visited.add(url)
         kind, locs = _parse_sitemap(client.get(url).text, url)
         if kind == "sitemapindex":
+            if base_url:
+                offsite = [loc for loc in locs if not same_site(loc, base_url)]
+                for loc in offsite:
+                    log.warning("skipping sitemap on another site: %s", loc)
+                locs = [to_base_host(loc, base_url) for loc in locs if loc not in offsite]
             posts = [loc for loc in locs if GHOST_POSTS_SITEMAP.search(urlsplit(loc).path)]
             for child in posts or locs:
                 visit(child)
@@ -150,7 +170,7 @@ def category_slugs(html: str, base_url: str) -> list[str]:
     soup = BeautifulSoup(html, "lxml")
     slugs: list[str] = []
     for a in soup.find_all("a", href=True):
-        url = urljoin(base_url + "/", a["href"])
+        url = urljoin(base_url + "/", attr(a, "href") or "")
         m = CATEGORY_PATH.match(urlsplit(url).path)
         if m and same_site(url, base_url) and m.group(1) not in slugs:
             slugs.append(m.group(1))
@@ -166,7 +186,7 @@ def _title_name(soup: BeautifulSoup) -> str | None:
 
 def crawl_category(client: Client, base_url: str, slug: str) -> tuple[str, list[str]]:
     """Return (category name, post URLs) for one category, following rel=next pages."""
-    url = f"{base_url}/t/{slug}"
+    url: str | None = f"{base_url}/t/{slug}"
     seen_pages: set[str] = set()
     found: dict[str, None] = {}
     name: str | None = None
@@ -181,14 +201,13 @@ def crawl_category(client: Client, base_url: str, slug: str) -> tuple[str, list[
             name = _title_name(soup) or slug
         new = 0
         for a in soup.select("article.gh-card a.gh-card-link[href]"):
-            post = normalize_url(urljoin(resp.url, a["href"]))
+            post = normalize_url(urljoin(resp.url, attr(a, "href") or ""))
             if is_post_url(post, base_url) and post not in found:
                 found[post] = None
                 new += 1
         if new == 0:
             break
-        nxt = soup.find("link", rel="next")
-        href = nxt.get("href") if nxt else None
+        href = attr(soup.find("link", rel="next"), "href")
         url = urljoin(resp.url, href) if href else None
         if url and not same_site(url, base_url):
             break
@@ -282,7 +301,8 @@ def run_discover(
     dry_run: bool = False,
 ) -> DiscoverResult:
     base = config.base_url
-    post_urls = post_urls_from_sitemap(collect_sitemap_urls(client, f"{base}/sitemap.xml"), base)
+    """Stage 1: merge sitemap posts and their categories into the manifest (saved unless dry run)."""
+    post_urls = post_urls_from_sitemap(collect_sitemap_urls(client, f"{base}/sitemap.xml", base), base)
     log.info("sitemap: %d posts", len(post_urls))
     crawl = crawl_categories(client, base)
     extra = set(crawl.post_categories) - set(post_urls)

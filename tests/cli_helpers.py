@@ -26,7 +26,8 @@ class CliEnv:
         self.clock = FakeClock()
         self.transport = FakeTransport(clock=self.clock)
         monkeypatch.setattr(
-            cli, "make_client",
+            cli,
+            "make_client",
             lambda cfg: Client(cfg, transport=self.transport, sleep=self.clock.sleep, clock=self.clock.clock),
         )
         self.runner = CliRunner()

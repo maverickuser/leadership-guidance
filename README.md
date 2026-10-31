@@ -43,19 +43,21 @@ archive extract             # stages 3-4: raw/ -> posts/{slug}.json (no network)
 archive run                 # all of the above, in order
 ```
 
-Options (every command):
+Options:
 
 | Option | Meaning |
 |---|---|
 | `--limit N` | Process at most N posts: the first N in the manifest (newest first). Repeating the same limit downloads nothing new. |
-| `--refresh` | Download or rewrite again even if cached. |
+| `--refresh` | Download or rewrite again even if cached (`fetch`, `extract`, `run`). |
 | `--dry-run` | Show what would be fetched or written. Makes no post requests and writes no post files. |
 | `--verbose`, `-v` | Show debug output. |
 | `--config PATH` | Use another `config.yaml`. `.env` is read from the same folder. |
 
 Start small: `archive run --limit 5`, check the output, then run `archive run` for everything. At 2 seconds per request, a full first run of about 250 posts takes around 10 minutes. Later runs fetch only new posts.
 
-Exit codes: `0` done (individual post failures are listed in the summary), `1` config or cookie missing, `2` cookie expired, `130` interrupted (progress is saved).
+Exit codes: `0` done (individual post failures are listed in the summary), `1` config or cookie missing, or another run is already using the archive folder, `2` cookie expired, `130` interrupted (progress is saved).
+
+Only one command runs at a time per archive folder; a second one exits with a message instead of overwriting progress.
 
 ## Settings (`config.yaml`)
 
@@ -84,16 +86,16 @@ Each `posts/{slug}.json` (schema version 1):
 ```json
 {
   "schema_version": 1,
-  "id": "stop-trying-harder-change-your-environment-instead",
-  "url": "https://www.scarletink.com/stop-trying-harder-change-your-environment-instead",
-  "title": "Stop Trying Harder. Change Your Environment Instead.",
+  "id": "example-post",
+  "url": "https://www.scarletink.com/example-post",
+  "title": "Example Post",
   "subtitle": "…",
-  "author": "David Anderson",
-  "published_date": "2026-10-26",
-  "categories": ["Career Growth"],
-  "word_count": 2559,
+  "author": "Author Name",
+  "published_date": "2026-01-15",
+  "categories": ["Example Category"],
+  "word_count": 2000,
   "summary": "…",
-  "sections": [{"heading": null, "level": 0, "text": "…"}, {"heading": "Good intentions.", "level": 2, "text": "…"}],
+  "sections": [{"heading": null, "level": 0, "text": "…"}, {"heading": "First heading", "level": 2, "text": "…"}],
   "text": "…",
   "links": [{"text": "…", "url": "https://…"}],
   "content_hash": "sha256 of text",
@@ -111,13 +113,23 @@ Manifest statuses: `discovered → fetched → ok | partial`, or `failed` with `
 ## Development
 
 ```bash
-pytest                 # unit + integration tests; non-local network is blocked
+pip install -r requirements-dev.lock && pip install --no-deps -e .   # pinned dev setup (same as CI)
+pre-commit install     # ruff, ruff-format, mypy and the safety check before each commit
+
+pytest                 # unit + integration tests; network and DNS are blocked except loopback
 pytest -m slow         # the real-clock spacing test (CI runs everything)
+ruff check . && ruff format --check . && mypy   # lint, format, strict types (CI "lint" job)
 python scripts/check_safety.py   # what CI runs to keep secrets and content out of the repo
 ```
+
+Update the lockfile after changing dependencies: `pip-compile --extra dev --strip-extras --allow-unsafe -o requirements-dev.lock pyproject.toml`.
 
 - Integration tests run the real CLI and HTTP stack against a fake Ghost site on `127.0.0.1`.
 - Fixtures are rebuilt from pages saved in `data/inspect/` (git-ignored) with `python scripts/make_fixtures.py`.
 - Design and specs live in `openspec/changes/add-scarlet-ink-archive/`.
 
-**Never commit** `.env`, anything under `data/` or the archive folder, or real article text.
+**Never commit** `.env`, anything under `data/` or the archive folder, or real article text. See [CONTRIBUTING.md](CONTRIBUTING.md) and [SECURITY.md](SECURITY.md).
+
+## License
+
+The code is [MIT](LICENSE). It archives content only for the subscriber's own reading; the archived posts belong to their author and must not be shared or published.
