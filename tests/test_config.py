@@ -18,7 +18,7 @@ def test_defaults_when_no_config_file(tmp_path):
     assert cfg.max_retries == 3
     assert cfg.timeout_seconds == 30
     assert cfg.min_word_count == 300
-    assert cfg.output_dir.name == "data"
+    assert cfg.output_dir.name == "newsletter-archive-data"
     assert not cfg.cookie
 
 

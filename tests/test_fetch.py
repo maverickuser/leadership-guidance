@@ -176,3 +176,11 @@ def test_dry_run_makes_no_requests_and_writes_nothing(cfg, clock):
     result = run_fetch(c, cfg, m, dry_run=True)
     assert result.would_fetch == ["a", "b"]
     assert t.calls == [] and not cfg.raw_dir.exists() and not cfg.manifest_path.exists()
+
+
+def test_fetch_goes_through_base_host_for_non_www_urls(cfg, clock):
+    m = Manifest()
+    m.entries["a"] = ManifestEntry(url="https://example.com/a", slug="a")
+    t, c = setup(cfg, clock, ["a"])
+    run_fetch(c, cfg, m)
+    assert t.urls() == [f"{BASE}/a/"] and "Cookie" in t.calls[0].headers

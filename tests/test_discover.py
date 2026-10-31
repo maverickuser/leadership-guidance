@@ -106,6 +106,7 @@ def test_normalize_url(raw, expected):
         ("https://www.example.com", False),
         ("https://www.example.com/a/b", False),
         ("https://other.example/post", False),
+        ("https://www.example.com:8443/post", False),
     ],
 )
 def test_is_post_url(url, ok):
@@ -267,3 +268,24 @@ def test_discover_does_not_need_cookie(tmp_path, clock):
     t = discover_site(FakeTransport(clock=clock))
     run_discover(make_client(cfg, t, clock), cfg, Manifest())
     assert all("Cookie" not in c.headers for c in t.calls)
+
+
+# review fixes
+@pytest.mark.parametrize(
+    "url, ok",
+    [
+        ("https://www.example.com:443/post", True),  # explicit default port
+        ("https://www.example.com:99999/post", False),  # malformed port: skipped, no crash
+        ("https://www.example.com:abc/post", False),
+    ],
+)
+def test_is_post_url_ports(url, ok):
+    assert is_post_url(url, BASE) is ok
+
+
+def test_bad_port_links_do_not_crash_category_crawl(cfg, clock):
+    page = categories_page(BASE, ["career-growth"]).replace(
+        "</ul>", '<li><a href="https://www.example.com:99999/t/x">bad</a></li></ul>'
+    )
+    assert category_slugs(page, BASE) == ["career-growth"]
+    assert normalize_url("https://www.example.com:99999/foo/") == "https://www.example.com:99999/foo"

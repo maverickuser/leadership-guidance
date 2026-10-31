@@ -20,7 +20,7 @@ DEFAULTS: dict[str, Any] = {
     "max_retries": 3,
     "timeout_seconds": 30,
     "min_word_count": 300,
-    "output_dir": "data",
+    "output_dir": "../newsletter-archive-data",  # next to the repo, outside git
     "user_agent": "newsletter-archive/0.1 (personal archive; one request every 2s)",
 }
 

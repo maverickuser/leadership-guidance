@@ -17,7 +17,7 @@ jobs:
         with:
           python-version: ${{ matrix.python-version }}
       - run: pip install -e '.[dev]'
-      - run: pytest -q --cov=newsletter_archive --cov-report=term-missing
+      - run: pytest -q -m "slow or not slow" --cov=newsletter_archive --cov-report=term-missing
 
   safety:
     runs-on: ubuntu-latest

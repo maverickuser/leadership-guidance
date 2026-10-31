@@ -30,3 +30,4 @@ packages = ["src/newsletter_archive"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 markers = ["slow: uses the real clock (seconds of waiting)"]
+addopts = '-m "not slow"'
