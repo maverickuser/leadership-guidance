@@ -32,8 +32,11 @@ MAX_TAG_PAGES = 200
 
 
 def _site_host(url: str) -> str:
-    host = (urlsplit(url).hostname or "").lower()
-    return host[4:] if host.startswith("www.") else host
+    """Host (without a leading www.) plus any explicit port."""
+    parts = urlsplit(url)
+    host = (parts.hostname or "").lower()
+    host = host[4:] if host.startswith("www.") else host
+    return f"{host}:{parts.port}" if parts.port else host
 
 
 def same_site(url: str, base_url: str) -> bool:

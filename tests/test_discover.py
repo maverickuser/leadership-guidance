@@ -106,6 +106,7 @@ def test_normalize_url(raw, expected):
         ("https://www.scarletink.com", False),
         ("https://www.scarletink.com/a/b", False),
         ("https://other.example/post", False),
+        ("https://www.scarletink.com:8443/post", False),
     ],
 )
 def test_is_post_url(url, ok):
