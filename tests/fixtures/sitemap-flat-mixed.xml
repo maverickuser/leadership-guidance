@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
+  <url><loc>https://www.example.com/why-promotions-stall/</loc></url>
+  <url><loc>https://www.example.com/tag/career-growth/</loc></url>
+  <url><loc>https://www.example.com/author/david/</loc></url>
+  <url><loc>https://www.example.com/categories/</loc></url>
+  <url><loc>https://www.example.com/about/</loc></url>
+  <url><loc>https://www.example.com/foo/?utm_source=x#top</loc></url>
+  <url><loc>https://www.example.com/foo</loc></url>
+  <url><loc>https://other-site.example/elsewhere/</loc></url>
+</urlset>
