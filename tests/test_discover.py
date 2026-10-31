@@ -254,7 +254,7 @@ def test_discover_dry_run_writes_nothing(cfg, clock):
     t = discover_site(FakeTransport(clock=clock))
     m = Manifest()
     result = run_discover(make_client(cfg, t, clock), cfg, m, dry_run=True)
-    assert result.stats.added == 3 and len(m) == 0
+    assert result.stats.added == 3 and len(m) == 3  # merged in memory only
     assert not cfg.manifest_path.exists()
 
 

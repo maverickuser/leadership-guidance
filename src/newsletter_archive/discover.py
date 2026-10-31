@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import copy
 import logging
 import re
 from dataclasses import dataclass, field
@@ -281,12 +280,12 @@ def run_discover(
     if extra:
         log.debug("%d posts in category listings but not in the sitemap (ignored)", len(extra))
 
-    target = copy.deepcopy(manifest) if dry_run else manifest
-    stats = merge_manifest(target, post_urls, crawl.post_categories, limit=limit)
+    # In a dry run the merge happens in memory only, so `run --dry-run` can list new posts.
+    stats = merge_manifest(manifest, post_urls, crawl.post_categories, limit=limit)
     if dry_run:
         log.info("dry run: would add %d, update %d; manifest not written", stats.added, stats.updated)
     else:
-        save_manifest(target, config.manifest_path)
+        save_manifest(manifest, config.manifest_path)
     if crawl.failed:
         log.warning("categories incomplete: %s", ", ".join(crawl.failed))
     return DiscoverResult(
@@ -294,5 +293,5 @@ def run_discover(
         stats=stats,
         categories=len(crawl.names),
         failed_categories=crawl.failed,
-        total=len(target),
+        total=len(manifest),
     )

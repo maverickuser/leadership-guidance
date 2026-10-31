@@ -54,3 +54,21 @@ def post_page(slug: str, signed_in: bool = True) -> str:
     return html.replace(
         "stop-trying-harder-change-your-environment-instead", slug
     )
+
+
+def ghost_site(t, base: str, slugs: list[str], categories: dict | None = None, signed_out: set | None = None):
+    """Register a whole fake Ghost site on a FakeTransport.
+
+    categories: {slug: (Title, [post slugs])}
+    """
+    categories = categories or {"career-growth": ("Career Growth", slugs[:2])}
+    signed_out = signed_out or set()
+    t.add(f"{base}/sitemap.xml", (200, sitemap_index(base, ["sitemap-pages.xml", "sitemap-posts.xml"])))
+    t.add(f"{base}/sitemap-posts.xml", (200, sitemap_urlset(base, slugs)))
+    t.add(f"{base}/categories/", (200, categories_page(base, list(categories))))
+    for cat, (title, posts) in categories.items():
+        t.add(f"{base}/t/{cat}", ("redirect", f"/tag/{cat}/"))
+        t.add(f"{base}/tag/{cat}/", (200, tag_page(title, posts)))
+    for s in slugs:
+        t.add(f"{base}/{s}/", (200, post_page(s, signed_in=s not in signed_out)))
+    return t
