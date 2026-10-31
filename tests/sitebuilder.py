@@ -51,9 +51,7 @@ def categories_page(base: str, slugs: list[str]) -> str:
 def post_page(slug: str, signed_in: bool = True) -> str:
     """A post page from the signed-in or signed-out fixture, with og:url set to this slug."""
     html = fixture_text("post-signed-in.html" if signed_in else "post-signed-out.html")
-    return html.replace(
-        "stop-trying-harder-change-your-environment-instead", slug
-    )
+    return html.replace("stop-trying-harder-change-your-environment-instead", slug)
 
 
 def ghost_site(t, base: str, slugs: list[str], categories: dict | None = None, signed_out: set | None = None):

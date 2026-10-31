@@ -2,9 +2,7 @@
 
 from __future__ import annotations
 
-MISSING_COOKIE_MESSAGE = (
-    "NEWSLETTER_COOKIE is not set. Copy your Cookie header into .env (see README)."
-)
+MISSING_COOKIE_MESSAGE = "NEWSLETTER_COOKIE is not set. Copy your Cookie header into .env (see README)."
 NOT_SIGNED_IN_MESSAGE = "Your cookie looks expired. Copy a fresh Cookie header into .env."
 
 

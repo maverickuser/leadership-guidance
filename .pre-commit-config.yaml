@@ -1,0 +1,21 @@
+repos:
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.17.3
+    hooks:
+      - id: ruff
+        args: [--fix]
+      - id: ruff-format
+  - repo: local
+    hooks:
+      - id: mypy
+        name: mypy
+        entry: mypy
+        language: system
+        pass_filenames: false
+        types: [python]
+      - id: safety
+        name: safety check (no cookies, data or member info)
+        entry: python scripts/check_safety.py
+        language: system
+        pass_filenames: false
+        always_run: true

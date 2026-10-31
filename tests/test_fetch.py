@@ -1,5 +1,3 @@
-import json
-
 import pytest
 
 from newsletter_archive.config import Secret
@@ -104,18 +102,24 @@ def test_signed_out_first_post_stops_without_writing(cfg, clock):
 def test_cookie_expires_mid_run(cfg, clock):
     slugs = ["p1", "p2", "p3", "p4", "p5"]
     m = manifest_of(*slugs)
-    t, c = setup(cfg, clock, slugs, signed_in={"p3": False, "p4": False, "p5": False})
+    _t, c = setup(cfg, clock, slugs, signed_in={"p3": False, "p4": False, "p5": False})
     with pytest.raises(NotSignedInError):
         run_fetch(c, cfg, m)
     assert sorted(p.name for p in cfg.raw_dir.iterdir()) == ["p1.html", "p2.html"]
     saved = load_manifest(cfg.manifest_path)
-    assert [saved.entries[s].status for s in slugs] == ["fetched", "fetched", "discovered", "discovered", "discovered"]
+    assert [saved.entries[s].status for s in slugs] == [
+        "fetched",
+        "fetched",
+        "discovered",
+        "discovered",
+        "discovered",
+    ]
 
 
 def test_upgrade_cta_class_alone_does_not_mean_signed_out(cfg, clock):
     # the signed-in fixture contains "gh-post-upgrade-cta" in its CSS; it must still be accepted
     m = manifest_of("a")
-    t, c = setup(cfg, clock, ["a"])
+    _t, c = setup(cfg, clock, ["a"])
     assert run_fetch(c, cfg, m).fetched == 1
 
 
@@ -133,7 +137,7 @@ def test_missing_cookie_makes_no_requests(tmp_path, clock):
 # spec: post-fetching / Client error; post-storage / Failed post
 def test_404_marks_failed_and_continues(cfg, clock):
     m = manifest_of("a", "b")
-    t, c = setup(cfg, clock, ["b"], overrides={f"{BASE}/a/": [404]})
+    _t, c = setup(cfg, clock, ["b"], overrides={f"{BASE}/a/": [404]})
     result = run_fetch(c, cfg, m)
     assert (result.failed, result.fetched) == (1, 1)
     saved = load_manifest(cfg.manifest_path).entries["a"]
@@ -143,7 +147,7 @@ def test_404_marks_failed_and_continues(cfg, clock):
 # spec: post-fetching / Retries exhausted
 def test_connection_errors_exhausted_marks_failed(cfg, clock):
     m = manifest_of("a", "b")
-    t, c = setup(cfg, clock, ["b"], overrides={f"{BASE}/a/": [TransportConnectionError]})
+    _t, c = setup(cfg, clock, ["b"], overrides={f"{BASE}/a/": [TransportConnectionError]})
     run_fetch(c, cfg, m)
     assert m.entries["a"].status == "failed" and "after 4 attempts" in m.entries["a"].error
     assert m.entries["b"].status == "fetched"
@@ -151,7 +155,7 @@ def test_connection_errors_exhausted_marks_failed(cfg, clock):
 
 def test_failed_post_retried_next_run(cfg, clock):
     m = manifest_of("a")
-    t, c = setup(cfg, clock, [], overrides={f"{BASE}/a/": [404, (200, post_page("a"))]})
+    _t, c = setup(cfg, clock, [], overrides={f"{BASE}/a/": [404, (200, post_page("a"))]})
     run_fetch(c, cfg, m)
     run_fetch(c, cfg, m)
     assert m.entries["a"].status == "fetched" and m.entries["a"].error is None
@@ -161,7 +165,7 @@ def test_manifest_saved_after_each_post(cfg, clock, monkeypatch):
     import newsletter_archive.fetch as fetch_mod
 
     m = manifest_of("a", "b")
-    t, c = setup(cfg, clock, ["a", "b"])
+    _t, c = setup(cfg, clock, ["a", "b"])
     saves = []
     real = fetch_mod.save_manifest
     monkeypatch.setattr(fetch_mod, "save_manifest", lambda man, p: (saves.append(1), real(man, p)))

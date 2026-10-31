@@ -1,28 +1,57 @@
 [build-system]
-requires = ["hatchling"]
+requires = ["hatchling>=1.27"]
 build-backend = "hatchling.build"
 
 [project]
 name = "newsletter-archive"
-version = "0.1.0"
+dynamic = ["version"]
 description = "Personal CLI that archives Example Newsletter posts the user subscribes to as structured JSON"
+readme = "README.md"
+license = "MIT"
+license-files = ["LICENSE"]
+authors = [{ name = "maverickuser" }]
 requires-python = ">=3.11"
+classifiers = [
+    "Environment :: Console",
+    "Operating System :: POSIX",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Private :: Do Not Upload",
+]
+# Upper bounds on libraries that shape the output: a new major of trafilatura
+# could change extracted text and rewrite every post.
 dependencies = [
-    "requests>=2.31",
-    "trafilatura>=1.12",
-    "beautifulsoup4>=4.12",
-    "lxml>=5.0",
-    "typer>=0.12",
-    "pyyaml>=6.0",
-    "python-dotenv>=1.0",
-    "jsonschema>=4.20",
+    "requests>=2.31,<3",
+    "trafilatura>=1.12,<3",
+    "beautifulsoup4>=4.12,<5",
+    "lxml>=5.0,<7",
+    "typer>=0.12,<1",
+    "pyyaml>=6.0,<7",
+    "python-dotenv>=1.0,<2",
+    "jsonschema>=4.20,<5",
 ]
 
 [project.optional-dependencies]
-dev = ["pytest>=8.0", "pytest-cov>=5.0"]
+dev = [
+    "pytest>=8.0",
+    "pytest-cov>=5.0",
+    "ruff>=0.6",
+    "mypy>=1.10",
+    "types-requests",
+    "types-PyYAML",
+    "pre-commit>=3.7",
+]
+
+[project.urls]
+Repository = "https://github.com/maverickuser/leadership-guidance"
+Issues = "https://github.com/maverickuser/leadership-guidance/issues"
 
 [project.scripts]
 archive = "newsletter_archive.cli:app"
+
+[tool.hatch.version]
+path = "src/newsletter_archive/__init__.py"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/newsletter_archive"]
@@ -31,3 +60,35 @@ packages = ["src/newsletter_archive"]
 testpaths = ["tests"]
 markers = ["slow: uses the real clock (seconds of waiting)"]
 addopts = '-m "not slow"'
+
+[tool.coverage.report]
+fail_under = 90
+
+[tool.ruff]
+line-length = 110
+target-version = "py311"
+src = ["src", "tests", "scripts"]
+extend-exclude = ["openspec"]  # design docs keep their own code-sample layout
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "UP", "B", "SIM", "RUF"]
+ignore = [
+    "B008",    # typer options in defaults are the documented pattern
+    "RUF001",  # ambiguous unicode in strings: test fixtures use real typography
+    "RUF002",
+    "RUF003",
+]
+
+[tool.ruff.lint.per-file-ignores]
+"src/newsletter_archive/cli.py" = ["UP007", "UP045"]  # typer reads Optional[...] reliably on 3.11
+"tests/**" = ["E501"]  # inline HTML snippets read better unwrapped
+
+[tool.mypy]
+python_version = "3.11"
+files = ["src"]
+strict = true
+warn_unreachable = true
+
+[[tool.mypy.overrides]]
+module = ["trafilatura", "trafilatura.*", "jsonschema", "jsonschema.*", "lxml", "lxml.*"]
+ignore_missing_imports = true

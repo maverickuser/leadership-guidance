@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import itertools
 import json
 import time
 
@@ -93,7 +94,9 @@ def test_server_set_cookie_is_never_resent(harness):
     sent = [h.get("Cookie") for p, h in harness.site.requests if p.strip("/") in SLUGS]
     assert sent and all(c == TEST_COOKIE for c in sent)
     # the server's Set-Cookie (ghost-members-ssr=SIGSECRET456) is never stored and merged in
-    assert not any("ghost-members-ssr=SIGSECRET456" in (h.get("Cookie") or "") for _, h in harness.site.requests)
+    assert not any(
+        "ghost-members-ssr=SIGSECRET456" in (h.get("Cookie") or "") for _, h in harness.site.requests
+    )
 
 
 # I7
@@ -134,7 +137,7 @@ def test_real_clock_spacing(tmp_path, monkeypatch):
 
         monkeypatch.setattr(http_mod.Client, "_follow", timed)
         assert h.run("discover").exit_code == 0  # sitemap index, posts sitemap, categories
-    gaps = [b - a for a, b in zip(stamps, stamps[1:])]
+    gaps = [b - a for a, b in itertools.pairwise(stamps)]
     assert len(gaps) == 2 and all(g >= 1.99 for g in gaps)
 
 

@@ -6,7 +6,7 @@ import logging
 import re
 import sys
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 from .config import Config, Secret
@@ -52,7 +52,7 @@ class RedactFilter(logging.Filter):
 
 
 def _log_file(logs_dir: Path) -> Path:
-    stamp = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S")
+    stamp = datetime.now(UTC).strftime("%Y%m%d-%H%M%S")
     path = logs_dir / f"run-{stamp}Z.log"
     n = 2
     while path.exists():
@@ -61,12 +61,16 @@ def _log_file(logs_dir: Path) -> Path:
     return path
 
 
-def setup_logging(config: Config, verbose: bool = False) -> Path:
-    """Console (INFO, or DEBUG with --verbose) + DEBUG log file. Returns the log file path."""
-    logger = logging.getLogger(LOGGER)
+def _remove_handlers(logger: logging.Logger) -> None:
     for h in list(logger.handlers):
         logger.removeHandler(h)
         h.close()
+
+
+def setup_logging(config: Config, verbose: bool = False) -> Path:
+    """Console (INFO, or DEBUG with --verbose) + DEBUG log file. Returns the log file path."""
+    logger = logging.getLogger(LOGGER)
+    _remove_handlers(logger)
     logger.setLevel(logging.DEBUG)
     logger.propagate = False
     redact = RedactFilter(config.cookie)
@@ -89,9 +93,7 @@ def setup_logging(config: Config, verbose: bool = False) -> Path:
 
 def close_logging() -> None:
     logger = logging.getLogger(LOGGER)
-    for h in list(logger.handlers):
-        logger.removeHandler(h)
-        h.close()
+    _remove_handlers(logger)
     logger.propagate = True
 
 

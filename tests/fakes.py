@@ -42,7 +42,7 @@ class FakeTransport:
     request_seconds: float = 0.0
     calls: list[Call] = field(default_factory=list)
 
-    def add(self, url: str, *results) -> "FakeTransport":
+    def add(self, url: str, *results) -> FakeTransport:
         self.routes.setdefault(url, []).extend(results)
         return self
 
@@ -71,4 +71,4 @@ class FakeTransport:
         return [c.url for c in self.calls]
 
 
-__all__ = ["FakeClock", "FakeTransport", "TransportTimeout", "TransportConnectionError"]
+__all__ = ["FakeClock", "FakeTransport", "TransportConnectionError", "TransportTimeout"]

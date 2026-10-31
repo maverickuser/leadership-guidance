@@ -36,6 +36,7 @@ def make_client(cfg, t, clock):
 
 # -- sitemap -----------------------------------------------------------------
 
+
 # spec: post-discovery / Ghost sitemap index
 def test_ghost_index_reads_only_posts_sitemap(cfg, clock):
     t = (
@@ -53,7 +54,12 @@ def test_ghost_index_reads_only_posts_sitemap(cfg, clock):
 # spec: post-discovery / Nested sitemap index
 def test_nested_index_followed_without_loops(cfg, clock):
     t = FakeTransport(clock=clock)
-    for name in ["sitemap-nested.xml", "sitemap-nested-child.xml", "sitemap-nested-leaf-a.xml", "sitemap-nested-leaf-b.xml"]:
+    for name in [
+        "sitemap-nested.xml",
+        "sitemap-nested-child.xml",
+        "sitemap-nested-leaf-a.xml",
+        "sitemap-nested-leaf-b.xml",
+    ]:
         t.add(f"{BASE}/{name}", (200, fixture_text(name)))
     urls = collect_sitemap_urls(make_client(cfg, t, clock), f"{BASE}/sitemap-nested.xml")
     assert sorted(urls) == [f"{BASE}/post-a/", f"{BASE}/post-b/", f"{BASE}/post-c/"]
@@ -63,7 +69,10 @@ def test_nested_index_followed_without_loops(cfg, clock):
 # spec: post-discovery / Flat sitemap
 def test_flat_urlset(cfg, clock):
     t = FakeTransport(clock=clock).add(f"{BASE}/sitemap.xml", (200, sitemap_urlset(BASE, ["a", "b"])))
-    assert collect_sitemap_urls(make_client(cfg, t, clock), f"{BASE}/sitemap.xml") == [f"{BASE}/a/", f"{BASE}/b/"]
+    assert collect_sitemap_urls(make_client(cfg, t, clock), f"{BASE}/sitemap.xml") == [
+        f"{BASE}/a/",
+        f"{BASE}/b/",
+    ]
 
 
 def test_bad_sitemap_xml_raises(cfg, clock):
@@ -123,6 +132,7 @@ def test_slug_from_url():
 
 # -- categories --------------------------------------------------------------
 
+
 # spec: post-discovery / Categories from the categories page
 def test_category_slugs_from_categories_page():
     slugs = category_slugs(fixture_text("categories.html"), BASE)
@@ -142,7 +152,9 @@ def add_category(t, slug, title, pages):
 
 # spec: post-discovery / Post in two categories; Pagination ends; Post without category
 def test_crawl_categories_with_pagination(cfg, clock):
-    t = FakeTransport(clock=clock).add(f"{BASE}/categories/", (200, categories_page(BASE, ["career-growth", "managing-up"])))
+    t = FakeTransport(clock=clock).add(
+        f"{BASE}/categories/", (200, categories_page(BASE, ["career-growth", "managing-up"]))
+    )
     add_category(t, "career-growth", "Career Growth", [["p1", "p2"]])
     add_category(t, "managing-up", "Managing Up", [["p3"], ["p1"]])
     crawl = crawl_categories(make_client(cfg, t, clock), BASE)
@@ -184,15 +196,24 @@ def test_failed_category_is_skipped(cfg, clock):
 
 def test_category_name_falls_back_to_slug(cfg, clock):
     t = FakeTransport(clock=clock).add(f"{BASE}/categories/", (200, categories_page(BASE, ["x"])))
-    t.add(f"{BASE}/t/x", (200, "<html><body><article class='gh-card'><a class='gh-card-link' href='/p1/'>p</a></article></body></html>"))
+    t.add(
+        f"{BASE}/t/x",
+        (
+            200,
+            "<html><body><article class='gh-card'><a class='gh-card-link' href='/p1/'>p</a></article></body></html>",
+        ),
+    )
     assert crawl_categories(make_client(cfg, t, clock), BASE).names == ["x"]
 
 
 # -- manifest ----------------------------------------------------------------
 
+
 def test_merge_adds_new_and_keeps_progress():
     m = Manifest()
-    m.entries["a"] = ManifestEntry(url=f"{BASE}/a", slug="a", categories=["Old"], status="ok", content_hash="h")
+    m.entries["a"] = ManifestEntry(
+        url=f"{BASE}/a", slug="a", categories=["Old"], status="ok", content_hash="h"
+    )
     m.entries["gone"] = ManifestEntry(url=f"{BASE}/gone", slug="gone", status="ok")
     stats = merge_manifest(m, [f"{BASE}/b", f"{BASE}/a"], {f"{BASE}/a": ["New"]})
     assert [e.slug for e in m.ordered()] == ["b", "a", "gone"]
@@ -230,8 +251,13 @@ def test_run_discover_writes_manifest(cfg, clock):
     data = json.loads(cfg.manifest_path.read_text())
     assert [p["slug"] for p in data["posts"]] == ["p1", "p2", "p3"]
     assert data["posts"][0] == {
-        "url": f"{BASE}/p1", "slug": "p1", "categories": ["Career Growth"], "status": "discovered",
-        "last_attempt": None, "error": None, "content_hash": None,
+        "url": f"{BASE}/p1",
+        "slug": "p1",
+        "categories": ["Career Growth"],
+        "status": "discovered",
+        "last_attempt": None,
+        "error": None,
+        "content_hash": None,
     }
     assert result.total == 3 and result.categories == 1 and result.failed_categories == []
     assert f"{BASE}/sitemap-pages.xml" not in t.urls()

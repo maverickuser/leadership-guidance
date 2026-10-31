@@ -17,6 +17,8 @@ SECRET_PARTS = ("TESTSECRET123", "SIGSECRET456")
 
 _LOOPBACK = {"127.0.0.1", "::1", "localhost"}
 _real_connect = socket.socket.connect
+_real_connect_ex = socket.socket.connect_ex
+_real_getaddrinfo = socket.getaddrinfo
 
 
 def _guarded_connect(self, address):  # pragma: no cover - exercised implicitly
@@ -26,9 +28,24 @@ def _guarded_connect(self, address):  # pragma: no cover - exercised implicitly
     raise RuntimeError(f"network access blocked in tests: {address!r}")
 
 
+def _guarded_connect_ex(self, address):  # pragma: no cover - exercised implicitly
+    host = address[0] if isinstance(address, tuple) else address
+    if self.family == getattr(socket, "AF_UNIX", None) or host in _LOOPBACK:
+        return _real_connect_ex(self, address)
+    raise RuntimeError(f"network access blocked in tests: {address!r}")
+
+
+def _guarded_getaddrinfo(host, *args, **kwargs):  # pragma: no cover - exercised implicitly
+    if host in _LOOPBACK or host is None:
+        return _real_getaddrinfo(host, *args, **kwargs)
+    raise RuntimeError(f"DNS lookup blocked in tests: {host!r}")
+
+
 @pytest.fixture(autouse=True)
 def _block_network(monkeypatch):
     monkeypatch.setattr(socket.socket, "connect", _guarded_connect)
+    monkeypatch.setattr(socket.socket, "connect_ex", _guarded_connect_ex)
+    monkeypatch.setattr(socket, "getaddrinfo", _guarded_getaddrinfo)
     monkeypatch.delenv("NEWSLETTER_COOKIE", raising=False)
 
 

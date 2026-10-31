@@ -10,6 +10,7 @@ from typing import Any
 import yaml
 from dotenv import dotenv_values
 
+from . import __version__
 from .errors import ConfigError
 
 COOKIE_ENV = "NEWSLETTER_COOKIE"
@@ -21,11 +22,12 @@ DEFAULTS: dict[str, Any] = {
     "timeout_seconds": 30,
     "min_word_count": 300,
     "output_dir": "../newsletter-archive-data",  # next to the repo, outside git
-    "user_agent": "newsletter-archive/0.1 (personal archive; one request every 2s)",
+    "user_agent": f"newsletter-archive/{__version__} (personal archive; one request every 2s)",
 }
 
 MIN_DELAY_SECONDS = 2
-MAX_RETRIES = 3  # the backoff table has three steps
+BACKOFF_SECONDS: tuple[int, ...] = (2, 4, 8)  # wait before retry 1, 2, 3
+MAX_RETRIES = len(BACKOFF_SECONDS)
 
 
 class Secret:
@@ -56,6 +58,8 @@ class Secret:
 
 @dataclass(frozen=True)
 class Config:
+    """Validated settings for one run. Build it with load_config()."""
+
     base_url: str
     delay_seconds: float
     max_retries: int
@@ -81,14 +85,26 @@ class Config:
     def logs_dir(self) -> Path:
         return self.output_dir / "logs"
 
-    def with_overrides(self, **changes: Any) -> "Config":
+    @property
+    def lock_path(self) -> Path:
+        return self.output_dir / ".lock"
+
+    def raw_path(self, slug: str) -> Path:
+        """Cached HTML for one post."""
+        return self.raw_dir / f"{slug}.html"
+
+    def post_path(self, slug: str) -> Path:
+        """JSON record for one post."""
+        return self.posts_dir / f"{slug}.json"
+
+    def with_overrides(self, **changes: Any) -> Config:
         return _validate(replace(self, **changes))
 
 
 def clean_cookie(raw: str | None) -> str:
     value = (raw or "").strip()
     if value.lower().startswith("cookie:"):
-        value = value[len("cookie:"):].strip()
+        value = value[len("cookie:") :].strip()
     # tolerate a value wrapped in quotes
     if len(value) >= 2 and value[0] == value[-1] and value[0] in "'\"":
         value = value[1:-1].strip()
@@ -102,7 +118,16 @@ def _read_cookie(env_file: Path) -> Secret:
     return Secret(clean_cookie(raw))
 
 
+def _cookie_is_valid(value: str) -> bool:
+    """A header value must be printable ASCII on one line."""
+    return all(" " <= ch <= "~" for ch in value)
+
+
 def _validate(cfg: Config) -> Config:
+    if cfg.cookie and not _cookie_is_valid(cfg.cookie.reveal()):
+        raise ConfigError(
+            f"{COOKIE_ENV} contains a line break or non-ASCII character; paste the Cookie header again"
+        )
     if cfg.delay_seconds < MIN_DELAY_SECONDS:
         raise ConfigError(f"delay_seconds must be >= {MIN_DELAY_SECONDS}")
     if not 0 <= cfg.max_retries <= MAX_RETRIES:
@@ -121,6 +146,12 @@ def load_config(
     env_file: Path | str = Path(".env"),
     overrides: dict[str, Any] | None = None,
 ) -> Config:
+    """Read config.yaml (optional) and the cookie, apply overrides, and validate.
+
+    Raises:
+        ConfigError: the file can't be parsed, a setting is unknown or out of range,
+            or the cookie has characters that can't go in an HTTP header.
+    """
     path, env_file = Path(path), Path(env_file)
     values = dict(DEFAULTS)
     if path.is_file():
@@ -158,4 +189,4 @@ def load_config(
     return _validate(cfg)
 
 
-__all__ = ["Config", "Secret", "load_config", "clean_cookie", "COOKIE_ENV", "DEFAULTS"]
+__all__ = ["BACKOFF_SECONDS", "COOKIE_ENV", "DEFAULTS", "Config", "Secret", "clean_cookie", "load_config"]

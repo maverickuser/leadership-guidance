@@ -15,7 +15,7 @@ from .errors import ArchiveError, ConfigError, MissingCookieError, NotSignedInEr
 from .fetch import run_fetch
 from .http import Client
 from .runlog import RunSummary, close_logging, log_post, setup_logging
-from .store import load_manifest, run_extract
+from .store import load_manifest, run_extract, run_lock
 
 log = logging.getLogger("newsletter_archive.cli")
 
@@ -27,9 +27,13 @@ app = typer.Typer(
 
 Limit = Annotated[Optional[int], typer.Option("--limit", min=1, help="Process at most N posts.")]
 Refresh = Annotated[bool, typer.Option("--refresh", help="Ignore caches and process again.")]
-DryRun = Annotated[bool, typer.Option("--dry-run", help="Show what would happen; fetch no posts, write no post files.")]
+DryRun = Annotated[
+    bool, typer.Option("--dry-run", help="Show what would happen; fetch no posts, write no post files.")
+]
 Verbose = Annotated[bool, typer.Option("--verbose", "-v", help="Show debug output on the console.")]
-ConfigPath = Annotated[Path, typer.Option("--config", help="Path to config.yaml (.env is read from the same folder).")]
+ConfigPath = Annotated[
+    Path, typer.Option("--config", help="Path to config.yaml (.env is read from the same folder).")
+]
 
 
 def make_client(config: Config) -> Client:
@@ -37,12 +41,19 @@ def make_client(config: Config) -> Client:
     return Client(config)
 
 
-def _execute(stages: list[str], limit, refresh, dry_run, verbose, config_path: Path) -> None:
+def _execute(
+    stages: list[str],
+    limit: int | None,
+    refresh: bool,
+    dry_run: bool,
+    verbose: bool,
+    config_path: Path,
+) -> None:
     try:
         config = load_config(config_path, config_path.parent / ".env")
     except ConfigError as e:
         typer.echo(f"Error: {e}", err=True)
-        raise typer.Exit(1)
+        raise typer.Exit(1) from None
 
     log_path = setup_logging(config, verbose)
     summary = RunSummary()
@@ -51,29 +62,34 @@ def _execute(stages: list[str], limit, refresh, dry_run, verbose, config_path: P
     try:
         if "fetch" in stages and not config.cookie:
             raise MissingCookieError()
-        manifest = load_manifest(config.manifest_path)
-        client: Client | None = None
-        for stage in stages:
-            log.info("== %s%s", stage, " (dry run)" if dry_run else "")
-            if stage == "discover":
-                client = client or make_client(config)
-                # `run` never limits discovery; `discover --limit N` caps new posts added
-                result = run_discover(
-                    client, config, manifest, limit=limit if stages == ["discover"] else None, dry_run=dry_run
-                )
-                summary.categories_incomplete = bool(result.failed_categories)
-            elif stage == "fetch":
-                client = client or make_client(config)
-                fr = run_fetch(client, config, manifest, limit, refresh, dry_run, on_post=log_post)
-                summary.fetched += fr.fetched
-                summary.failed += fr.failed
-                summary.skipped += fr.skipped
-            elif stage == "extract":
-                er = run_extract(config, manifest, limit, refresh, dry_run, on_post=log_post)
-                summary.ok += er.ok
-                summary.partial += er.partial
-                summary.failed += er.failed
-                summary.unchanged += er.unchanged
+        with run_lock(config.lock_path):
+            manifest = load_manifest(config.manifest_path)
+            client: Client | None = None
+            for stage in stages:
+                log.info("== %s%s", stage, " (dry run)" if dry_run else "")
+                if stage == "discover":
+                    client = client or make_client(config)
+                    # `run` never limits discovery; `discover --limit N` caps new posts added
+                    result = run_discover(
+                        client,
+                        config,
+                        manifest,
+                        limit=limit if stages == ["discover"] else None,
+                        dry_run=dry_run,
+                    )
+                    summary.categories_incomplete = bool(result.failed_categories)
+                elif stage == "fetch":
+                    client = client or make_client(config)
+                    fr = run_fetch(client, config, manifest, limit, refresh, dry_run, on_post=log_post)
+                    summary.fetched += fr.fetched
+                    summary.failed += fr.failed
+                    summary.skipped += fr.skipped
+                elif stage == "extract":
+                    er = run_extract(config, manifest, limit, refresh, dry_run, on_post=log_post)
+                    summary.ok += er.ok
+                    summary.partial += er.partial
+                    summary.failed += er.failed
+                    summary.unchanged += er.unchanged
     except NotSignedInError as e:
         log.error(str(e))
         code = e.exit_code
@@ -106,16 +122,21 @@ def main(
 
 @app.command()
 def discover(
-    limit: Limit = None, refresh: Refresh = False, dry_run: DryRun = False, verbose: Verbose = False,
+    limit: Limit = None,
+    dry_run: DryRun = False,
+    verbose: Verbose = False,
     config: ConfigPath = Path("config.yaml"),
 ) -> None:
     """Stage 1: read the sitemap and category pages into data/manifest.json."""
-    _execute(["discover"], limit, refresh, dry_run, verbose, config)
+    _execute(["discover"], limit, False, dry_run, verbose, config)
 
 
 @app.command()
 def fetch(
-    limit: Limit = None, refresh: Refresh = False, dry_run: DryRun = False, verbose: Verbose = False,
+    limit: Limit = None,
+    refresh: Refresh = False,
+    dry_run: DryRun = False,
+    verbose: Verbose = False,
     config: ConfigPath = Path("config.yaml"),
 ) -> None:
     """Stage 2: download post pages with your cookie into data/raw/."""
@@ -124,7 +145,10 @@ def fetch(
 
 @app.command()
 def extract(
-    limit: Limit = None, refresh: Refresh = False, dry_run: DryRun = False, verbose: Verbose = False,
+    limit: Limit = None,
+    refresh: Refresh = False,
+    dry_run: DryRun = False,
+    verbose: Verbose = False,
     config: ConfigPath = Path("config.yaml"),
 ) -> None:
     """Stages 3-4: turn cached pages into data/posts/{slug}.json (no network)."""
@@ -133,7 +157,10 @@ def extract(
 
 @app.command()
 def run(
-    limit: Limit = None, refresh: Refresh = False, dry_run: DryRun = False, verbose: Verbose = False,
+    limit: Limit = None,
+    refresh: Refresh = False,
+    dry_run: DryRun = False,
+    verbose: Verbose = False,
     config: ConfigPath = Path("config.yaml"),
 ) -> None:
     """All stages in order: discover, fetch, extract."""

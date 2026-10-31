@@ -2,25 +2,41 @@
 
 from __future__ import annotations
 
+from typing import Any
+
 from jsonschema import Draft202012Validator
 
 from .errors import ExtractError
+from .models import SLUG_PATTERN
 
 SCHEMA_VERSION = 1
 
-POST_SCHEMA: dict = {
+POST_SCHEMA: dict[str, Any] = {
     "$schema": "https://json-schema.org/draft/2020-12/schema",
     "title": "Example Newsletter archived post",
     "type": "object",
     "additionalProperties": False,
     "required": [
-        "schema_version", "id", "url", "title", "subtitle", "author", "published_date",
-        "categories", "word_count", "summary", "sections", "text", "links", "content_hash",
-        "fetched_at", "status",
+        "schema_version",
+        "id",
+        "url",
+        "title",
+        "subtitle",
+        "author",
+        "published_date",
+        "categories",
+        "word_count",
+        "summary",
+        "sections",
+        "text",
+        "links",
+        "content_hash",
+        "fetched_at",
+        "status",
     ],
     "properties": {
         "schema_version": {"const": SCHEMA_VERSION},
-        "id": {"type": "string", "pattern": "^[a-z0-9][a-z0-9-]*$"},
+        "id": {"type": "string", "pattern": SLUG_PATTERN},
         "url": {"type": "string", "pattern": "^https?://"},
         "title": {"type": "string", "minLength": 1},
         "subtitle": {"type": ["string", "null"]},
@@ -49,7 +65,10 @@ POST_SCHEMA: dict = {
                 "type": "object",
                 "additionalProperties": False,
                 "required": ["text", "url"],
-                "properties": {"text": {"type": "string"}, "url": {"type": "string", "pattern": "^https?://"}},
+                "properties": {
+                    "text": {"type": "string"},
+                    "url": {"type": "string", "pattern": "^https?://"},
+                },
             },
         },
         "content_hash": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
@@ -61,7 +80,8 @@ POST_SCHEMA: dict = {
 _validator = Draft202012Validator(POST_SCHEMA)
 
 
-def validate_post(record: dict) -> None:
+def validate_post(record: dict[str, Any]) -> None:
+    """Raises ExtractError naming the first field that breaks the post schema."""
     errors = sorted(_validator.iter_errors(record), key=lambda e: list(e.path))
     if errors:
         e = errors[0]

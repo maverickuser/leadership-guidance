@@ -20,14 +20,52 @@ from pathlib import Path
 
 from bs4 import BeautifulSoup, Comment, NavigableString
 
+from newsletter_archive.extract import BOILERPLATE_PREFIXES
+
 BASE = "https://www.example.com"
-BOILERPLATE_PREFIXES = ("Welcome to my newsletter!", "Free members can read")
-FILLER_WORDS = (
-    "team plan work goal idea review signal manager project trust growth feedback "
-    "leader meeting decision result effort clarity owner customer metric habit "
-    "scope context career promotion problem process skill change focus outcome "
-    "question answer example story mentor practice writing direction priority"
-).split()
+FILLER_WORDS = [
+    "team",
+    "plan",
+    "work",
+    "goal",
+    "idea",
+    "review",
+    "signal",
+    "manager",
+    "project",
+    "trust",
+    "growth",
+    "feedback",
+    "leader",
+    "meeting",
+    "decision",
+    "result",
+    "effort",
+    "clarity",
+    "owner",
+    "customer",
+    "metric",
+    "habit",
+    "scope",
+    "context",
+    "career",
+    "promotion",
+    "problem",
+    "process",
+    "skill",
+    "change",
+    "focus",
+    "outcome",
+    "question",
+    "answer",
+    "example",
+    "story",
+    "mentor",
+    "practice",
+    "writing",
+    "direction",
+    "priority",
+]
 UUID_RE = re.compile(r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}", re.I)
 EMAIL_RE = re.compile(r"[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}")
 NGRAM = 8
@@ -57,7 +95,7 @@ def _replace_text(node: NavigableString, filler: Filler, keep_prefix: str | None
     if n == 0:
         return
     lead = text[: len(text) - len(text.lstrip())]
-    trail = text[len(text.rstrip()):]
+    trail = text[len(text.rstrip()) :]
     if keep_prefix:
         kept = len(keep_prefix.split())
         new = keep_prefix + (" " + filler.words(n - kept) if n > kept else "")
@@ -154,9 +192,7 @@ def build_sitemaps(src: Path, out: Path, keep_slugs: list[str]) -> None:
     keep = [u for u in urls if any(f"/{s}/</loc>" in u for s in keep_slugs)]
     keep = [re.sub(r"<image:image>.*?</image:image>", "", u, flags=re.S) for u in keep]
     head = posts[: posts.index("<url>")]
-    (out / "sitemap-posts.xml").write_text(
-        _finalize(head + "".join(keep) + "</urlset>"), encoding="utf-8"
-    )
+    (out / "sitemap-posts.xml").write_text(_finalize(head + "".join(keep) + "</urlset>"), encoding="utf-8")
 
 
 def build_categories(src: Path, out: Path) -> list[str]:
@@ -205,9 +241,9 @@ def build_tag_pages(src: Path, out: Path, page2_slugs: list[str]) -> list[str]:
     for link in soup.find_all("link", rel="next"):
         link.decompose()
     cards = soup.select("article.gh-card")
-    for card in cards[len(page2_slugs):]:
+    for card in cards[len(page2_slugs) :]:
         card.decompose()
-    for card, slug in zip(soup.select("article.gh-card"), page2_slugs):
+    for card, slug in zip(soup.select("article.gh-card"), page2_slugs, strict=False):
         a = card.select_one("a.gh-card-link")
         a["href"] = f"/{slug}/"
         title = card.select_one(".gh-card-title")
@@ -231,8 +267,10 @@ def main() -> int:
     p1 = build_tag_pages(
         args.src,
         args.out,
-        page2_slugs=["how-amazon-uses-tenets-to-make-better-decisions-at-every-level",
-                     "the-secret-to-sounding-like-a-senior-leader-say-less"],
+        page2_slugs=[
+            "how-amazon-uses-tenets-to-make-better-decisions-at-every-level",
+            "the-secret-to-sounding-like-a-senior-leader-say-less",
+        ],
     )
     sitemap_slugs = [
         "stop-trying-harder-change-your-environment-instead",

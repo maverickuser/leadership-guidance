@@ -4,12 +4,11 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass, field
-from pathlib import Path
 from urllib.parse import urlsplit, urlunsplit
 
 from .config import Config
 from .errors import FetchError, MissingCookieError, NotSignedInError
-from .http import Client
+from .http import Client, to_base_host
 from .models import Manifest, ManifestEntry, PostCallback, no_callback, utc_now_iso
 from .store import save_manifest, write_text_atomic
 
@@ -32,17 +31,10 @@ def fetch_url(entry: ManifestEntry, base_url: str | None = None) -> str:
 
     With base_url, the request goes to base_url's scheme and host (e.g. a non-www sitemap
     link is fetched from www), which is the only origin the cookie is sent to."""
-    parts = urlsplit(entry.url)
+    url = to_base_host(entry.url, base_url) if base_url else entry.url
+    parts = urlsplit(url)
     path = parts.path if parts.path.endswith("/") else parts.path + "/"
-    scheme, netloc = parts.scheme, parts.netloc
-    if base_url:
-        base = urlsplit(base_url)
-        scheme, netloc = base.scheme, base.netloc
-    return urlunsplit((scheme, netloc, path, parts.query, ""))
-
-
-def raw_path(config: Config, slug: str) -> Path:
-    return config.raw_dir / f"{slug}.html"
+    return urlunsplit((parts.scheme, parts.netloc, path, parts.query, ""))
 
 
 def select_for_fetch(
@@ -53,8 +45,8 @@ def select_for_fetch(
     candidates = manifest.ordered() if limit is None else manifest.ordered()[:limit]
     if refresh:
         return candidates, []
-    todo = [e for e in candidates if not raw_path(config, e.slug).exists()]
-    skipped = [e for e in candidates if raw_path(config, e.slug).exists()]
+    todo = [e for e in candidates if not config.raw_path(e.slug).exists()]
+    skipped = [e for e in candidates if config.raw_path(e.slug).exists()]
     return todo, skipped
 
 
@@ -67,6 +59,12 @@ def run_fetch(
     dry_run: bool = False,
     on_post: PostCallback = no_callback,
 ) -> FetchResult:
+    """Download each selected post's page into raw/, saving progress after every post.
+
+    Raises:
+        MissingCookieError: no cookie is configured.
+        NotSignedInError: a page came back without the signed-in marker (cookie expired).
+    """
     if not config.cookie:
         raise MissingCookieError()
     result = FetchResult()
@@ -99,7 +97,7 @@ def run_fetch(
             on_post(entry.slug, "fetch", "not-signed-in", None)
             raise NotSignedInError(entry.slug)
 
-        write_text_atomic(raw_path(config, entry.slug), resp.text)
+        write_text_atomic(config.raw_path(entry.slug), resp.text)
         entry.status, entry.error, entry.last_attempt = "fetched", None, utc_now_iso()
         save_manifest(manifest, config.manifest_path)
         result.fetched += 1
