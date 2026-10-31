@@ -9,7 +9,7 @@
 
 ## Spec
 
-<!-- Requirements / scenarios from openspec/changes/add-newsletter-archive/specs/ implemented here -->
+<!-- Requirements / scenarios from openspec/specs/ (or the active change under openspec/changes/) implemented here -->
 
 ## Tests
 

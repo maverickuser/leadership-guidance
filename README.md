@@ -129,7 +129,7 @@ Update the lockfile after changing dependencies: `pip-compile --extra dev --stri
 
 - Integration tests run the real CLI and HTTP stack against a fake Ghost site on `127.0.0.1`.
 - Fixtures are rebuilt from pages saved in `data/inspect/` (git-ignored) with `python scripts/make_fixtures.py`.
-- Design and specs live in `openspec/changes/add-newsletter-archive/`.
+- Specs live in `openspec/specs/`. The original design, low-level design and plan are in `openspec/changes/archive/2026-10-31-add-newsletter-archive/`.
 
 **Never commit** `.env`, anything under `data/` or the archive folder, or real article text. See [CONTRIBUTING.md](CONTRIBUTING.md) and [SECURITY.md](SECURITY.md).
 
