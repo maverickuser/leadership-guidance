@@ -16,10 +16,12 @@ def test_redacts_exact_value_and_pairs():
 
 
 def test_redacts_cookie_lines_and_ghost_cookies_even_if_unknown():
-    out = redact("headers: Cookie: a=b; c=d\nSet-Cookie: ghost-members-ssr=OTHERVALUE; path=/")
-    assert "a=b" not in out and "OTHERVALUE" not in out
+    # a filter that knows a *different* cookie still scrubs Cookie lines and ghost cookies
+    other = RedactFilter(Secret("session=zzzzzzzzzzzz"))
+    out = other.redact("headers: Cookie: a=b; c=d\nSet-Cookie: ghost-members-ssr=TESTSECRET123; path=/")
+    assert "a=b" not in out and "TESTSECRET123" not in out
     assert "Cookie: [REDACTED]" in out
-    assert redact("x ghost-members-ssr.sig=abc123 y") == "x ghost-members-ssr.sig=[REDACTED] y"
+    assert other.redact("x ghost-members-ssr.sig=SIGSECRET456 y") == "x ghost-members-ssr.sig=[REDACTED] y"
 
 
 def test_filter_redacts_args_and_exceptions(cfg):
