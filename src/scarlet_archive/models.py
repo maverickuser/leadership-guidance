@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
-from typing import Literal
+from typing import Callable, Literal, Optional
 
 Status = Literal["discovered", "fetched", "ok", "partial", "failed"]
 STATUSES: tuple[str, ...] = ("discovered", "fetched", "ok", "partial", "failed")
@@ -72,3 +72,11 @@ class Extracted:
     text: str
     links: list[dict]
     word_count: int
+
+
+# Called once per post per stage: (slug, stage, status, error or detail)
+PostCallback = Callable[[str, str, str, Optional[str]], None]
+
+
+def no_callback(slug: str, stage: str, status: str, error: Optional[str] = None) -> None:
+    return None
