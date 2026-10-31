@@ -63,6 +63,6 @@
 
 - [x] 9.1 User fills in `.env`
 - [ ] 9.2 Run `archive discover` and review the manifest with the user
-- [ ] 9.3 Run `archive run --limit 5`; check acceptance criteria against the output (paid post matches browser view)
-- [ ] 9.4 Run `archive run --limit 5` again and confirm nothing new is downloaded
+- [x] 9.3 Run `archive run --limit 5`; check acceptance criteria against the output (paid post matches browser view)
+- [x] 9.4 Run `archive run --limit 5` again and confirm nothing new is downloaded
 - [ ] 9.5 Full crawl only on the user's explicit go-ahead
