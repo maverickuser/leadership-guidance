@@ -62,6 +62,36 @@ Exit codes: `0` done (individual post failures are listed in the summary), `1` c
 
 Only one command runs at a time per archive folder; a second one exits with a message instead of overwriting progress.
 
+## Weekly updates (macOS)
+
+`scripts/scheduled-run.sh` runs `archive run` unattended. It sends a macOS notification when new posts are archived, when the cookie has expired, or when a run fails. A second run can't overlap a running one (the archive folder is locked).
+
+To run it every Monday at 09:00, save this as `~/Library/LaunchAgents/com.<you>.newsletter-archive.plist`, replacing `/path/to` with your paths:
+
+```xml
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key><string>com.you.newsletter-archive</string>
+  <key>ProgramArguments</key>
+  <array><string>/bin/bash</string><string>/path/to/leadership-guidance/scripts/scheduled-run.sh</string></array>
+  <key>StartCalendarInterval</key>
+  <dict><key>Weekday</key><integer>1</integer><key>Hour</key><integer>9</integer><key>Minute</key><integer>0</integer></dict>
+  <key>StandardOutPath</key><string>/path/to/newsletter-archive-data/logs/scheduled.log</string>
+  <key>StandardErrorPath</key><string>/path/to/newsletter-archive-data/logs/scheduled.log</string>
+</dict>
+</plist>
+```
+
+```bash
+launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.you.newsletter-archive.plist   # turn on
+launchctl kickstart gui/$(id -u)/com.you.newsletter-archive                                # run once now
+launchctl bootout gui/$(id -u)/com.you.newsletter-archive                                  # turn off
+```
+
+launchd runs a missed job when the Mac wakes from sleep, but not if the Mac was shut down at that time. On Linux, use cron instead: `0 9 * * 1 /path/to/leadership-guidance/scripts/scheduled-run.sh`.
+
 ## Settings (`config.yaml`, copied from `config.example.yaml`)
 
 | Setting | Default | |
