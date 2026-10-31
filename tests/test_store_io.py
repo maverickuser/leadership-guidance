@@ -22,7 +22,15 @@ def test_manifest_round_trip_keeps_order_and_fields(tmp_path):
     assert loaded.entries["alpha"] == m.entries["alpha"]
     raw = json.loads(path.read_text())
     assert raw["version"] == 1 and raw["updated_at"].endswith("Z")
-    assert set(raw["posts"][0]) == {"url", "slug", "categories", "status", "last_attempt", "error", "content_hash"}
+    assert set(raw["posts"][0]) == {
+        "url",
+        "slug",
+        "categories",
+        "status",
+        "last_attempt",
+        "error",
+        "content_hash",
+    }
 
 
 def test_missing_manifest_is_empty(tmp_path):
@@ -38,7 +46,7 @@ def test_corrupt_manifest_gives_clear_error(tmp_path):
 
 def test_unknown_status_falls_back_to_discovered(tmp_path):
     p = tmp_path / "manifest.json"
-    p.write_text(json.dumps({"posts": [{"url": "u", "slug": "s", "status": "weird"}]}))
+    p.write_text(json.dumps({"posts": [{"url": "https://x/s", "slug": "s", "status": "weird"}]}))
     assert load_manifest(p).entries["s"].status == "discovered"
 
 
@@ -66,7 +74,8 @@ def test_leftover_tmp_does_not_break_next_write(tmp_path):
     (tmp_path / "a.json.tmp").write_text("garbage")
     write_json_atomic(tmp_path / "a.json", {"ok": True})
     assert json.loads((tmp_path / "a.json").read_text()) == {"ok": True}
-    assert not (tmp_path / "a.json.tmp").exists()
+    # only the stray file is left; the write's own temp file is gone
+    assert sorted(p.name for p in tmp_path.iterdir()) == ["a.json", "a.json.tmp"]
 
 
 def test_unicode_preserved(tmp_path):

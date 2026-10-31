@@ -10,19 +10,20 @@ from __future__ import annotations
 import http.cookiejar
 import logging
 import time
+from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Callable, Protocol
-from urllib.parse import urljoin, urlsplit
+from typing import Protocol
+from urllib.parse import urljoin, urlsplit, urlunsplit
 
 import requests
 
-from .config import Config
+from .config import BACKOFF_SECONDS, Config
 from .errors import FetchError
 
 log = logging.getLogger("scarlet_archive.http")
 
-BACKOFF_SECONDS = (2, 4, 8)
 MAX_REDIRECTS = 5
+MAX_RESPONSE_BYTES = 10 * 1024 * 1024  # a post page is well under 1 MB
 REDIRECT_CODES = {301, 302, 303, 307, 308}
 ACCEPT = "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8"
 
@@ -32,6 +33,10 @@ class TransportTimeout(Exception):
 
 
 class TransportConnectionError(Exception):
+    pass
+
+
+class ResponseTooLarge(Exception):
     pass
 
 
@@ -67,14 +72,30 @@ class RequestsTransport:
 
     def __call__(self, url: str, headers: dict[str, str], timeout: float) -> RawResponse:
         try:
-            r = self.session.get(url, headers=headers, timeout=timeout, allow_redirects=False)
+            with self.session.get(
+                url, headers=headers, timeout=timeout, allow_redirects=False, stream=True
+            ) as r:
+                body = self._read_capped(r)
+                encoding = r.encoding if "charset" in r.headers.get("Content-Type", "").lower() else "utf-8"
+                location = r.headers.get("Location")
+                status = r.status_code
         except requests.Timeout as e:
             raise TransportTimeout(type(e).__name__) from None
         except requests.RequestException as e:
             raise TransportConnectionError(type(e).__name__) from None
-        if "charset" not in r.headers.get("Content-Type", "").lower():
-            r.encoding = "utf-8"
-        return RawResponse(status=r.status_code, url=url, text=r.text, location=r.headers.get("Location"))
+        text = body.decode(encoding or "utf-8", errors="replace")
+        return RawResponse(status=status, url=url, text=text, location=location)
+
+    @staticmethod
+    def _read_capped(r: requests.Response) -> bytes:
+        chunks: list[bytes] = []
+        size = 0
+        for chunk in r.iter_content(chunk_size=64 * 1024):
+            size += len(chunk)
+            if size > MAX_RESPONSE_BYTES:
+                raise ResponseTooLarge(f"over {MAX_RESPONSE_BYTES} bytes")
+            chunks.append(chunk)
+        return b"".join(chunks)
 
 
 def origin(url: str) -> tuple[str, str, int]:
@@ -85,7 +106,18 @@ def origin(url: str) -> tuple[str, str, int]:
     return scheme, (parts.hostname or "").lower(), port
 
 
+def to_base_host(url: str, base_url: str) -> str:
+    """The same path and query, on base_url's scheme and host (the cookie's only origin)."""
+    parts, base = urlsplit(url), urlsplit(base_url)
+    return urlunsplit((base.scheme, base.netloc, parts.path, parts.query, ""))
+
+
 class Client:
+    """The run's only HTTP client: one request at a time, retries, same-site redirects.
+
+    The Cookie header is sent only to base_url's exact origin.
+    """
+
     def __init__(
         self,
         config: Config,
@@ -113,6 +145,9 @@ class Client:
             started = self._clock()
             try:
                 resp = self._follow(url)
+            except ResponseTooLarge as e:
+                self._last_end = self._clock()
+                raise FetchError(url, f"response too large ({e})") from None
             except FetchError:
                 self._last_end = self._clock()
                 raise
