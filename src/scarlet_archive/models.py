@@ -72,6 +72,7 @@ class Extracted:
     text: str
     links: list[dict]
     word_count: int
+    paywalled: bool = False  # the paywall box was inside the article body
 
 
 # Called once per post per stage: (slug, stage, status, error or detail)

@@ -51,11 +51,19 @@ The system SHALL collect links inside the article body only, each as `{text, url
 - **THEN** `links` holds only the two body links
 
 ### Requirement: Paywall detection
-The system SHALL compute `word_count` from `text`, and SHALL set `status: "partial"` when `word_count < min_word_count` (default 300); otherwise `status: "ok"`.
+The system SHALL compute `word_count` from `text`, and SHALL set `status: "partial"` when `word_count < min_word_count` (default 300) or when the paywall box (`.gh-post-upgrade-cta`) is present inside the article body; otherwise `status: "ok"`.
 
 #### Scenario: Truncated paid post
 - **WHEN** a paid post's extracted text has 120 words
 - **THEN** its status is `partial`
+
+#### Scenario: Paywall box inside the body
+- **WHEN** a signed-in page shows a 700-word preview followed by the `.gh-post-upgrade-cta` box inside `.gh-content` (for example a free member reading a paid post)
+- **THEN** its status is `partial`
+
+#### Scenario: Paywall class only in page CSS
+- **WHEN** the page's `<style>` mentions `.gh-post-upgrade-cta` but the article body has no such element
+- **THEN** the status is decided by word count alone
 
 #### Scenario: Full post
 - **WHEN** a post's extracted text has 2140 words
