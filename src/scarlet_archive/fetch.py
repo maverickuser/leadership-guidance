@@ -27,11 +27,18 @@ class FetchResult:
     would_fetch: list[str] = field(default_factory=list)
 
 
-def fetch_url(entry: ManifestEntry) -> str:
-    """Canonical form with a trailing slash, so Ghost doesn't answer with a redirect."""
+def fetch_url(entry: ManifestEntry, base_url: str | None = None) -> str:
+    """Canonical form with a trailing slash, so Ghost doesn't answer with a redirect.
+
+    With base_url, the request goes to base_url's scheme and host (e.g. a non-www sitemap
+    link is fetched from www), which is the only origin the cookie is sent to."""
     parts = urlsplit(entry.url)
     path = parts.path if parts.path.endswith("/") else parts.path + "/"
-    return urlunsplit((parts.scheme, parts.netloc, path, parts.query, ""))
+    scheme, netloc = parts.scheme, parts.netloc
+    if base_url:
+        base = urlsplit(base_url)
+        scheme, netloc = base.scheme, base.netloc
+    return urlunsplit((scheme, netloc, path, parts.query, ""))
 
 
 def raw_path(config: Config, slug: str) -> Path:
@@ -71,12 +78,12 @@ def run_fetch(
     if dry_run:
         for entry in todo:
             result.would_fetch.append(entry.slug)
-            on_post(entry.slug, "fetch", "would-fetch", fetch_url(entry))
+            on_post(entry.slug, "fetch", "would-fetch", fetch_url(entry, config.base_url))
         return result
 
     for entry in todo:
         try:
-            resp = client.get(fetch_url(entry))
+            resp = client.get(fetch_url(entry, config.base_url))
             if resp.status != 200:
                 raise FetchError(resp.url, f"HTTP {resp.status}", status=resp.status)
         except FetchError as e:

@@ -77,7 +77,8 @@ class RequestsTransport:
         return RawResponse(status=r.status_code, url=url, text=r.text, location=r.headers.get("Location"))
 
 
-def _origin(url: str) -> tuple[str, str, int]:
+def origin(url: str) -> tuple[str, str, int]:
+    """(scheme, host, port) with default ports filled in. Raises ValueError on a bad port."""
     parts = urlsplit(url)
     scheme = parts.scheme.lower()
     port = parts.port or (443 if scheme == "https" else 80)
@@ -97,7 +98,7 @@ class Client:
         self._sleep = sleep
         self._clock = clock
         self._last_end: float | None = None
-        self._base_origin = _origin(config.base_url)
+        self._base_origin = origin(config.base_url)
         self.request_count = 0  # HTTP exchanges, including redirect hops and retries
 
     # -- public -------------------------------------------------------------
@@ -146,7 +147,7 @@ class Client:
 
     def _headers_for(self, url: str) -> dict[str, str]:
         headers = {"User-Agent": self.config.user_agent, "Accept": ACCEPT}
-        if self.config.cookie and _origin(url) == self._base_origin:
+        if self.config.cookie and origin(url) == self._base_origin:
             headers["Cookie"] = self.config.cookie.reveal()
         return headers
 
@@ -157,7 +158,11 @@ class Client:
             raw = self._transport(current, self._headers_for(current), self.config.timeout_seconds)
             if raw.status in REDIRECT_CODES and raw.location:
                 target = urljoin(current, raw.location)
-                if _origin(target) != self._base_origin:
+                try:
+                    same = origin(target) == self._base_origin
+                except ValueError:
+                    raise FetchError(url, "malformed redirect", status=raw.status) from None
+                if not same:
                     raise FetchError(url, "redirect to another site refused", status=raw.status)
                 current = target
                 continue
