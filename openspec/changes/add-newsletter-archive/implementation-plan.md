@@ -16,7 +16,7 @@ The code is public; the archive is not. These rules hold for every PR.
 |---|---|
 | `.env`, the cookie value, any `ghost-members-ssr=` value | `.gitignore`; CI `safety` job greps the tree; `test_secrets.py` |
 | `data/` (raw HTML, post JSON, manifest, logs, `data/inspect/`) | `.gitignore`; CI fails if any tracked path starts with `data/` |
-| Real article text from Example Newsletter (paid or free) | Fixtures are **structure-only**: real Ghost markup, with article text replaced by deterministic filler (see §4) |
+| Real article text from the newsletter (paid or free) | Fixtures are **structure-only**: real Ghost markup, with article text replaced by deterministic filler (see §4) |
 | Member name, email, uuid, tokens from signed-in pages | Scrub step in `scripts/make_fixtures.py`; CI greps fixtures for `@` emails and uuid patterns |
 
 Post titles, slugs, URLs, category names and meta descriptions are public on the site and may appear in fixtures.

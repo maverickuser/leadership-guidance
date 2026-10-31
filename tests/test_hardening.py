@@ -114,7 +114,7 @@ def test_from_dict_keeps_good_entries():
 def test_cookie_with_line_break_or_non_ascii_is_rejected(tmp_path, monkeypatch, bad):
     monkeypatch.setenv("NEWSLETTER_COOKIE", bad)
     with pytest.raises(ConfigError, match="line break or non-ASCII"):
-        load_config(tmp_path / "missing.yaml", tmp_path / ".env")
+        load_config(tmp_path / "missing.yaml", tmp_path / ".env", overrides={"base_url": BASE})
 
 
 def test_retry_limit_matches_backoff_table():

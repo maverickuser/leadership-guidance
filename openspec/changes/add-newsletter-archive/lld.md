@@ -268,7 +268,7 @@ The Ghost sitemap index already keeps static pages out, because only `sitemap-po
 1. `GET {base}/categories/`. Collect `a[href]` whose path matches `^/t/([^/]+)/?$`, absolute or relative, deduped in page order. The current site has 9 categories. `dave` is one of them; it's on the page, so it counts. Tags not linked there, such as `newsletter` and `page`, are ignored.
 2. For each category: `url = {base}/t/<slug>`, `seen_pages = set()`, `posts_in_cat = set()`.
    - `GET url`. The client follows the redirect to `/tag/<slug>/`.
-   - On the first page, the name is `<title>` with a trailing ` - Example Newsletter` removed (rsplit on `" - "`). If the title is missing, use the slug.
+   - On the first page, the name is `<title>` with a trailing ` - <site name>` removed (rsplit on `" - "`). If the title is missing, use the slug.
    - The post links are `article.gh-card a.gh-card-link[href]`, normalized and joined to the base. There are 12 per page.
    - Stop if the page has no new posts. Otherwise follow `link[rel=next][href]` if it exists and hasn't been seen. Stop at 200 pages as a safety cap.
 3. Build `post_url -> sorted(category names)`. Posts that appear in listings but not in the sitemap are ignored and logged at DEBUG.
@@ -423,7 +423,7 @@ The URL is kept as written in the post: no tracking params are stripped, so `?re
 
 | Field | Sources in order |
 |---|---|
-| title | `meta[property=og:title]` → JSON-LD `headline` → `h1.gh-article-title` → first `h1` → `<title>` minus ` - Example Newsletter` |
+| title | `meta[property=og:title]` → JSON-LD `headline` → `h1.gh-article-title` → first `h1` → `<title>` minus ` - <og:site_name>` |
 | subtitle | `p.gh-article-excerpt` → `null` |
 | author | JSON-LD `author.name` (a list is joined with `", "`) → `meta[name=author]` → `.gh-article-author-name` text → `"Unknown"` + warning |
 | published_date | `meta[property=article:published_time]` → JSON-LD `datePublished` → `time[datetime]` → raise `ExtractError("no published date")` |

@@ -1,6 +1,6 @@
 ## Context
 
-Example Newsletter is a paid newsletter site. The user is a subscriber and wants a personal, offline, structured copy of every post to feed a later search/Q&A phase. The tool runs on the user's Mac, uses only their own login cookie, and must be polite to the site. Category tags are not reliably shown on post pages, so category listing pages are the source of truth.
+The target is a paid newsletter site built on Ghost. The user is a subscriber and wants a personal, offline, structured copy of every post to feed a later search/Q&A phase. The tool runs on the user's Mac, uses only their own login cookie, and must be polite to the site. Category tags are not reliably shown on post pages, so category listing pages are the source of truth.
 
 ## Site findings (inspected 2026-10-31)
 

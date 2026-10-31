@@ -108,7 +108,7 @@ def test_signed_out_exit_2(tmp_path, monkeypatch):
 
 
 def test_bad_config_exit_1(env):
-    env.config.write_text("delay_seconds: 0\n")
+    env.config.write_text(f"base_url: {BASE}\ndelay_seconds: 0\n")
     r = env.run("discover")
     assert r.exit_code == 1 and "delay_seconds" in r.output
 

@@ -5,7 +5,7 @@ build-backend = "hatchling.build"
 [project]
 name = "newsletter-archive"
 dynamic = ["version"]
-description = "Personal CLI that archives Example Newsletter posts the user subscribes to as structured JSON"
+description = "Personal CLI that archives newsletter posts the user subscribes to as structured JSON"
 readme = "README.md"
 license = "MIT"
 license-files = ["LICENSE"]

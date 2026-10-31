@@ -13,7 +13,7 @@ SCHEMA_VERSION = 1
 
 POST_SCHEMA: dict[str, Any] = {
     "$schema": "https://json-schema.org/draft/2020-12/schema",
-    "title": "Example Newsletter archived post",
+    "title": "Archived newsletter post",
     "type": "object",
     "additionalProperties": False,
     "required": [

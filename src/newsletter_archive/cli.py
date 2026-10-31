@@ -22,7 +22,7 @@ log = logging.getLogger("newsletter_archive.cli")
 app = typer.Typer(
     add_completion=False,
     no_args_is_help=True,
-    help="Archive the Example Newsletter posts you subscribe to as clean JSON, for personal use.",
+    help="Archive the newsletter posts you subscribe to as clean JSON, for personal use.",
 )
 
 Limit = Annotated[Optional[int], typer.Option("--limit", min=1, help="Process at most N posts.")]

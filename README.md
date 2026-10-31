@@ -1,12 +1,12 @@
 # Newsletter Archive
 
-A personal command-line tool that saves the [Example Newsletter](https://www.example.com) posts **you subscribe to** as clean, structured JSON on your own computer. Later it can feed search and Q&A over your archive.
+A personal command-line tool that saves the posts **you subscribe to** on a Ghost-based newsletter site as clean, structured JSON on your own computer. Later it can feed search and Q&A over your archive.
 
 - **Personal use only.** It uses your own login cookie and reads only what your subscription can read. It never bypasses the paywall.
 - **Polite.** One request at a time, at least 2 seconds apart, with backoff on errors.
 - **Private.** Posts are stored outside this repo (`../newsletter-archive-data/` by default) and are never committed. Your cookie stays in `.env` and is never printed or logged.
 
-This repository holds code and specs only, with no Example Newsletter content. Test fixtures keep the site's HTML structure but replace article text with filler.
+This repository holds code and specs only, with no newsletter content. Test fixtures keep the site's HTML structure but replace article text with filler.
 
 ## Setup
 
@@ -19,11 +19,14 @@ python3.12 -m venv .venv
 source .venv/bin/activate
 pip install -e '.[dev]'
 cp .env.example .env
+cp config.example.yaml config.yaml   # then set base_url to the newsletter's address
 ```
+
+`config.yaml` and `.env` are git-ignored, so the site address and your cookie stay on your machine.
 
 ### Add your cookie to `.env`
 
-1. Sign in to https://www.example.com in your browser.
+1. Sign in to the newsletter site (your `base_url`) in your browser.
 2. Open DevTools (⌥⌘I in Chrome), go to the **Network** tab, and reload the page.
 3. Click the first request (the page itself). Under **Request Headers**, find `cookie`.
 4. Copy its whole value into `.env`:
@@ -59,11 +62,11 @@ Exit codes: `0` done (individual post failures are listed in the summary), `1` c
 
 Only one command runs at a time per archive folder; a second one exits with a message instead of overwriting progress.
 
-## Settings (`config.yaml`)
+## Settings (`config.yaml`, copied from `config.example.yaml`)
 
 | Setting | Default | |
 |---|---|---|
-| `base_url` | `https://www.example.com` | |
+| `base_url` | none (required) | the Ghost newsletter site, e.g. `https://www.example.com` |
 | `delay_seconds` | `2` | minimum gap between requests; lower values are refused |
 | `max_retries` | `3` | retries on timeouts, connection errors and 5xx (2s, 4s, 8s); never on 4xx |
 | `timeout_seconds` | `30` | |

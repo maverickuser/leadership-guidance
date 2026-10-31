@@ -90,7 +90,6 @@ BLOCK_TAGS = [
     "section",
 ]
 ARTICLE_TYPES = {"Article", "BlogPosting", "NewsArticle"}
-SITE_SUFFIX = re.compile(r"\s+-\s+Example Newsletter$")
 TRAFILATURA_MIN_RATIO = 0.8
 SUMMARY_MAX_CHARS = 400
 
@@ -356,6 +355,14 @@ def first_sentences(text: str, n: int = 2) -> str:
     return summary
 
 
+def _strip_site_name(title: str, site_name: str | None) -> str:
+    """Drop a trailing " - <site name>" from a <title> (the name comes from og:site_name)."""
+    suffix = f" - {site_name}" if site_name else None
+    if suffix and title.endswith(suffix):
+        return title[: -len(suffix)].strip()
+    return title
+
+
 def extract_metadata(soup: BeautifulSoup, text: str) -> dict[str, Any]:
     ld = _json_ld_article(soup)
     title_tag = _squash(soup.title.get_text()) if soup.title else ""
@@ -364,7 +371,7 @@ def extract_metadata(soup: BeautifulSoup, text: str) -> dict[str, Any]:
         or (_squash(str(ld["headline"])) if ld.get("headline") else None)
         or _text_of(soup, "h1.gh-article-title")
         or _text_of(soup, "h1")
-        or (SITE_SUFFIX.sub("", title_tag) or None)
+        or (_strip_site_name(title_tag, _meta(soup, prop="og:site_name")) or None)
     )
     if not title:
         raise ExtractError("no title found")

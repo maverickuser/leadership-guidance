@@ -160,11 +160,21 @@ def test_metadata_fallbacks():
 def test_title_falls_back_to_title_tag_and_author_to_unknown(caplog):
     html = (
         "<html><head><title>Only Title - Example Newsletter</title>"
+        '<meta property="og:site_name" content="Example Newsletter">'
         '<meta property="article:published_time" content="2024-01-02T00:00:00Z"></head>'
         '<body><article class="gh-article"><section class="gh-content"><p>Hi there.</p></section></article></body></html>'
     )
     e = extract_post(html, f"{BASE}/x")
     assert e.title == "Only Title" and e.author == "Unknown"
+
+
+def test_title_tag_kept_whole_without_a_site_name():
+    html = (
+        "<html><head><title>Plan A - Plan B</title>"
+        '<meta property="article:published_time" content="2024-01-02T00:00:00Z"></head>'
+        '<body><article class="gh-article"><section class="gh-content"><p>Hi there.</p></section></article></body></html>'
+    )
+    assert extract_post(html, f"{BASE}/x").title == "Plan A - Plan B"
 
 
 def test_missing_date_raises():

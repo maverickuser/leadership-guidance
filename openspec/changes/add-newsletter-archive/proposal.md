@@ -1,6 +1,6 @@
 ## Why
 
-The user pays for Example Newsletter and wants every post they can read (free and paid) saved locally as clean, structured JSON, so a later phase can add semantic and keyword search and LLM Q&A over the archive. Today there is no local copy, and the site's pages mix the article with navigation, comments, images and subscribe boxes.
+The user pays for a newsletter and wants every post they can read (free and paid) saved locally as clean, structured JSON, so a later phase can add semantic and keyword search and LLM Q&A over the archive. Today there is no local copy, and the site's pages mix the article with navigation, comments, images and subscribe boxes.
 
 ## What Changes
 

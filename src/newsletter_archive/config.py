@@ -16,7 +16,7 @@ from .errors import ConfigError
 COOKIE_ENV = "NEWSLETTER_COOKIE"
 
 DEFAULTS: dict[str, Any] = {
-    "base_url": "https://www.example.com",
+    "base_url": None,  # required: the newsletter site, set in config.yaml
     "delay_seconds": 2,
     "max_retries": 3,
     "timeout_seconds": 30,
@@ -173,6 +173,10 @@ def load_config(
     if not output_dir.is_absolute():
         output_dir = (base_dir / output_dir).resolve()
 
+    if not values["base_url"]:
+        raise ConfigError(
+            f"base_url is not set; copy config.example.yaml to {path} and set the newsletter's address"
+        )
     try:
         cfg = Config(
             base_url=str(values["base_url"]).rstrip("/"),
