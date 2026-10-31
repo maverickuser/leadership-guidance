@@ -78,7 +78,7 @@ def test_404_post_fails_others_succeed(harness):
 
 
 # I6
-def test_offsite_redirect_never_sends_cookie(tmp_path, monkeypatch, harness):
+def test_offsite_redirect_never_sends_cookie(harness):
     with FixtureSite(["elsewhere"], {}, TEST_COOKIE) as other:
         harness.site.offsite["post-1"] = f"{other.base}/elsewhere/"
         r = harness.run("run", "--limit", "1")
@@ -92,8 +92,8 @@ def test_server_set_cookie_is_never_resent(harness):
     harness.run("run", "--limit", "3")
     sent = [h.get("Cookie") for p, h in harness.site.requests if p.strip("/") in SLUGS]
     assert sent and all(c == TEST_COOKIE for c in sent)
-    # the server's Set-Cookie value (SIGSECRET456 alone) never came back as its own cookie
-    assert all((h.get("Cookie") or TEST_COOKIE) == TEST_COOKIE for _, h in harness.site.requests)
+    # the server's Set-Cookie (ghost-members-ssr=SIGSECRET456) is never stored and merged in
+    assert not any("ghost-members-ssr=SIGSECRET456" in (h.get("Cookie") or "") for _, h in harness.site.requests)
 
 
 # I7

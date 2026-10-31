@@ -66,7 +66,7 @@ Exit codes: `0` done (individual post failures are listed in the summary), `1` c
 | `max_retries` | `3` | retries on timeouts, connection errors and 5xx (2s, 4s, 8s); never on 4xx |
 | `timeout_seconds` | `30` | |
 | `min_word_count` | `300` | posts with fewer words, or with a paywall box in the body, are `partial` |
-| `output_dir` | `../scarlet-ink-archive-data` | relative to `config.yaml`, or an absolute path |
+| `output_dir` | `../scarlet-ink-archive-data` | relative to `config.yaml` (or the current folder if there is none), or an absolute path |
 | `user_agent` | `scarlet-ink-archive/0.1 (...)` | |
 
 ## Output
@@ -112,6 +112,7 @@ Manifest statuses: `discovered → fetched → ok | partial`, or `failed` with `
 
 ```bash
 pytest                 # unit + integration tests; non-local network is blocked
+pytest -m slow         # the real-clock spacing test (CI runs everything)
 python scripts/check_safety.py   # what CI runs to keep secrets and content out of the repo
 ```
 

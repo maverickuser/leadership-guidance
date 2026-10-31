@@ -28,7 +28,6 @@ class Harness:
         self.config.write_text(f"base_url: {site.base}\noutput_dir: data\n", encoding="utf-8")
         (tmp_path / ".env").write_text(f"SCARLETINK_COOKIE={TEST_COOKIE}\n", encoding="utf-8")
         self.clock = FakeClock()
-        self.real_clock = real_clock
 
         def make_client(cfg):
             if real_clock:

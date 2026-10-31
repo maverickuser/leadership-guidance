@@ -12,7 +12,7 @@ from lxml import etree
 
 from .config import Config
 from .errors import ArchiveError, FetchError
-from .http import Client
+from .http import Client, origin
 from .models import Manifest, ManifestEntry
 from .store import save_manifest
 
@@ -31,16 +31,19 @@ MAX_TAG_PAGES = 200
 # -- URLs ------------------------------------------------------------------
 
 
-def _site_host(url: str) -> str:
-    """Host (without a leading www.) plus any explicit port."""
-    parts = urlsplit(url)
-    host = (parts.hostname or "").lower()
-    host = host[4:] if host.startswith("www.") else host
-    return f"{host}:{parts.port}" if parts.port else host
+def _site_key(url: str) -> tuple[str, int] | None:
+    """Host without a leading www., plus the port (defaults filled in). None if malformed."""
+    try:
+        _, host, port = origin(url)
+    except ValueError:
+        return None
+    return (host[4:] if host.startswith("www.") else host), port
 
 
 def same_site(url: str, base_url: str) -> bool:
-    return _site_host(url) == _site_host(base_url)
+    """www and non-www count as one site; fetch always requests through base_url's host."""
+    key = _site_key(url)
+    return key is not None and key == _site_key(base_url)
 
 
 def normalize_url(url: str) -> str:
@@ -52,8 +55,11 @@ def normalize_url(url: str) -> str:
         if not (k.lower().startswith("utm_") or k.lower() in TRACKING_PARAMS)
     ]
     netloc = (parts.hostname or "").lower()
-    if parts.port:
-        netloc += f":{parts.port}"
+    try:
+        if parts.port:
+            netloc += f":{parts.port}"
+    except ValueError:  # malformed port: keep it as written
+        netloc = parts.netloc.lower()
     return urlunsplit((parts.scheme.lower(), netloc, parts.path.rstrip("/"), urlencode(sorted(query)), ""))
 
 

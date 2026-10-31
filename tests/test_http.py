@@ -165,3 +165,9 @@ def test_requests_transport_refuses_to_store_cookies():
     t = RequestsTransport()
     assert t.session.trust_env is False
     assert t.session.cookies.get_policy().allowed_domains() == ()
+
+
+def test_malformed_redirect_is_a_fetch_error(cfg, clock):
+    t = FakeTransport(clock=clock).add(f"{BASE}/a/", ("redirect", "https://www.scarletink.com:99999/x"))
+    with pytest.raises(FetchError, match="malformed redirect"):
+        client(cfg, t, clock).get(f"{BASE}/a/")
