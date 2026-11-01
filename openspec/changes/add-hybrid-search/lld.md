@@ -327,10 +327,10 @@ Phase 1's extractor matched one intro wording and stopped at the first non-match
 
 | Concern | Design |
 |---|---|
-| Model | `search.summaries.model`, a Gemini Flash-class model (exact id pinned in PR 4), via `google-genai` `client.models.generate_content`, temperature 0, max ~400 output tokens. Same `GEMINI_API_KEY`. |
+| Model | `search.summaries.model` = `gemini-3.8-flash` (pinned in PR 4: newest stable Flash on the key, not a "latest" alias), via `client.models.generate_content`, temperature 0, `max_output_tokens` 1,024, `thinking_level` "low" (configurable). **Verified:** at the default thinking level, thinking used 984 of 1,024 output tokens and cut the summary to 32 words (`finish_reason` MAX_TOKENS); at "low" the same post gave 133 words in 3.3 s. A cut-off answer is treated as unusable. Same `GEMINI_API_KEY`. |
 | Input | Post title + cleaned sections (after boilerplate removal). Longest post ~2,600 words (~4k tokens); well inside the context window, no truncation. |
 | Prompt (v1) | "Summarise this newsletter post in 100–150 words using only its content. Name its main argument, the frameworks or models it introduces (with their names), concrete advice, and who it is for. No preamble." `SUMMARY_PROMPT_VERSION = 1`. |
-| Validation | Non-empty, 60–200 words, no refusal text; else one retry, then failure (stage `summarize`). |
+| Validation | Not cut off, non-empty, 60–200 words, no refusal text; else one retry, then failure (stage `summarize`). Checks run inside the client call, so repeated unusable answers open the circuit breaker. Hand check on 3 real posts (PR 4): 131–142 words, accurate, named the frameworks, advice and audience. |
 | Cache | `summary_cache` keyed by sha256(model, prompt version, title, cleaned text). Unchanged posts never re-summarised, even across generations. GC with the embedding cache. |
 | Storage | One row in `passages`: `passage_id = {post_id}#summary`, `kind = 'summary'`, `n = -1`, `heading = null`, `body = summary`, post metadata copied. `posts.summary_sha256` set. |
 | Embedding input | `title: {post title} \| text: Summary\n{summary}` (same model and dimension as passages). |
@@ -562,7 +562,7 @@ Still to verify:
 - `gemini-embedding-2` pricing (check before the first full build in PR 5).
 - `Qwen3-Reranker-0.6B` prompt template and latency on MPS.
 - `mcp` SDK version and structured-output API.
-- Gemini Flash-class model id for summaries, its pricing, rate limits and `generate_content` config fields.
+- Summary model pricing and rate limits for the key's tier (before the first full build in PR 5).
 
 ## 16. PR stack
 

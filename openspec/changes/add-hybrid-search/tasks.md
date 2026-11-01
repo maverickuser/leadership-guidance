@@ -39,10 +39,10 @@
 
 ## 4. Post summarizer (PR 4)
 
-- [ ] 4.1 Pin the Gemini Flash-class model id; verify pricing and `generate_content` config
-- [ ] 4.2 `summaries.py`: prompt v1, temperature 0, output cap, validation (60–200 words), one retry, `summary_cache`
-- [ ] 4.3 Tests with `FakeSummarizer`: cache hit, invalid output retry, failure path, disabled mode
-- [ ] 4.4 Opt-in `api` smoke test: summarise 3 real posts and review the summaries by hand
+- [x] 4.1 Pin the Gemini Flash-class model id; verify pricing and `generate_content` config
+- [x] 4.2 `summaries.py`: prompt v1, temperature 0, output cap, validation (60–200 words), one retry, `summary_cache`
+- [x] 4.3 Tests with `FakeSummarizer`: cache hit, invalid output retry, failure path, disabled mode
+- [x] 4.4 Opt-in `api` smoke test: summarise 3 real posts and review the summaries by hand
 
 ## 5. Indexer (PR 5)
 

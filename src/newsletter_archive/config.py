@@ -69,7 +69,8 @@ class SummaryConfig:
     """Settings for the one-summary-per-post layer (see openspec add-hybrid-search, lld.md 5.10)."""
 
     enabled: bool = True
-    model: str = "gemini-2.5-flash"  # pinned and verified when the summarizer lands
+    model: str = "gemini-3.8-flash"  # pinned in PR 4: newest stable Flash, not a "latest" alias
+    thinking_level: str = "low"  # "" sends no thinking setting (for models without it)
     max_tokens_per_run: int = 1_500_000
 
 
@@ -111,6 +112,7 @@ class SearchConfig:
 SEARCH_FIELDS = {f.name for f in fields(SearchConfig)}
 SUMMARY_FIELDS = {f.name for f in fields(SummaryConfig)}
 BM25_FIELDS = {"heading", "title", "body"}
+THINKING_LEVELS = ("", "minimal", "low", "medium", "high")
 
 
 def _empty_secret() -> Secret:
@@ -291,6 +293,8 @@ def _validate_search(s: SearchConfig) -> None:
         raise ConfigError("search.summaries.max_tokens_per_run must be > 0")
     if s.summaries.enabled and not s.summaries.model:
         raise ConfigError("search.summaries.model must be set when summaries are enabled")
+    if s.summaries.thinking_level.lower() not in THINKING_LEVELS:
+        raise ConfigError("search.summaries.thinking_level must be one of: '', minimal, low, medium, high")
 
 
 def _cookie_is_valid(value: str) -> bool:

@@ -173,6 +173,7 @@ def test_search_overrides_and_nested_sections(tmp_path):
         ("search:\n  summaries: {max_tokens_per_run: 0}\n", "max_tokens_per_run must be > 0"),
         ("search:\n  summaries: {model: ''}\n", "model must be set"),
         ("search:\n  summaries: {model: ~}\n", "summaries.model must not be empty"),
+        ("search:\n  summaries: {thinking_level: extreme}\n", "thinking_level must be one of"),
         ("search:\n  summaries: {max_tokens_per_run: 2.5}\n", "whole number"),
         ("search:\n  summaries: {max_tokens_per_run: true}\n", "must be a int"),
         ("search:\n  db_host: ~\n", "db_host must not be empty"),

@@ -24,7 +24,31 @@ def api_error(code: int, retry_after: str | None = None) -> genai_errors.APIErro
     return cls(code, body, response)
 
 
-class FakeModels:
+GOOD_SUMMARY = " ".join(["The post argues that managers should delegate work and grow their team."] * 9)
+
+
+def generate_response(text: str, finish: str = "STOP", thoughts: int = 5) -> Any:
+    return SimpleNamespace(
+        text=text,
+        candidates=[SimpleNamespace(finish_reason=SimpleNamespace(name=finish))],
+        usage_metadata=SimpleNamespace(
+            prompt_token_count=100, candidates_token_count=50, thoughts_token_count=thoughts
+        ),
+    )
+
+
+class _FakeGenerate:
+    def generate_content(self, model: str, contents: Any, config: Any) -> Any:
+        sdk: FakeSDK = self.sdk  # type: ignore[attr-defined]
+        sdk.calls.append({"model": model, "contents": contents, "config": config})
+        if sdk.script:
+            outcome = sdk.script.pop(0)
+            if isinstance(outcome, BaseException):
+                raise outcome
+        return sdk.answers.pop(0) if sdk.answers else generate_response(GOOD_SUMMARY)
+
+
+class FakeModels(_FakeGenerate):
     def __init__(self, sdk: FakeSDK) -> None:
         self.sdk = sdk
 
@@ -44,8 +68,15 @@ class FakeModels:
 class FakeSDK:
     """Stands in for google.genai.Client. ``script`` holds exceptions to raise on the next calls."""
 
-    def __init__(self, script: Sequence[BaseException] = (), dim: int | None = None, extra_vectors: int = 0):
+    def __init__(
+        self,
+        script: Sequence[BaseException] = (),
+        dim: int | None = None,
+        extra_vectors: int = 0,
+        answers: Sequence[Any] = (),
+    ):
         self.script = list(script)
+        self.answers = list(answers)  # generate_content responses, in order; then GOOD_SUMMARY
         self.calls: list[dict[str, Any]] = []
         self.dim = dim
         self.extra_vectors = extra_vectors
