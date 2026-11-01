@@ -102,6 +102,12 @@ class IndexOptions:
     retry_failed: bool = False
     allow_mass_delete: bool = False
     yes: bool = False
+    # index versions (generations.py)
+    refresh: bool = False  # build a new generation with the configured model
+    no_swap: bool = False  # with refresh: build it but don't make it live
+    swap: bool = False  # make the newest ready generation live
+    rollback: bool = False  # make the previous generation live again
+    force: bool = False  # swap even if the quality gate says the new one is worse
 
 
 @dataclass
@@ -128,6 +134,7 @@ class IndexReport:
     not_attempted: list[str] = field(default_factory=list)  # breaker open: nothing was sent
     breaker_open: bool = False
     build_incomplete: bool = False
+    notes: list[str] = field(default_factory=list)  # e.g. from a swap or rollback
     elapsed_seconds: float = 0.0
     status: str = "ok"
 
@@ -182,6 +189,7 @@ class IndexReport:
             out.append("First build incomplete: it becomes searchable once every post has indexed")
         for post_id in self.stuck:
             out.append(f"Stuck: {post_id} has not indexed in {STUCK_AFTER_RUNS}+ runs")
+        out.extend(self.notes)
         out.append(f"Index status: {self.status} in {self.elapsed_seconds:.1f}s")
         return out
 
@@ -242,7 +250,18 @@ class Indexer:
 
     # -- run ------------------------------------------------------------------------------------
 
-    def run(self, options: IndexOptions) -> IndexReport:
+    def run(
+        self,
+        options: IndexOptions,
+        target: db.Generation | str | None = None,
+        activate_first_build: bool = True,
+    ) -> IndexReport:
+        """Index into the active generation (or start the first build) by default.
+
+        ``target="new"`` builds a fresh generation with the configured model (``--refresh``);
+        a Generation updates that one (catch-up before a swap or rollback). Neither is activated
+        here when ``activate_first_build`` is False: generations.py decides when to swap.
+        """
         started = time.monotonic()
         report = IndexReport()
         with db.index_lock(self.conn):
@@ -250,7 +269,12 @@ class Indexer:
             if not options.dry_run:
                 self._abort_stale_runs()
             loaded = self._load(options.limit, report, record=not options.dry_run)
-            gen, report.mode = self._target()  # nothing is created until the checks below pass
+            if target == "new":
+                gen, report.mode = None, "build"
+            elif isinstance(target, db.Generation):
+                gen, report.mode = target, "incremental"
+            else:
+                gen, report.mode = self._target()  # nothing is created until the checks below pass
             report.generation = gen.generation if gen else 0
             stored = self._stored(gen) if gen else {}
             failures = self._failures()
@@ -285,13 +309,15 @@ class Indexer:
                 self._save_boilerplate(gen, loaded.boilerplate)
                 stored = self._stored(gen)
                 self._verify(gen, loaded, stored, report)
-                if gen.status == "building":
+                if gen.status == "building" and activate_first_build:
                     if self._build_complete(report):
                         db.set_generation_status(self.conn, gen.generation, "ready")
                         db.activate_generation(self.conn, gen.generation)
                         log.info("generation %s is now active", gen.generation)
                     else:
                         report.build_incomplete = True
+                elif gen.status == "building":
+                    report.build_incomplete = not self._build_complete(report)
                 self._freshness(loaded, stored, report)
                 self._gc()
                 problems = report.failed or report.summaries_failed or report.not_attempted
@@ -837,4 +863,20 @@ def index_archive(config: Config, options: IndexOptions, on_post: PostCallback =
         return GeminiSummarizer(client, s.summaries.model, s.summaries.thinking_level)
 
     with db.connect(config, "writer") as conn:
-        return Indexer(config, conn, embedder, summarizer, on_post).run(options)
+        if not (options.refresh or options.swap or options.rollback):
+            return Indexer(config, conn, embedder, summarizer, on_post).run(options)
+        from .generations import Generations
+
+        gens = Generations(config, conn, lambda: Indexer(config, conn, embedder, summarizer, on_post))
+        if options.rollback:
+            result = gens.rollback(options)
+        elif options.swap:
+            result = gens.swap(options, force=options.force)
+        else:
+            result = gens.refresh(options, swap=not options.no_swap, force=options.force)
+        if result.gate:
+            result.report.notes.append(
+                f"Quality gate: candidate recall@10 {result.gate[0]:.1f} vs live {result.gate[1]:.1f}"
+            )
+        result.report.notes.append(result.summary())
+        return result.report

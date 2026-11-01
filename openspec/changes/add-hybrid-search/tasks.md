@@ -55,9 +55,9 @@
 
 ## 6. Generations (PR 6)
 
-- [ ] 6.1 `generations.py`: build beside live, catch-up, verify, quality gate, swap, keep one retired, rollback
-- [ ] 6.2 `--refresh`, `--no-swap`, `--swap`, `--rollback`, `--force`
-- [ ] 6.3 Tests: catch-up before swap, gate blocks, rollback restores and catches up, summaries reused from cache on rebuild
+- [x] 6.1 `generations.py`: build beside live, catch-up, verify, quality gate, swap, keep one retired, rollback
+- [x] 6.2 `--refresh`, `--no-swap`, `--swap`, `--rollback`, `--force`
+- [x] 6.3 Tests: catch-up before swap, gate blocks, rollback restores and catches up, summaries reused from cache on rebuild
 
 ## 7. Retrieval (PR 7)
 

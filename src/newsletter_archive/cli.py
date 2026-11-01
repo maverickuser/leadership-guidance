@@ -208,11 +208,31 @@ def index(
         bool, typer.Option("--allow-mass-delete", help="Allow removing many posts at once.")
     ] = False,
     yes: Annotated[bool, typer.Option("--yes", help="Go ahead even if over the spending ceiling.")] = False,
+    refresh: Annotated[
+        bool, typer.Option("--refresh", help="Build a new index version (e.g. after changing the model).")
+    ] = False,
+    no_swap: Annotated[
+        bool, typer.Option("--no-swap", help="With --refresh: build it but keep using the current one.")
+    ] = False,
+    swap: Annotated[bool, typer.Option("--swap", help="Make the newest built index version live.")] = False,
+    rollback: Annotated[
+        bool, typer.Option("--rollback", help="Go back to the previous index version.")
+    ] = False,
+    force: Annotated[
+        bool, typer.Option("--force", help="Swap even if the quality check says the new version is worse.")
+    ] = False,
     verbose: Verbose = False,
     config: ConfigPath = Path("config.yaml"),
 ) -> None:
     """Build or update the search store from data/posts/ (needs the database and GEMINI_API_KEY)."""
-    options = IndexOptions(limit, dry_run, retry_failed, allow_mass_delete, yes)
+    if sum((refresh, swap, rollback)) > 1 or (no_swap and not refresh):
+        typer.echo(
+            "Error: use one of --refresh, --swap or --rollback (--no-swap only with --refresh)", err=True
+        )
+        raise typer.Exit(1)
+    options = IndexOptions(
+        limit, dry_run, retry_failed, allow_mass_delete, yes, refresh, no_swap, swap, rollback, force
+    )
     _execute(["index"], limit, False, dry_run, verbose, config, options)
 
 
