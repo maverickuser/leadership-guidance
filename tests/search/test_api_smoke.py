@@ -49,4 +49,4 @@ def test_real_embeddings_are_separate_normalised_and_meaningful(live_client):
     assert len(vectors) == 3 and all(v.shape == (3072,) for v in vectors)
     assert all(abs(float(np.linalg.norm(v)) - 1) < 1e-3 for v in vectors)
     assert float(vectors[2] @ vectors[0]) > float(vectors[2] @ vectors[1])
-    assert live_client.stats.calls == 2
+    assert live_client.stats.calls - live_client.stats.retries == 2

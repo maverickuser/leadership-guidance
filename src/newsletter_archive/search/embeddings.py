@@ -2,8 +2,8 @@
 
 Verified against the API (PR 3): each text must be its own ``Content`` (a plain list of strings
 is embedded as ONE input); at most 100 texts per request; vectors come back L2-normalised;
-over-long input is silently truncated and the Developer API can't turn that off, so inputs are
-checked here before sending (and chunking keeps passages under 2,000 tokens).
+over-long input is silently truncated and the Developer API can't turn that off, so every input
+is capped at ``MAX_EMBED_CHARS`` characters before sending (chunking keeps passages under it).
 
 The model takes no task type: the task goes in the text (``EMBED_INPUT_VERSION``).
 """
@@ -12,7 +12,6 @@ from __future__ import annotations
 
 import hashlib
 import logging
-import math
 from collections.abc import Sequence
 from dataclasses import dataclass, field
 from functools import partial
@@ -22,18 +21,20 @@ import numpy as np
 import psycopg
 from pgvector.psycopg import register_vector
 
-from .gemini import GeminiClient, GeminiError
+from .gemini import GeminiClient, GeminiError, GeminiResponseError
+from .text import MAX_EMBED_CHARS, estimate_tokens
 
 log = logging.getLogger("newsletter_archive.search.embeddings")
 
 MAX_BATCH = 100  # API limit per request
-MAX_INPUT_TOKENS = 8192  # model input limit
-INPUT_TOKEN_MARGIN = 0.9  # refuse well before the limit, since our count is an estimate
-CHARS_PER_TOKEN = 4
 
 
 class EmbeddingError(GeminiError):
-    """Embedding failed or returned something unusable."""
+    """An input can't be embedded safely."""
+
+
+class EmbeddingResponseError(GeminiResponseError, EmbeddingError):
+    """The API returned embeddings we can't use."""
 
 
 # --- input formats (EMBED_INPUT_VERSION = 1) ---------------------------------------------------
@@ -52,8 +53,16 @@ def query_input(query: str) -> str:
     return f"task: search result | query: {query}"
 
 
-def estimate_tokens(text: str) -> int:
-    return max(1, math.ceil(len(text) / CHARS_PER_TOKEN))
+def check_input(text: str) -> None:
+    """Raise EmbeddingError for an input the API would reject or silently truncate. The indexer
+    calls this per post first, so one bad input fails only its post."""
+    if not text.strip():
+        raise EmbeddingError("empty embedding input")
+    if len(text) > MAX_EMBED_CHARS:
+        raise EmbeddingError(
+            f"embedding input is {len(text)} characters, over the {MAX_EMBED_CHARS}-character cap; "
+            "it would be truncated, so it was not sent"
+        )
 
 
 def text_key(text: str) -> str:
@@ -65,12 +74,12 @@ def validate_vector(values: Sequence[float], dim: int) -> np.ndarray:
     """Exactly ``dim`` finite values with a non-zero length; returned L2-normalised float32."""
     vec = np.asarray(values, dtype=np.float32)
     if vec.shape != (dim,):
-        raise EmbeddingError(f"embedding has {vec.size} values, expected {dim}")
+        raise EmbeddingResponseError(f"embedding has {vec.size} values, expected {dim}")
     if not np.all(np.isfinite(vec)):
-        raise EmbeddingError("embedding contains non-finite values")
+        raise EmbeddingResponseError("embedding contains non-finite values")
     norm = float(np.linalg.norm(vec))
     if norm == 0.0:
-        raise EmbeddingError("embedding is all zeros")
+        raise EmbeddingResponseError("embedding is all zeros")
     normalised: np.ndarray = (vec / norm).astype(np.float32)
     return normalised
 
@@ -78,6 +87,7 @@ def validate_vector(values: Sequence[float], dim: int) -> np.ndarray:
 class Embedder(Protocol):
     model: str
     dim: int
+    batch_size: int
 
     def embed(self, texts: Sequence[str]) -> list[np.ndarray]: ...
 
@@ -93,24 +103,25 @@ class GeminiEmbedder:
         self.batch_size = max(1, min(self.batch_size, MAX_BATCH))
 
     def embed(self, texts: Sequence[str]) -> list[np.ndarray]:
-        """Embed texts in order, in batches. Raises EmbeddingError for an input that is too long
-        (never sent) or an unusable response; Gemini errors propagate (see GeminiClient)."""
-        limit = int(MAX_INPUT_TOKENS * INPUT_TOKEN_MARGIN)
-        for i, text in enumerate(texts):
-            if estimate_tokens(text) > limit:
-                raise EmbeddingError(
-                    f"input {i} is ~{estimate_tokens(text)} tokens, over the {limit}-token limit; "
-                    "it would be truncated, so it was not sent"
-                )
+        """Embed texts in order, in batches. Raises EmbeddingError for an unsafe input (nothing
+        is sent) or an unusable response (counted by the circuit breaker); Gemini errors
+        propagate (see GeminiClient)."""
+        for text in texts:
+            check_input(text)
         out: list[np.ndarray] = []
         for start in range(0, len(texts), self.batch_size):
             batch = list(texts[start : start + self.batch_size])
             tokens = sum(estimate_tokens(t) for t in batch)
-            response = self.client.call(partial(self._request, batch=batch), tokens, "embedding")
-            embeddings = getattr(response, "embeddings", None) or []
-            if len(embeddings) != len(batch):
-                raise EmbeddingError(f"asked for {len(batch)} embeddings, got {len(embeddings)}")
-            out.extend(validate_vector(e.values, self.dim) for e in embeddings)
+            vectors: list[np.ndarray] = []
+
+            def check(response: Any, batch: list[str] = batch, vectors: list[np.ndarray] = vectors) -> None:
+                embeddings = getattr(response, "embeddings", None) or []
+                if len(embeddings) != len(batch):
+                    raise EmbeddingResponseError(f"asked for {len(batch)} embeddings, got {len(embeddings)}")
+                vectors.extend(validate_vector(e.values, self.dim) for e in embeddings)
+
+            self.client.call(partial(self._request, batch=batch), tokens, "embedding", check)
+            out.extend(vectors)
         return out
 
     def _request(self, sdk: Any, batch: list[str]) -> Any:
@@ -149,6 +160,17 @@ class EmbeddingCache:
         ).fetchall()
         return {k: _to_array(v) for k, v in rows}
 
+    def has_many(self, keys: Sequence[str]) -> set[str]:
+        """Which keys are cached. Read-only (doesn't touch ``last_used_at``)."""
+        if not keys:
+            return set()
+        rows = self.conn.execute(
+            "SELECT embed_sha256 FROM public.embedding_cache "
+            "WHERE model = %s AND dim = %s AND embed_sha256 = ANY(%s)",
+            (self.model, self.dim, list(keys)),
+        ).fetchall()
+        return {r[0] for r in rows}
+
     def put_many(self, vectors: dict[str, np.ndarray]) -> None:
         if not vectors:
             return
@@ -186,17 +208,22 @@ class CachedEmbedder:
             if key not in found and key not in missing:
                 missing[key] = text
         self.stats.cache_hits += len(texts) - len(missing)  # inputs served without an API call
-        if missing:
-            vectors = self.embedder.embed(list(missing.values()))
-            new = dict(zip(missing, vectors, strict=True))
+        todo = list(missing.items())
+        step = max(1, getattr(self.embedder, "batch_size", MAX_BATCH))
+        for start in range(0, len(todo), step):
+            # Cache each batch as soon as it's back: a later failure never wastes paid work.
+            chunk = todo[start : start + step]
+            vectors = self.embedder.embed([t for _, t in chunk])
+            new = {k: v for (k, _), v in zip(chunk, vectors, strict=True)}
             self.cache.put_many(new)
             found.update(new)
-            self.stats.embedded += len(missing)
-            self.stats.tokens += sum(estimate_tokens(t) for t in missing.values())
+            self.stats.embedded += len(chunk)
+            self.stats.tokens += sum(estimate_tokens(t) for _, t in chunk)
         return [found[k] for k in keys]
 
     def missing_tokens(self, texts: Sequence[str]) -> int:
-        """Estimated tokens to embed the texts not yet cached (for the spending ceiling)."""
+        """Estimated tokens to embed the texts not yet cached (for the spending ceiling).
+        Read-only, so a dry run changes nothing."""
         unique = {text_key(t): t for t in texts}
-        cached = self.cache.get_many(sorted(unique))
+        cached = self.cache.has_many(sorted(unique))
         return sum(estimate_tokens(t) for k, t in unique.items() if k not in cached)

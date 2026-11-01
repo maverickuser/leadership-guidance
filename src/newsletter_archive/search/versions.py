@@ -6,6 +6,6 @@ the post fingerprint, so a bump re-indexes exactly the posts it affects.
 
 from __future__ import annotations
 
-CHUNKER_VERSION = 1  # search/chunking.py and search/sentences.py
+CHUNKER_VERSION = 2  # search/chunking.py and search/sentences.py (2: 7,000-character passage cap)
 EMBED_INPUT_VERSION = 1  # the text sent to the embedding model for passages and summaries
 SUMMARY_PROMPT_VERSION = 1  # the prompt that writes post summaries

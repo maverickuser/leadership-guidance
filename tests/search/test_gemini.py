@@ -34,8 +34,8 @@ def make_client(sdk, clock=None, **kw):
     clock = clock or Clock()
     seen = {}
 
-    def factory(key):
-        seen["key"] = key
+    def factory(key, timeout):
+        seen["key"], seen["timeout"] = key, timeout
         return sdk
 
     client = GeminiClient(
@@ -80,7 +80,7 @@ def test_sdk_built_lazily_with_the_key():
     client, _, seen = make_client(sdk)
     assert seen == {}
     client.call(embed_call, 1)
-    assert seen["key"] == TEST_GEMINI_KEY
+    assert seen == {"key": TEST_GEMINI_KEY, "timeout": gemini.DEFAULT_TIMEOUT_SECONDS}
 
 
 def test_missing_key():
@@ -121,14 +121,33 @@ def test_auth_errors_are_not_retried(code):
     assert clock.sleeps == [] and TEST_GEMINI_KEY not in str(exc.value)
 
 
-def test_invalid_requests_are_not_retried():
-    sdk = FakeSDK([api_error(400)])
-    client, clock, _ = make_client(sdk)
-    with pytest.raises(GeminiRequestError, match="HTTP 400: fake 400"):
-        client.call(embed_call, 1, "embedding")
-    assert clock.sleeps == []
-    with pytest.raises(GeminiRequestError, match="ValueError"):
-        make_client(FakeSDK([ValueError()]))[0].call(embed_call, 1)
+def test_invalid_requests_are_not_retried_and_dont_trip_the_breaker():
+    sdk = FakeSDK([api_error(400)] * 5)
+    client, clock, _ = make_client(sdk, breaker_failures=3)
+    for _ in range(5):
+        with pytest.raises(GeminiRequestError, match="HTTP 400: fake 400"):
+            client.call(embed_call, 1, "embedding")
+    assert clock.sleeps == [] and not client.circuit_open
+
+
+def test_programming_errors_propagate_unchanged():
+    client, _, _ = make_client(FakeSDK([ValueError("bug")]))
+    with pytest.raises(ValueError, match="bug"):
+        client.call(embed_call, 1)
+    assert not client.circuit_open and client.stats.failures == 0
+
+
+def test_unusable_responses_count_toward_the_breaker():
+    client, _, _ = make_client(FakeSDK(), breaker_failures=2)
+
+    def bad(_result):
+        raise gemini.GeminiResponseError("bad shape")
+
+    for _ in range(2):
+        with pytest.raises(gemini.GeminiResponseError):
+            client.call(embed_call, 1, check=bad)
+    with pytest.raises(CircuitOpenError):
+        client.call(embed_call, 1)
 
 
 # spec: search-indexing / Embedding API use / Outage
@@ -146,10 +165,10 @@ def test_circuit_breaker_opens_after_three_failed_calls():
 
 
 def test_success_resets_the_breaker():
-    sdk = FakeSDK([api_error(400), api_error(400)])
+    sdk = FakeSDK([api_error(500)] * 10)
     client, _, _ = make_client(sdk, breaker_failures=3)
     for _ in range(2):
-        with pytest.raises(GeminiRequestError):
+        with pytest.raises(GeminiUnavailableError):
             client.call(embed_call, 1)
     client.call(embed_call, 1)
     assert not client.circuit_open and client.stats.failures == 2

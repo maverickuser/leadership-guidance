@@ -5,8 +5,14 @@
 - Retries: rate limits (429), server errors (5xx), timeouts and connection errors are retried
   after 2, 4, 8, 16 s (with jitter, or the server's Retry-After). Authentication and invalid
   requests are not retried.
-- Circuit breaker: after ``breaker_failures`` calls in a row fail even after retries, no more
-  calls are made in this run (CircuitOpenError), so an outage can't burn time or money.
+- Timeout: every request has one (``timeout_seconds``); a stalled request counts as a timeout
+  and is retried.
+- Circuit breaker: after ``breaker_failures`` calls in a row fail even after retries (or return
+  an unusable response), no more calls are made in this run (CircuitOpenError), so an outage
+  can't burn time or money. An invalid request (HTTP 400/404) is about that input, not the
+  service, so it doesn't count.
+- Only API and network errors are handled here; anything else (a bug, an SDK change) propagates
+  unchanged with its traceback.
 
 The API key is held in a Secret and handed only to the SDK; it never appears in messages.
 """
@@ -33,6 +39,8 @@ T = TypeVar("T")
 RETRY_DELAYS_SECONDS: tuple[float, ...] = (2, 4, 8, 16)
 MAX_RETRY_AFTER_SECONDS = 60.0
 RETRYABLE_STATUS = frozenset({408, 429, 500, 502, 503, 504})
+DEFAULT_TIMEOUT_SECONDS = 60.0
+_HANDLED = (genai_errors.APIError, httpx.HTTPError, TimeoutError, ConnectionError)
 AUTH_STATUS = frozenset({401, 403})
 
 
@@ -56,6 +64,10 @@ class GeminiRequestError(GeminiError):
 
 class GeminiUnavailableError(GeminiError):
     """Still failing after every retry."""
+
+
+class GeminiResponseError(GeminiError):
+    """The call succeeded but the response is unusable (wrong size, missing values…)."""
 
 
 class CircuitOpenError(GeminiError):
@@ -150,7 +162,8 @@ class GeminiClient:
     rpm: int
     tpm: int
     breaker_failures: int = 3
-    sdk_factory: Callable[[str], Any] | None = None
+    timeout_seconds: float = DEFAULT_TIMEOUT_SECONDS
+    sdk_factory: Callable[[str, float], Any] | None = None
     sleep: Callable[[float], None] = time.sleep
     clock: Callable[[], float] = time.monotonic
     jitter: Callable[[], float] = random.random
@@ -168,20 +181,28 @@ class GeminiClient:
     def sdk(self) -> Any:
         if self._sdk is None:
             factory = self.sdk_factory or _default_sdk
-            self._sdk = factory(self.api_key.reveal())
+            self._sdk = factory(self.api_key.reveal(), self.timeout_seconds)
         return self._sdk
 
     @property
     def circuit_open(self) -> bool:
         return self._consecutive_failures >= self.breaker_failures
 
-    def call(self, fn: Callable[[Any], T], tokens: int, what: str = "call") -> T:
-        """Run ``fn(sdk)`` with pacing, retries and the circuit breaker.
+    def call(
+        self,
+        fn: Callable[[Any], T],
+        tokens: int,
+        what: str = "call",
+        check: Callable[[T], object] | None = None,
+    ) -> T:
+        """Run ``fn(sdk)`` with pacing, retries and the circuit breaker. ``check(result)`` may
+        raise GeminiResponseError for an unusable response, which counts as a failed call.
 
         Raises:
             CircuitOpenError: too many calls in a row have failed in this run.
             GeminiAuthError, GeminiRequestError: not retried.
             GeminiUnavailableError: still failing after every retry.
+            GeminiResponseError: from ``check``.
         """
         if self.circuit_open:
             raise CircuitOpenError(self._consecutive_failures)
@@ -191,12 +212,11 @@ class GeminiClient:
             self.stats.calls += 1
             try:
                 result = fn(self.sdk)
-            except Exception as e:
+            except _HANDLED as e:
                 status = _status(e)
                 if status in AUTH_STATUS:
                     raise GeminiAuthError(status or 0) from None
                 if not is_retryable(e):
-                    self._fail()
                     raise GeminiRequestError(f"Gemini {what} failed: {_describe(e)}") from None
                 if attempt >= len(RETRY_DELAYS_SECONDS):
                     self._fail()
@@ -211,8 +231,14 @@ class GeminiClient:
                 self.sleep(delay)
                 attempt += 1
                 continue
-            self._consecutive_failures = 0
             self.stats.tokens += tokens
+            if check is not None:
+                try:
+                    check(result)
+                except GeminiResponseError:
+                    self._fail()
+                    raise
+            self._consecutive_failures = 0
             return result
 
     def _fail(self) -> None:
@@ -224,7 +250,8 @@ class GeminiClient:
             )
 
 
-def _default_sdk(api_key: str) -> Any:  # pragma: no cover - the real SDK; smoke-tested with -m api
+def _default_sdk(api_key: str, timeout_seconds: float) -> Any:  # pragma: no cover - smoke-tested (-m api)
     from google import genai
+    from google.genai import types
 
-    return genai.Client(api_key=api_key)
+    return genai.Client(api_key=api_key, http_options=types.HttpOptions(timeout=int(timeout_seconds * 1000)))

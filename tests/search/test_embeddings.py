@@ -4,14 +4,16 @@ import pytest
 from newsletter_archive.search.embeddings import (
     MAX_BATCH,
     EmbeddingError,
+    EmbeddingResponseError,
     GeminiEmbedder,
-    estimate_tokens,
+    check_input,
     passage_input,
     query_input,
     summary_input,
     text_key,
     validate_vector,
 )
+from newsletter_archive.search.text import MAX_EMBED_CHARS, estimate_tokens
 
 from .fakes import FakeSDK
 from .test_gemini import make_client
@@ -30,7 +32,7 @@ def test_validate_vector():
     v = validate_vector([3.0, 4.0], 2)
     assert v.dtype == np.float32 and np.allclose(v, [0.6, 0.8])
     for bad, msg in (([1.0], "1 values, expected 2"), ([np.nan, 1], "non-finite"), ([0, 0], "all zeros")):
-        with pytest.raises(EmbeddingError, match=msg):
+        with pytest.raises(EmbeddingResponseError, match=msg):
             validate_vector(bad, 2)
 
 
@@ -50,18 +52,23 @@ def test_batches_each_text_as_its_own_content():
     assert emb.embed([]) == []
 
 
-def test_too_long_input_is_never_sent():
+def test_unsafe_inputs_are_never_sent():
     sdk = FakeSDK()
     client, _, _ = make_client(sdk)
     with pytest.raises(EmbeddingError, match="not sent"):
-        GeminiEmbedder(client, "m", 4).embed(["ok", "x" * 40_000])
+        GeminiEmbedder(client, "m", 4).embed(["ok", "x" * (MAX_EMBED_CHARS + 1)])
+    with pytest.raises(EmbeddingError, match="empty"):
+        GeminiEmbedder(client, "m", 4).embed(["ok", "  "])
     assert sdk.calls == []
+    check_input("x" * MAX_EMBED_CHARS)  # exactly at the cap is fine
 
 
-def test_wrong_count_or_size_fails_the_batch():
+def test_wrong_count_or_size_fails_the_batch_and_counts_as_a_failure():
     client, _, _ = make_client(FakeSDK(extra_vectors=1))
-    with pytest.raises(EmbeddingError, match="asked for 1 embeddings, got 2"):
+    with pytest.raises(EmbeddingResponseError, match="asked for 1 embeddings, got 2"):
         GeminiEmbedder(client, "m", 4).embed(["a"])
-    client, _, _ = make_client(FakeSDK(dim=3))
-    with pytest.raises(EmbeddingError, match="3 values, expected 4"):
+    assert client.stats.failures == 1
+    client, _, _ = make_client(FakeSDK(dim=3), breaker_failures=1)
+    with pytest.raises(EmbeddingResponseError, match="3 values, expected 4"):
         GeminiEmbedder(client, "m", 4).embed(["a"])
+    assert client.circuit_open

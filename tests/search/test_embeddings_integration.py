@@ -39,9 +39,22 @@ def test_identical_text_is_never_embedded_twice(conn):
     second = embedder.embed(["b", "a", "c"])
     assert fake.batches == [["a", "b"], ["c"]]
     assert np.allclose(second[1], first[0])
+    assert embedder.cache.has_many([text_key("a"), text_key("zz")]) == {text_key("a")}
+    assert embedder.cache.has_many([]) == set()
     s = embedder.stats
     assert (s.requested, s.cache_hits, s.embedded, s.tokens) == (6, 3, 3, 3)
     row = conn.execute(
         "SELECT count(*) FROM embedding_cache WHERE embed_sha256 = %s", (text_key("a"),)
     ).fetchone()
     assert row == (1,)
+
+
+def test_finished_batches_are_cached_when_a_later_one_fails(conn):
+    fake = FakeEmbedder(dim=4, batch_size=2, fail_on_batch=2)
+    embedder = CachedEmbedder(fake, EmbeddingCache(conn, fake.model, fake.dim))
+    with pytest.raises(RuntimeError):
+        embedder.embed(["a", "b", "c", "d"])
+    assert embedder.cache.has_many([text_key(t) for t in "abcd"]) == {text_key("a"), text_key("b")}
+    fake.fail_on_batch = None
+    embedder.embed(["a", "b", "c", "d"])
+    assert fake.batches[-1] == ["c", "d"]  # only the unfinished batch is sent again

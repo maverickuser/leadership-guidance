@@ -2,8 +2,17 @@
 
 from __future__ import annotations
 
+import math
 import re
 import unicodedata
+
+CHARS_PER_TOKEN = 4  # rough English average: for pacing and cost estimates only
+# Hard cap on one embedding input. The model takes 8,192 tokens and truncates silently beyond
+# that; 8,000 characters stays under the limit even at one character per token.
+MAX_EMBED_CHARS = 8000
+# Room left in each embedding input for "title: … | text: heading\n" around the passage body.
+EMBED_PREFIX_CHARS = 1000
+MAX_PASSAGE_CHARS = MAX_EMBED_CHARS - EMBED_PREFIX_CHARS
 
 _PUNCT_RE = re.compile(r"[^\w\s]", re.UNICODE)
 _PARA_SPLIT_RE = re.compile(r"\n\s*\n")
@@ -41,3 +50,8 @@ def paragraphs(text: str) -> list[str]:
 def normalize_for_matching(text: str) -> str:
     """Lowercase, accent-free, punctuation-free, single-spaced: for duplicate detection."""
     return squash(_PUNCT_RE.sub(" ", fold(text).lower()))
+
+
+def estimate_tokens(text: str) -> int:
+    """Rough token count for pacing and cost; never used to decide whether text fits."""
+    return max(1, math.ceil(len(text) / CHARS_PER_TOKEN))

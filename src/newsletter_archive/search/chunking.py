@@ -7,8 +7,9 @@
    by words.
 3. Each window after the first starts with the previous window's trailing whole sentences,
    up to ``overlap_words`` words, so an idea cut at a boundary appears in both passages.
-4. A passage over ``MAX_PASSAGE_TOKENS`` estimated tokens (characters / 4, e.g. long URLs) is
-   split again by words, so nothing is ever truncated by the embedding API.
+4. A passage over ``MAX_PASSAGE_CHARS`` characters (e.g. a pasted long URL) is split again by
+   words, so with its title and heading it always fits one embedding input (``MAX_EMBED_CHARS``)
+   and is never truncated by the API.
 
 Any change to the output for the same input must bump ``CHUNKER_VERSION``
 (``search/versions.py``); golden tests enforce this.
@@ -21,11 +22,9 @@ from dataclasses import dataclass
 
 from .models import Section
 from .sentences import split_sentences
-from .text import paragraphs, word_count, words
+from .text import MAX_PASSAGE_CHARS, paragraphs, word_count, words
 
 MIN_SECTION_WORDS = 40
-MAX_PASSAGE_TOKENS = 2000
-CHARS_PER_TOKEN = 4
 
 
 @dataclass(frozen=True)
@@ -145,11 +144,10 @@ def _pack(section_text: str, limit: int, overlap_words: int) -> list[tuple[list[
 _TOKEN_RE = re.compile(r"\S+|\s+")
 
 
-def _token_guard(text: str, max_tokens: int = MAX_PASSAGE_TOKENS) -> list[str]:
+def _token_guard(text: str, limit: int = MAX_PASSAGE_CHARS) -> list[str]:
     """Split text that is over the token estimate (e.g. a pasted long URL): words are packed
     greedily up to the character limit, only a word that is itself over the limit is cut, and
     whitespace (including paragraph breaks) inside each part is kept."""
-    limit = max_tokens * CHARS_PER_TOKEN
     if len(text) <= limit:
         return [text]
     parts: list[str] = []

@@ -55,13 +55,17 @@ class FakeSDK:
 class FakeEmbedder:
     """Deterministic vectors; records every batch it is asked to embed."""
 
-    def __init__(self, model: str = "fake-model", dim: int = 8) -> None:
+    def __init__(self, model: str = "fake-model", dim: int = 8, batch_size: int = 50, fail_on_batch=None):
         self.model = model
         self.dim = dim
+        self.batch_size = batch_size
         self.batches: list[list[str]] = []
+        self.fail_on_batch = fail_on_batch  # 1-based batch number that raises
 
     def embed(self, texts: Sequence[str]) -> list[np.ndarray]:
         self.batches.append(list(texts))
+        if self.fail_on_batch == len(self.batches):
+            raise RuntimeError("batch failed")
         out = []
         for t in texts:
             v = np.asarray(fake_vector(t, self.dim), dtype=np.float32)
