@@ -33,9 +33,9 @@
 
 ## 3. Gemini client and embedder (PR 3)
 
-- [ ] 3.1 `gemini.py`: client from `GEMINI_API_KEY`, token-bucket pacing, retries with backoff and `Retry-After`, no retry on 400/401/403, circuit breaker
-- [ ] 3.2 `embeddings.py`: passage, summary and query input formats; batching; response validation and normalisation; truncation disabled; embedding cache
-- [ ] 3.3 Verify `gemini-embedding-2` batch limit, truncation flag, normalisation; opt-in `api` smoke test
+- [x] 3.1 `gemini.py`: client from `GEMINI_API_KEY`, token-bucket pacing, retries with backoff and `Retry-After`, no retry on 400/401/403, circuit breaker
+- [x] 3.2 `embeddings.py`: passage, summary and query input formats; batching; response validation and normalisation; truncation disabled; embedding cache
+- [x] 3.3 Verify `gemini-embedding-2` batch limit, truncation flag, normalisation; opt-in `api` smoke test
 
 ## 4. Post summarizer (PR 4)
 
