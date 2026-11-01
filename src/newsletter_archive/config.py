@@ -241,9 +241,12 @@ def _parse_search(raw: Any, env_port: str | None = None) -> SearchConfig:
         values[name] = _coerce(f"search.{name}", value, getattr(defaults, name))
     if summaries is not None:
         sv = _section("search.summaries", summaries, defaults.summaries, SUMMARY_FIELDS)
-        values["summaries"] = SummaryConfig(
-            **{k: _coerce(f"search.summaries.{k}", v, getattr(defaults.summaries, k)) for k, v in sv.items()}
-        )
+        parsed = {
+            k: _coerce(f"search.summaries.{k}", v, getattr(defaults.summaries, k)) for k, v in sv.items()
+        }
+        if "thinking_level" in parsed:
+            parsed["thinking_level"] = parsed["thinking_level"].strip().lower()
+        values["summaries"] = SummaryConfig(**parsed)
     if boosts is not None:
         if not isinstance(boosts, dict) or set(boosts) - BM25_FIELDS:
             raise ConfigError("search.bm25_boosts must map heading, title and body to numbers")
@@ -293,7 +296,7 @@ def _validate_search(s: SearchConfig) -> None:
         raise ConfigError("search.summaries.max_tokens_per_run must be > 0")
     if s.summaries.enabled and not s.summaries.model:
         raise ConfigError("search.summaries.model must be set when summaries are enabled")
-    if s.summaries.thinking_level.lower() not in THINKING_LEVELS:
+    if s.summaries.thinking_level not in THINKING_LEVELS:
         raise ConfigError("search.summaries.thinking_level must be one of: '', minimal, low, medium, high")
 
 

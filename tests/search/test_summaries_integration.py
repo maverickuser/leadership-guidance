@@ -2,7 +2,7 @@ import pytest
 
 from newsletter_archive.search import db
 from newsletter_archive.search.models import Section
-from newsletter_archive.search.summaries import CachedSummarizer, Summary, SummaryCache, summary_key
+from newsletter_archive.search.summaries import CachedSummarizer, Summary, SummaryCache
 
 pytestmark = pytest.mark.db
 
@@ -11,13 +11,14 @@ SECTIONS = [Section(None, "Intro text."), Section("Why", "Body text.")]
 
 class FakeSummarizer:
     model = "fake-model"
+    thinking_level = "low"
 
     def __init__(self) -> None:
         self.calls: list[str] = []
 
     def summarize(self, title, sections):
         self.calls.append(title)
-        return Summary(f"Summary of {title}.", 100, 20)
+        return Summary(f"Summary of {title}.", 100, 20 * len(self.calls))
 
 
 @pytest.fixture
@@ -29,20 +30,40 @@ def conn(db_config):
 
 def test_cache_round_trip(conn):
     cache = SummaryCache(conn)
-    assert cache.get("k") is None and not cache.has("k")
+    assert cache.get("k") is None and cache.has_many(["k"]) == set() and cache.has_many([]) == set()
     cache.put("k", "m", Summary("first", 1, 2))
-    cache.put("k", "m", Summary("second", 1, 2))
-    assert cache.get("k") == "second" and cache.has("k")
+    cache.put("k", "m2", Summary("second", 3, 4))
+    assert cache.get("k") == "second" and cache.has_many(["k", "x"]) == {"k"}
+    row = conn.execute("SELECT model, input_tokens, output_tokens FROM summary_cache").fetchone()
+    assert row == ("m2", 3, 4)
+
+
+def test_reads_dont_write_and_flush_touches_once(conn):
+    cache = SummaryCache(conn)
+    cache.put("k", "m", Summary("text", 1, 2))
+    conn.execute("UPDATE summary_cache SET last_used_at = now() - interval '10 days'")
+    s = CachedSummarizer(FakeSummarizer(), cache)
+    s._hits.append("k")
+    assert cache.get("k") == "text"
+    old = conn.execute("SELECT last_used_at < now() - interval '9 days' FROM summary_cache").fetchone()
+    assert old == (True,)
+    s.flush()
+    fresh = conn.execute("SELECT last_used_at > now() - interval '1 minute' FROM summary_cache").fetchone()
+    assert fresh == (True,) and s._hits == []
+    cache.touch([])
 
 
 # spec: search-indexing / Post summaries / Unchanged post
 def test_unchanged_post_is_never_summarised_twice(conn):
     fake = FakeSummarizer()
     s = CachedSummarizer(fake, SummaryCache(conn))
-    assert s.missing_tokens([("A", SECTIONS), ("B", SECTIONS)]) > 0
-    assert s.summarize("A", SECTIONS) == "Summary of A."
-    assert s.summarize("A", SECTIONS) == "Summary of A."
-    assert s.summarize("A", [Section(None, "Edited.")]) == "Summary of A."
+    assert s.missing_tokens([("A", SECTIONS), ("A", SECTIONS), ("B", SECTIONS)]) == 2 * s.missing_tokens(
+        [("A", SECTIONS)]
+    )
+    text, key = s.summarize("A", SECTIONS)
+    assert text == "Summary of A." and key == s.key("A", SECTIONS)
+    assert s.summarize("A", SECTIONS)[0] == "Summary of A."
+    s.summarize("A", [Section(None, "Edited.")])
     assert fake.calls == ["A", "A"]  # the edit regenerated it; the repeat didn't
     assert s.missing_tokens([("A", SECTIONS)]) == 0
     st = s.stats
@@ -51,10 +72,5 @@ def test_unchanged_post_is_never_summarised_twice(conn):
         1,
         2,
         200,
-        40,
+        60,
     )
-    row = conn.execute(
-        "SELECT model, prompt_version, input_tokens FROM summary_cache WHERE summary_sha256 = %s",
-        (summary_key("fake-model", "A", SECTIONS),),
-    ).fetchone()
-    assert row == ("fake-model", 1, 100)

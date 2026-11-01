@@ -38,7 +38,11 @@ def fingerprint_payload(
         "chunk_overlap_words": search.chunk_overlap_words,
         "embed_input_version": EMBED_INPUT_VERSION,
         "summaries": (
-            {"model": summaries.model, "prompt_version": SUMMARY_PROMPT_VERSION}
+            {
+                "model": summaries.model,
+                "thinking_level": summaries.thinking_level,
+                "prompt_version": SUMMARY_PROMPT_VERSION,
+            }
             if summaries.enabled
             else None
         ),

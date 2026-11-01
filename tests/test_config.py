@@ -228,3 +228,8 @@ def test_boilerplate_prefixes(tmp_path):
         p = write(tmp_path / "config.yaml", bad)
         with pytest.raises(ConfigError, match="boilerplate_prefixes"):
             load_config(p, tmp_path / ".env")
+
+
+def test_thinking_level_is_normalised(tmp_path):
+    p = write(tmp_path / "config.yaml", "search:\n  summaries: {thinking_level: ' Low '}\n")
+    assert load_config(p, tmp_path / ".env").search.summaries.thinking_level == "low"
