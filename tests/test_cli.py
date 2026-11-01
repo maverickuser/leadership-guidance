@@ -182,3 +182,27 @@ def test_stuck_posts_exit_3_in_run(env):
     env.index_result = IndexReport(stuck=["p1"], status="partial")
     assert env.run("run", "--limit", "1").exit_code == 3
     assert env.run("index").exit_code == 0  # the index command itself only reports it
+
+
+def test_unexpected_index_errors_exit_3_in_run(env):
+    import psycopg
+
+    env.index_result = psycopg.OperationalError("server closed the connection")
+    r = env.run("run", "--limit", "1")
+    assert r.exit_code == 3 and "search.enabled: false" in r.output
+    env.index_result = RuntimeError("bug")
+    assert env.run("run", "--limit", "1").exit_code == 3
+    assert env.run("index").exit_code == 1  # alone, an unexpected error is a plain failure
+
+
+def test_outage_exits_3_in_run(env):
+    from newsletter_archive.search.indexer import IndexReport
+
+    env.index_result = IndexReport(breaker_open=True, status="partial")
+    assert env.run("run", "--limit", "1").exit_code == 3
+
+
+def test_search_can_be_turned_off_for_run(env):
+    env.config.write_text(env.config.read_text() + "search:\n  enabled: false\n", encoding="utf-8")
+    r = env.run("run", "--limit", "1")
+    assert r.exit_code == 0 and env.index_calls == [] and "Search is turned off" in r.output

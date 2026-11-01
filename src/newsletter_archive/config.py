@@ -78,6 +78,7 @@ class SummaryConfig:
 class SearchConfig:
     """Settings for indexing and hybrid search. Every field can be set under `search:` in config.yaml."""
 
+    enabled: bool = True  # false: `archive run` skips the index stage (archive only)
     embedding_model: str = "gemini-embedding-2"
     embedding_dimension: int = 3072
     embed_batch_size: int = 50
@@ -87,8 +88,8 @@ class SearchConfig:
     summary_tpm: int = 1_000_000
     max_embed_tokens_per_run: int = 1_500_000
     # Prices for the cost estimate (USD per million tokens); set them to your tier's rates.
-    embed_usd_per_million_tokens: float = 0.15
-    summary_usd_per_million_tokens: float = 0.50
+    embed_usd_per_million_tokens: float = 0.20  # gemini-embedding-2, paid tier (Nov 2026)
+    summary_usd_per_million_tokens: float = 0.75  # gemini-3.8-flash input rate (Nov 2026)
     gemini_timeout_seconds: float = 60.0
     circuit_breaker_failures: int = 3
     cache_retention_days: int = 90

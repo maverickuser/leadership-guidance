@@ -216,6 +216,16 @@ class SummaryCache:
         ).fetchall()
         return {r[0] for r in rows}
 
+    def missing(
+        self, model: str, thinking_level: str, posts: Sequence[tuple[str, Sequence[Section]]]
+    ) -> tuple[int, int]:
+        """(posts with no cached summary, estimated tokens to write them: input + output).
+        One read-only query; identical posts count once."""
+        by_key = {summary_key(model, thinking_level, t, s): (t, s) for t, s in posts}
+        cached = self.has_many(sorted(by_key))
+        todo = [post_text(t, s) for key, (t, s) in by_key.items() if key not in cached]
+        return len(todo), sum(estimate_tokens(PROMPT) + estimate_tokens(t) + MAX_OUTPUT_TOKENS for t in todo)
+
     def touch(self, keys: Sequence[str]) -> None:
         if keys:
             self.conn.execute(
@@ -279,11 +289,4 @@ class CachedSummarizer:
 
     def missing_tokens(self, posts: Sequence[tuple[str, Sequence[Section]]]) -> int:
         """Estimated tokens (input + output) for posts with no cached summary. One query."""
-        by_key = {self.key(title, sections): (title, sections) for title, sections in posts}
-        cached = self.cache.has_many(sorted(by_key))
-        total = 0
-        for key, (title, sections) in by_key.items():
-            if key not in cached:
-                text = post_text(title, sections)
-                total += estimate_tokens(PROMPT) + estimate_tokens(text) + MAX_OUTPUT_TOKENS
-        return total
+        return self.cache.missing(self.summarizer.model, self.summarizer.thinking_level, posts)[1]

@@ -233,13 +233,75 @@ def test_three_failures_then_skipped_until_retry_failed(cfg, conn):
 
 
 # spec: Embedding API use / Outage
-def test_circuit_breaker_stops_all_further_calls(cfg, conn):
+def test_circuit_breaker_stops_calls_without_counting_attempts(cfg, conn):
     archive(cfg, n=4)
     flaky = FlakyEmbedder("Post post-1", CircuitOpenError(3), dim=8)
     report, emb, *_ = run(cfg, conn, embedder=flaky)
-    assert report.indexed == ["post-0"] and sorted(report.failed) == ["post-1", "post-2", "post-3"]
-    assert "stopped for this run" in report.failed["post-3"]
+    assert report.indexed == ["post-0"] and report.failed == {} and report.breaker_open
+    assert report.not_attempted == ["post-1", "post-2", "post-3"]
     assert len(emb.batches) == 2  # post-0, then post-1 raised; nothing sent for post-2/3
+    assert rows(conn, "SELECT count(*) FROM index_failures") == [(0,)]  # never counted as tries
+    # an incomplete first build is not served
+    assert report.build_incomplete and db.active_generation(conn) is None
+    assert "First build incomplete" in "\n".join(report.lines())
+    report, *_ = run(cfg, conn)  # healthy again: the build completes and goes live
+    assert sorted(report.indexed) == ["post-1", "post-2", "post-3"] and not report.build_incomplete
+    assert db.active_generation(conn).generation == 1
+
+
+def test_summary_outage_keeps_indexing_passages(cfg, conn):
+    archive(cfg, n=3)
+
+    class SummariesDown(FakeSummarizer):
+        def summarize(self, title, sections):
+            self.calls.append(title)
+            raise CircuitOpenError(3)
+
+    summ = SummariesDown()
+    report, *_ = run(cfg, conn, summarizer=summ)
+    assert len(report.indexed) == 3 and report.breaker_open and report.summaries == 0
+    assert summ.calls == ["Post post-0"]  # no more summary calls after the breaker opened
+    assert sorted(report.summaries_failed) == ["post-0", "post-1", "post-2"]
+    assert rows(conn, "SELECT count(*) FROM index_failures") == [(0,)]
+    report, *_ = run(cfg, conn)
+    assert report.summaries == 3  # summary-only work next run
+
+
+def test_summary_only_posts_wait_while_summaries_are_down(cfg, conn):
+    archive(cfg, n=3)
+    run(cfg, conn, summarizer=FakeSummarizer(fail={"Post post-1", "Post post-2"}))
+
+    class SummariesDown(FakeSummarizer):
+        def summarize(self, title, sections):
+            raise CircuitOpenError(3)
+
+    report, *_ = run(cfg, conn, summarizer=SummariesDown())
+    assert report.not_attempted == ["post-2"] and "post-1" in report.summaries_failed
+
+
+def test_post_with_temporarily_other_status_is_kept(cfg, conn):
+    archive(cfg, n=3)
+    run(cfg, conn)
+    data = json.loads(cfg.manifest_path.read_text())
+    data["posts"][1]["status"] = "failed"  # e.g. a failed re-fetch; its JSON is still on disk
+    cfg.manifest_path.write_text(json.dumps(data))
+    report, *_ = run(cfg, conn)
+    assert report.removed == [] and rows(conn, "SELECT count(*) FROM idx_g1.posts") == [(3,)]
+    cfg.post_path("post-1").unlink()  # really gone now
+    report, *_ = run(cfg, conn)
+    assert report.removed == ["post-1"]
+
+
+def test_post_that_is_all_boilerplate_fails_without_breaking_verify(cfg, conn):
+    from .archive import INTRO
+
+    recs = [record(f"post-{i}", i) for i in range(5)]
+    empty = record("post-empty", 9)
+    empty["sections"] = [{"heading": None, "level": 0, "text": INTRO}]
+    write_archive(cfg, [*recs, empty])
+    report, *_ = run(cfg, conn)
+    assert report.failed["post-empty"] == "chunk: no text left after boilerplate removal"
+    assert len(report.indexed) == 5 and report.status == "partial"
 
 
 def test_bad_post_file_is_recorded_and_not_removed(cfg, conn):
@@ -432,14 +494,14 @@ def test_verify_catches_mismatches(cfg, conn):
     loaded = indexer._load(None, IndexReport(), record=False)
     conn.execute("UPDATE idx_g1.posts SET fingerprint = 'stale' WHERE post_id = 'post-0'")
     with pytest.raises(VerifyError, match="don't match the archive"):
-        indexer._verify(gen, loaded, IndexReport())
+        indexer._verify(gen, loaded, indexer._stored(gen), IndexReport())
     conn.execute(
         "UPDATE idx_g1.posts SET fingerprint = %s WHERE post_id = 'post-0'",
         (loaded.prepared["post-0"].fingerprint,),
     )
     conn.execute("DELETE FROM idx_g1.passages WHERE post_id = 'post-0' AND kind = 'passage'")
     with pytest.raises(VerifyError, match="no passages"):
-        indexer._verify(gen, loaded, IndexReport())
+        indexer._verify(gen, loaded, indexer._stored(gen), IndexReport())
 
 
 def test_run_bookkeeping_survives_a_closed_or_broken_connection(cfg, conn):

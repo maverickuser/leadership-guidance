@@ -30,12 +30,13 @@ from ..errors import ArchiveError
 from ..schema import validate_post
 from ..store import load_manifest
 from . import db
-from .boilerplate import Boilerplate, find_boilerplate
+from .boilerplate import LOSS_WARN_FRACTION, Boilerplate, find_boilerplate
 from .chunking import Chunk, chunk_sections
 from .embeddings import (
     CachedEmbedder,
     EmbeddingCache,
-    EmbeddingError,
+    EmbeddingInputError,
+    EmbeddingResponseError,
     check_input,
     passage_input,
     summary_input,
@@ -56,15 +57,11 @@ from .planner import (
     make_plan,
 )
 from .summaries import (
-    MAX_OUTPUT_TOKENS,
-    PROMPT,
     CachedSummarizer,
     SummaryCache,
     SummaryError,
-    post_text,
-    summary_key,
 )
-from .text import estimate_tokens, fold
+from .text import fold
 
 log = logging.getLogger("newsletter_archive.search.indexer")
 
@@ -128,6 +125,9 @@ class IndexReport:
     estimate: Estimate | None = None
     unindexed: list[tuple[str, str | None]] = field(default_factory=list)  # (post id, fetched_at)
     stuck: list[str] = field(default_factory=list)
+    not_attempted: list[str] = field(default_factory=list)  # breaker open: nothing was sent
+    breaker_open: bool = False
+    build_incomplete: bool = False
     elapsed_seconds: float = 0.0
     status: str = "ok"
 
@@ -140,6 +140,7 @@ class IndexReport:
             "skipped": len(self.skipped),
             "failed": len(self.failed),
             "summaries_failed": len(self.summaries_failed),
+            "not_attempted": len(self.not_attempted),
             "passages": self.passages,
             "summaries": self.summaries,
             "embedded": self.embedded,
@@ -172,6 +173,13 @@ class IndexReport:
             out.append(f"Warning: boilerplate filter removed over 20% of {post_id}")
         for post_id, fetched in self.unindexed:
             out.append(f"Not indexed yet: {post_id} (fetched {utc_age(fetched)})")
+        if self.not_attempted:
+            out.append(
+                f"Not attempted: {len(self.not_attempted)} posts (Gemini calls stopped after repeated "
+                "failures); they will be tried next run"
+            )
+        if self.build_incomplete:
+            out.append("First build incomplete: it becomes searchable once every post has indexed")
         for post_id in self.stuck:
             out.append(f"Stuck: {post_id} has not indexed in {STUCK_AFTER_RUNS}+ runs")
         out.append(f"Index status: {self.status} in {self.elapsed_seconds:.1f}s")
@@ -187,12 +195,19 @@ class _Loaded:
     boilerplate: Boilerplate
 
 
-def load_posts(config: Config) -> tuple[dict[str, Post], dict[str, str]]:
+def load_posts(config: Config) -> tuple[dict[str, Post], dict[str, str], set[str]]:
     """Every eligible post from the manifest and posts/*.json, in manifest order:
-    (posts, load failures)."""
+    (posts, load failures, posts to keep as they are). A post whose manifest status is
+    temporarily something else (a failed re-fetch, a run cut off between fetch and extract)
+    but whose JSON is still on disk is kept: only posts gone from the archive are removed."""
     manifest = load_manifest(config.manifest_path)
     posts: dict[str, Post] = {}
     failed: dict[str, str] = {}
+    keep = {
+        e.slug
+        for e in manifest.ordered()
+        if e.status not in ELIGIBLE and Path(config.post_path(e.slug)).exists()
+    }
     for entry in [e for e in manifest.ordered() if e.status in ELIGIBLE]:
         path = config.post_path(entry.slug)
         try:
@@ -201,7 +216,7 @@ def load_posts(config: Config) -> tuple[dict[str, Post], dict[str, str]]:
             posts[record["id"]] = Post.from_record(record)
         except (OSError, ValueError, ArchiveError) as e:
             failed[entry.slug] = f"{type(e).__name__}: {e}"[:300]
-    return posts, failed
+    return posts, failed, keep
 
 
 class Indexer:
@@ -252,7 +267,8 @@ class Indexer:
             )
             report.unchanged, report.guarded, report.skipped = len(plan.unchanged), plan.guarded, plan.skipped
             chunks = {pid: self._chunks(loaded.prepared[pid]) for pid in plan.to_index}
-            report.estimate = self._estimate(loaded, plan, chunks)
+            inputs = {pid: self._inputs(loaded.prepared[pid], chunks[pid]) for pid in plan.to_index}
+            report.estimate = self._estimate(loaded, plan, inputs)
             if options.dry_run:
                 self._dry_run_lines(plan, report)
                 report.status = "dry-run"
@@ -264,17 +280,22 @@ class Indexer:
                 report.generation = gen.generation
             run_id = self._start_run(report.mode, gen.generation)
             try:
-                self._index(gen, loaded, plan, chunks, report)
+                self._index(gen, loaded, plan, chunks, inputs, report)
                 self._remove(gen, plan.removed, report)
                 self._save_boilerplate(gen, loaded.boilerplate)
-                self._verify(gen, loaded, report)
+                stored = self._stored(gen)
+                self._verify(gen, loaded, stored, report)
                 if gen.status == "building":
-                    db.set_generation_status(self.conn, gen.generation, "ready")
-                    db.activate_generation(self.conn, gen.generation)
-                    log.info("generation %s is now active", gen.generation)
-                self._freshness(gen, loaded, report)
+                    if self._build_complete(report):
+                        db.set_generation_status(self.conn, gen.generation, "ready")
+                        db.activate_generation(self.conn, gen.generation)
+                        log.info("generation %s is now active", gen.generation)
+                    else:
+                        report.build_incomplete = True
+                self._freshness(loaded, stored, report)
                 self._gc()
-                report.status = "partial" if report.failed or report.summaries_failed else "ok"
+                problems = report.failed or report.summaries_failed or report.not_attempted
+                report.status = "partial" if problems or report.build_incomplete else "ok"
             except BaseException as e:
                 report.status = "failed"
                 self._finish_run(run_id, report, f"{type(e).__name__}: {e}")
@@ -288,7 +309,7 @@ class Indexer:
     def _load(self, limit: int | None, report: IndexReport, record: bool = True) -> _Loaded:
         # Boilerplate is always found across every eligible post, so --limit never changes
         # fingerprints; --limit only chooses which posts this run indexes (the rest are kept).
-        posts, load_failed = load_posts(self.config)
+        posts, load_failed, kept = load_posts(self.config)
         for slug, problem in load_failed.items():
             report.failed[slug] = f"load: {problem}"
             if record:
@@ -299,13 +320,13 @@ class Indexer:
             similarity=self.s.boilerplate_similarity,
         )
         chosen = list(posts)[:limit] if limit else list(posts)
-        left_out = set(posts) - set(chosen)
+        left_out = (set(posts) - set(chosen)) | kept
         prepared: dict[str, Prepared] = {}
         for pid in chosen:
             post = posts[pid]
-            cleaned = boilerplate.clean(post.sections, pid)
+            cleaned = boilerplate.clean(post.sections, pid, warn=False)  # reported below instead
             report.boilerplate_paragraphs += cleaned.removed_paragraphs
-            if cleaned.loss_fraction > 0.2:
+            if cleaned.loss_fraction > LOSS_WARN_FRACTION:
                 report.heavy_loss.append(pid)
             fp = post_fingerprint(post, cleaned.sections, self.s)
             prepared[pid] = Prepared(post, cleaned.sections, fp, cleaned.loss_fraction)
@@ -348,33 +369,25 @@ class Indexer:
     def _inputs(self, p: Prepared, chunks: list[Chunk]) -> list[str]:
         return [passage_input(p.post.title, c.heading, c.text) for c in chunks]
 
-    def _estimate(self, loaded: _Loaded, plan: Plan, chunks: dict[str, list[Chunk]]) -> Estimate:
+    def _estimate(self, loaded: _Loaded, plan: Plan, inputs: dict[str, list[str]]) -> Estimate:
         """Tokens and cost for what isn't cached yet. Read-only: a dry run changes nothing."""
-        texts = [t for pid in plan.to_index for t in self._inputs(loaded.prepared[pid], chunks[pid])]
-        keys = {text_key(t): t for t in texts}
+        texts = [t for pid in plan.to_index for t in inputs[pid]]
         cache = EmbeddingCache(self.conn, self.s.embedding_model, self.s.embedding_dimension)
-        cached = cache.has_many(sorted(keys))
-        missing = {k: t for k, t in keys.items() if k not in cached}
+        embed_tokens, cached = cache.missing(texts)
         summaries_needed = summary_tokens = 0
         if self.s.summaries.enabled:
             sc = self.s.summaries
-            wanted: dict[str, str] = {}
-            for pid in plan.to_index + plan.summary_only:
-                p = loaded.prepared[pid]
-                wanted[summary_key(sc.model, sc.thinking_level, p.post.title, p.sections)] = post_text(
-                    p.post.title, p.sections
-                )
-            have = SummaryCache(self.conn).has_many(sorted(wanted))
-            todo = [text for key, text in wanted.items() if key not in have]
-            summaries_needed = len(todo)
-            summary_tokens = sum(
-                estimate_tokens(PROMPT) + estimate_tokens(t) + MAX_OUTPUT_TOKENS for t in todo
+            posts = [
+                (loaded.prepared[pid].post.title, loaded.prepared[pid].sections)
+                for pid in plan.to_index + plan.summary_only
+            ]
+            summaries_needed, summary_tokens = SummaryCache(self.conn).missing(
+                sc.model, sc.thinking_level, posts
             )
         return Estimate(
             passages=len(texts),
-            passages_cached=sum(1 for t in texts if text_key(t) in cached),
-            embed_tokens=sum(estimate_tokens(t) for t in missing.values())
-            + summaries_needed * SUMMARY_EMBED_TOKENS,
+            passages_cached=cached,
+            embed_tokens=embed_tokens + summaries_needed * SUMMARY_EMBED_TOKENS,
             summaries=summaries_needed,
             summary_tokens=summary_tokens,
             embed_usd_per_million=self.s.embed_usd_per_million_tokens,
@@ -405,80 +418,94 @@ class Indexer:
         for pid in plan.removed:
             self.on_post(pid, "index", "would remove", None)
 
+    @staticmethod
+    def _build_complete(report: IndexReport) -> bool:
+        """A first build goes live only when every post that can be indexed was: nothing failed
+        (bad JSON aside, which needs a fix in the archive) and nothing was left unattempted."""
+        failed = [v for v in report.failed.values() if not v.startswith("load:")]
+        return not failed and not report.not_attempted
+
     def _index(
         self,
         gen: db.Generation,
         loaded: _Loaded,
         plan: Plan,
         chunks: dict[str, list[Chunk]],
+        inputs: dict[str, list[str]],
         report: IndexReport,
     ) -> None:
-        if not (plan.to_index or plan.summary_only):
+        todo = plan.to_index + plan.summary_only
+        if not todo:
             return  # nothing to send: don't even create the API clients
+        summary_only_ids = set(plan.summary_only)
         raw = self.embedder_factory()
-        embedder = self._embedder = CachedEmbedder(raw, EmbeddingCache(self.conn, raw.model, raw.dim))
+        embedder = CachedEmbedder(raw, EmbeddingCache(self.conn, raw.model, raw.dim))
         summarizer: CachedSummarizer | None = None
         if self.summarizer_factory is not None:
-            summarizer = self._summarizer = CachedSummarizer(
-                self.summarizer_factory(), SummaryCache(self.conn)
-            )
-        breaker_open = False
-        for pid in plan.to_index + plan.summary_only:
+            summarizer = CachedSummarizer(self.summarizer_factory(), SummaryCache(self.conn))
+        embed_down = summaries_down = False
+        for pid in todo:
             p = loaded.prepared[pid]
-            summary_only = pid in plan.summary_only
-            if breaker_open:
-                self._fail(
-                    pid,
-                    SUMMARY_STAGE if summary_only else "embed",
-                    "Gemini calls stopped for this run",
-                    p,
-                    report,
-                )
+            summary_only = pid in summary_only_ids
+            if embed_down or (summary_only and summaries_down):
+                # Embedding calls are stopped (or this post only needed a summary): nothing is
+                # sent, so it isn't a failed attempt; it is simply tried next run.
+                report.not_attempted.append(pid)
+                self.on_post(pid, "index", "not attempted", "Gemini calls stopped for this run")
+                continue
+            post_chunks = [] if summary_only else chunks[pid]
+            texts = [] if summary_only else list(inputs[pid])
+            if not summary_only and not post_chunks:
+                self._fail(pid, "chunk", "no text left after boilerplate removal", p, report)
                 continue
             try:
-                post_chunks = [] if summary_only else chunks[pid]
-                texts = self._inputs(p, post_chunks)
                 for text in texts:
                     check_input(text)
-                summary: tuple[str, str] | None = None
-                if summarizer is not None:
-                    try:
-                        summary = summarizer.summarize(p.post.title, p.sections)
-                    except CircuitOpenError:
-                        raise
-                    except (SummaryError, GeminiError) as e:
-                        if isinstance(e, GeminiAuthError):
-                            raise
-                        report.summaries_failed[pid] = str(e)
-                        self._record_failure(pid, SUMMARY_STAGE, str(e), p.fingerprint)
-                        self.on_post(pid, "summarize", "failed", str(e))
-                if summary is not None:
-                    texts.append(summary_input(p.post.title, summary[0]))
-                if summary_only and summary is None:
-                    continue
+            except EmbeddingInputError as e:
+                self._fail(pid, "chunk", str(e), p, report)
+                continue
+            summary: tuple[str, str] | None = None
+            if summarizer is not None and not summaries_down:
+                try:
+                    summary = summarizer.summarize(p.post.title, p.sections)
+                except GeminiAuthError:
+                    raise
+                except CircuitOpenError:
+                    summaries_down = report.breaker_open = True
+                    report.summaries_failed[pid] = "summary calls stopped for this run"
+                except (SummaryError, GeminiError) as e:
+                    self._fail(pid, SUMMARY_STAGE, str(e), p, report)
+            elif summarizer is not None:
+                report.summaries_failed[pid] = "summary calls stopped for this run"
+            if summary is not None:
+                texts.append(summary_input(p.post.title, summary[0]))
+            if summary_only and summary is None:
+                continue
+            try:
                 vectors = embedder.embed(texts)
                 if summary_only:
                     assert summary is not None
-                    self._write_summary(gen, p, summary, vectors[-1])
+                    self._write_summary(gen, p, summary, texts[-1], vectors[-1])
                 else:
-                    self._write_post(gen, p, post_chunks, vectors, summary)
+                    self._write_post(gen, p, post_chunks, texts, vectors, summary)
                     report.indexed.append(pid)
                     report.passages += len(post_chunks)
-                report.summaries += 1 if summary is not None else 0
-                self._clear_failures(pid, summary_ok=summary is not None or summarizer is None)
-                self.on_post(pid, "index", "summarised" if summary_only else "indexed", None)
             except GeminiAuthError:
                 raise
-            except CircuitOpenError as e:
-                breaker_open = True
-                self._fail(pid, SUMMARY_STAGE if summary_only else "embed", str(e), p, report)
-            except EmbeddingError as e:
-                stage = "chunk" if "not sent" in str(e) or "empty" in str(e) else "embed"
-                self._fail(pid, SUMMARY_STAGE if summary_only else stage, str(e), p, report)
+            except CircuitOpenError:
+                embed_down = report.breaker_open = True
+                report.not_attempted.append(pid)
+                self.on_post(pid, "index", "not attempted", "Gemini calls stopped for this run")
+                continue
             except GeminiError as e:
                 self._fail(pid, SUMMARY_STAGE if summary_only else "embed", str(e), p, report)
+                continue
             except psycopg.Error as e:
                 self._fail(pid, "write", f"{type(e).__name__}: {e}", p, report)
+                continue
+            report.summaries += 1 if summary is not None else 0
+            self._clear_failures(pid, summary_ok=summary is not None or summarizer is None)
+            self.on_post(pid, "index", "summarised" if summary_only else "indexed", None)
         if summarizer is not None:
             summarizer.flush()
         st = embedder.stats
@@ -543,22 +570,27 @@ class Indexer:
         gen: db.Generation,
         p: Prepared,
         chunks: Sequence[Chunk],
+        texts: Sequence[str],
         vectors: Sequence[np.ndarray],
         summary: tuple[str, str] | None,
     ) -> None:
+        """``texts``/``vectors``: one per chunk, then the summary's when there is one."""
+        expected = len(chunks) + (1 if summary is not None else 0)
+        if len(texts) != expected or len(vectors) != expected:
+            raise EmbeddingResponseError(
+                f"expected {expected} embeddings for {p.post.id}, got {len(vectors)}"
+            )
         schema = sql.Identifier(gen.schema)
-        texts = self._inputs(p, list(chunks))
         rows = [
             self._passage_row(p, f"{p.post.id}#{c.n}", "passage", c.n, c.heading, c.text, t, v)
-            for c, t, v in zip(chunks, texts, vectors, strict=False)
+            for c, t, v in zip(chunks, texts, vectors, strict=False)  # lengths checked above
         ]
         if summary is not None:
             rows.append(
                 self._passage_row(
-                    p, f"{p.post.id}#summary", "summary", -1, None, summary[0],
-                    summary_input(p.post.title, summary[0]), vectors[-1],
+                    p, f"{p.post.id}#summary", "summary", -1, None, summary[0], texts[-1], vectors[-1]
                 )
-            )  # fmt: skip
+            )
         with self.conn.transaction(), self.conn.cursor() as cur:
             cur.execute(sql.SQL("DELETE FROM {}.passages WHERE post_id = %s").format(schema), (p.post.id,))
             cur.execute(
@@ -567,19 +599,10 @@ class Indexer:
             cur.executemany(_INSERT_PASSAGE.format(schema=schema), rows)
 
     def _write_summary(
-        self, gen: db.Generation, p: Prepared, summary: tuple[str, str], vec: np.ndarray
+        self, gen: db.Generation, p: Prepared, summary: tuple[str, str], text: str, vec: np.ndarray
     ) -> None:
         schema = sql.Identifier(gen.schema)
-        row = self._passage_row(
-            p,
-            f"{p.post.id}#summary",
-            "summary",
-            -1,
-            None,
-            summary[0],
-            summary_input(p.post.title, summary[0]),
-            vec,
-        )
+        row = self._passage_row(p, f"{p.post.id}#summary", "summary", -1, None, summary[0], text, vec)
         with self.conn.transaction(), self.conn.cursor() as cur:
             cur.execute(
                 sql.SQL("DELETE FROM {}.passages WHERE post_id = %s AND kind = 'summary'").format(schema),
@@ -615,9 +638,10 @@ class Indexer:
                 [(c.cluster_id, key, c.post_count, c.sample) for c in boilerplate.clusters for key in c.keys],
             )
 
-    def _verify(self, gen: db.Generation, loaded: _Loaded, report: IndexReport) -> None:
-        stored = self._stored(gen)
-        skip = set(report.failed) | set(report.skipped)
+    def _verify(
+        self, gen: db.Generation, loaded: _Loaded, stored: dict[str, Stored], report: IndexReport
+    ) -> None:
+        skip = set(report.failed) | set(report.skipped) | set(report.not_attempted)
         missing = Stored("", False)
         wrong = [
             pid
@@ -656,8 +680,7 @@ class Indexer:
         if near is None:
             raise VerifyError("vector search returned nothing")
 
-    def _freshness(self, gen: db.Generation, loaded: _Loaded, report: IndexReport) -> None:
-        stored = self._stored(gen)
+    def _freshness(self, loaded: _Loaded, stored: dict[str, Stored], report: IndexReport) -> None:
         failures = self._failures()
         eligible = set(loaded.prepared) | set(loaded.load_failed)
         for pid in sorted(eligible - set(stored)):

@@ -6,6 +6,7 @@ import logging
 from pathlib import Path
 from typing import Annotated, Optional
 
+import psycopg
 import typer
 
 from . import __version__
@@ -51,16 +52,27 @@ def _index_stage(config: Config, options: IndexOptions, stages: list[str]) -> in
     Under `archive run`, any index problem becomes exit 3 so the weekly job notifies, while the
     earlier stages' work is kept. Under `archive index`, errors keep their own exit code."""
     in_run = stages != ["index"]
+    if in_run and not config.search.enabled:
+        log.info("Search is turned off (search.enabled: false); skipping the index stage")
+        return 0
     try:
         report = index_archive(config, options, on_post=log_post)
-    except ArchiveError as e:
+    except (ArchiveError, psycopg.Error) as e:
         if not in_run:
             raise
         log.error("Index step failed: %s", e)
+        log.error(
+            "New posts are archived. To archive without search, set search.enabled: false in config.yaml"
+        )
+        return INDEX_FAILED_IN_RUN
+    except Exception:  # unexpected, under `run`: keep the traceback, still notify as an index failure
+        if not in_run:
+            raise
+        log.exception("Index step failed unexpectedly")
         return INDEX_FAILED_IN_RUN
     for line in report.lines():
         log.info(line)
-    if in_run and report.stuck:
+    if in_run and (report.stuck or report.breaker_open):
         return INDEX_FAILED_IN_RUN
     return 0
 
