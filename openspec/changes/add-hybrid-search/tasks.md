@@ -24,12 +24,12 @@
 
 ## 2. Pure preprocessing (PR 2)
 
-- [ ] 2.1 `boilerplate.py`: exact groups + MinHash/LSH near-duplicates, ≥ 5 posts, 20% loss warning
-- [ ] 2.2 `fingerprint.py`: canonical JSON incl. chunk settings, embed input version, summary model and prompt version
-- [ ] 2.3 `sentences.py`: in-repo splitter with abbreviation, decimal, initial and quote cases
-- [ ] 2.4 `chunking.py`: section merge, greedy packing 300/50, token guard, `CHUNKER_VERSION`
-- [ ] 2.5 Golden snapshot and property tests (hypothesis)
-- [ ] 2.6 Phase-1 extractor fix: boilerplate patterns from the local `config.yaml`, scan the first few paragraphs; `archive extract --refresh`
+- [x] 2.1 `boilerplate.py`: exact groups + MinHash/LSH near-duplicates, ≥ 5 posts, 20% loss warning
+- [x] 2.2 `fingerprint.py`: canonical JSON incl. chunk settings, embed input version, summary model and prompt version
+- [x] 2.3 `sentences.py`: in-repo splitter with abbreviation, decimal, initial and quote cases
+- [x] 2.4 `chunking.py`: section merge, greedy packing 300/50, token guard, `CHUNKER_VERSION`
+- [x] 2.5 Golden snapshot and property tests (hypothesis)
+- [x] 2.6 Phase-1 extractor fix: extra intro prefixes from the local `config.yaml` (`boilerplate_prefixes`), stop-at-first-non-match rule kept; `archive extract --refresh` run locally (boilerplate left in post JSON: 208 → 38 paragraphs, removed at index time)
 
 ## 3. Gemini client and embedder (PR 3)
 

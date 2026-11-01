@@ -261,3 +261,16 @@ def test_whole_page_fallback_without_gh_content():
 def test_no_body_at_all_raises():
     with pytest.raises(ExtractError):
         extract_post("<html><head><title>x</title></head><body></body></html>", f"{BASE}/x")
+
+
+def test_configured_prefixes_strip_extra_intros():
+    html = (
+        "<section><p>Hello from the  example   letter, I am the author.</p>"
+        "<p>Free members can read part of it.</p><p>Real start.</p></section>"
+    )
+    body = BeautifulSoup(html, "lxml").section
+    assert strip_boilerplate(body, ("Hello from the example letter",)) == 2
+    assert body.get_text().strip() == "Real start."
+    # without the configured prefix the first paragraph stops the scan, as before
+    body = BeautifulSoup(html, "lxml").section
+    assert strip_boilerplate(body) == 0
