@@ -184,7 +184,7 @@ def run_extract(
         if not raw.exists():
             continue
         try:
-            ex = extract_post(raw.read_text(encoding="utf-8"), entry.url)
+            ex = extract_post(raw.read_text(encoding="utf-8"), entry.url, config.boilerplate_prefixes)
             record = build_record(entry, ex, mtime_iso(raw), config.min_word_count)
             validate_post(record)
         except Exception as e:  # one bad page must not stop the run

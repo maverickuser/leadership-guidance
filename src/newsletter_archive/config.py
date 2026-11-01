@@ -13,6 +13,7 @@ from dotenv import dotenv_values
 
 from . import __version__
 from .errors import ConfigError
+from .search.text import squash
 
 COOKIE_ENV = "NEWSLETTER_COOKIE"
 GEMINI_KEY_ENV = "GEMINI_API_KEY"
@@ -29,6 +30,7 @@ DEFAULTS: dict[str, Any] = {
     "output_dir": "../newsletter-archive-data",  # next to the repo, outside git
     "user_agent": f"newsletter-archive/{__version__} (personal archive; one request every 2s)",
     "search": None,  # optional mapping; see SearchConfig
+    "boilerplate_prefixes": [],  # extra intro openings to strip; kept in the local config only
 }
 
 MIN_DELAY_SECONDS = 2
@@ -128,6 +130,7 @@ class Config:
     user_agent: str
     cookie: Secret
     search: SearchConfig = field(default_factory=SearchConfig)
+    boilerplate_prefixes: tuple[str, ...] = ()
     gemini_api_key: Secret = field(default_factory=_empty_secret)
     db_writer_password: Secret = field(default_factory=_empty_secret)
     db_reader_password: Secret = field(default_factory=_empty_secret)
@@ -249,6 +252,14 @@ def _parse_search(raw: Any, env_port: str | None = None) -> SearchConfig:
     return SearchConfig(**values)
 
 
+def _parse_prefixes(raw: Any) -> tuple[str, ...]:
+    if raw is None:
+        return ()
+    if not isinstance(raw, list) or not all(isinstance(p, str) and p.strip() for p in raw):
+        raise ConfigError("boilerplate_prefixes must be a list of non-empty strings")
+    return tuple(squash(p) for p in raw)
+
+
 def _validate_search(s: SearchConfig) -> None:
     positive = (
         "embedding_dimension", "embed_batch_size", "embed_rpm", "embed_tpm", "summary_rpm",
@@ -354,6 +365,7 @@ def load_config(
             user_agent=str(values["user_agent"]),
             cookie=Secret(clean_cookie(read_env(COOKIE_ENV))),
             search=_parse_search(values["search"], read_env(DB_PORT_ENV)),
+            boilerplate_prefixes=_parse_prefixes(values["boilerplate_prefixes"]),
             gemini_api_key=Secret(read_env(GEMINI_KEY_ENV)),
             db_writer_password=Secret(read_env(DB_WRITER_PASSWORD_ENV)),
             db_reader_password=Secret(read_env(DB_READER_PASSWORD_ENV)),

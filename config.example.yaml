@@ -7,6 +7,11 @@ min_word_count: 300       # posts with fewer words are marked "partial"
 output_dir: ../newsletter-archive-data   # next to the repo, so archived posts can never be committed
 user_agent: "newsletter-archive/0.1 (personal archive; one request every 2s)"
 
+# Extra intro openings the extractor strips from the top of each post (optional).
+# Put your newsletter's own wording here, in your local config.yaml only.
+# boilerplate_prefixes:
+#   - "Welcome to the Example newsletter"
+
 # Search (optional; these are the defaults). See openspec/changes/add-hybrid-search/lld.md.
 # search:
 #   embedding_model: gemini-embedding-2

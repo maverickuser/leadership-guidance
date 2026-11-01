@@ -20,6 +20,7 @@ from lxml import etree
 from .errors import ExtractError
 from .models import Extracted, Section
 from .parsing import attr, parse_xml
+from .search.text import squash
 
 log = logging.getLogger("newsletter_archive.extract")
 
@@ -70,7 +71,6 @@ REMOVE_SELECTORS = ", ".join(
 # The standard intro at the top of almost every post. Matched on exact openings, so a
 # post's own italic note (e.g. "I'm writing about something different today!") stays.
 BOILERPLATE_PREFIXES = ("Welcome to my newsletter!", "Free members can read")
-BOILERPLATE_SCAN = 3
 
 HEADING_RE = re.compile(r"^h([1-6])$")
 BLOCK_TAGS = [
@@ -94,8 +94,7 @@ TRAFILATURA_MIN_RATIO = 0.8
 SUMMARY_MAX_CHARS = 400
 
 
-def _squash(text: str) -> str:
-    return " ".join(text.split())
+_squash = squash  # one whitespace rule for extraction, config prefixes and search
 
 
 # -- body cleaning ---------------------------------------------------------
@@ -109,11 +108,16 @@ def find_body(soup: BeautifulSoup) -> Tag | None:
     return None
 
 
-def strip_boilerplate(body: Tag) -> int:
-    """Remove the standard intro paragraphs at the very top. Returns how many were removed."""
+def strip_boilerplate(body: Tag, extra_prefixes: tuple[str, ...] = ()) -> int:
+    """Remove the standard intro paragraphs at the very top. Returns how many were removed.
+
+    ``extra_prefixes`` come from the local config (``boilerplate_prefixes``), so a site's own
+    wording never has to be in the code.
+    """
+    prefixes = BOILERPLATE_PREFIXES + extra_prefixes
     removed = 0
-    for el in [c for c in body.children if isinstance(c, Tag)][:BOILERPLATE_SCAN]:
-        if el.name == "p" and _squash(el.get_text()).startswith(BOILERPLATE_PREFIXES):
+    for el in [c for c in body.children if isinstance(c, Tag)]:
+        if el.name == "p" and _squash(el.get_text(" ")).startswith(prefixes):
             el.decompose()
             removed += 1
         else:
@@ -121,7 +125,7 @@ def strip_boilerplate(body: Tag) -> int:
     return removed
 
 
-def clean_body(body: Tag) -> Tag:
+def clean_body(body: Tag, extra_prefixes: tuple[str, ...] = ()) -> Tag:
     """Return a cleaned copy of the article body (the input is not modified)."""
     copy = BeautifulSoup(str(body), "lxml").find(body.name)
     if not isinstance(copy, Tag):  # pragma: no cover - re-parsing a tag always finds it
@@ -131,7 +135,7 @@ def clean_body(body: Tag) -> Tag:
     for el in copy.find_all(True):
         for name in ("alt", "title"):
             el.attrs.pop(name, None)
-    strip_boilerplate(copy)
+    strip_boilerplate(copy, extra_prefixes)
     return copy
 
 
@@ -408,7 +412,7 @@ def extract_metadata(soup: BeautifulSoup, text: str) -> dict[str, Any]:
 # -- entry point -----------------------------------------------------------
 
 
-def extract_post(html: str, page_url: str) -> Extracted:
+def extract_post(html: str, page_url: str, boilerplate_prefixes: tuple[str, ...] = ()) -> Extracted:
     """Turn one signed-in post page into clean sections, links and metadata.
 
     Raises:
@@ -419,7 +423,7 @@ def extract_post(html: str, page_url: str) -> Extracted:
     paywalled = False
     if body is not None:
         paywalled = body.select_one(".gh-post-upgrade-cta") is not None
-        cleaned = clean_body(body)
+        cleaned = clean_body(body, boilerplate_prefixes)
         sections = build_sections(cleaned, page_url)
         links = extract_links(cleaned, page_url)
     else:
