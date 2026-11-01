@@ -61,10 +61,10 @@
 
 ## 7. Retrieval (PR 7)
 
-- [ ] 7.1 `keyword.py`: safe query builder (phrases, stop words, escaping), boosted BM25 SQL, filters incl. `kind`
-- [ ] 7.2 `vector.py`: exact cosine search with the same filters
-- [ ] 7.3 `fusion.py`: RRF with deterministic ties and `found_by`
-- [ ] 7.4 Verify pg_search DDL, stemmer, boost and score functions on the pinned tag
+- [x] 7.1 `keyword.py`: safe query builder (phrases, stop words, escaping), boosted BM25 SQL, filters incl. `kind`
+- [x] 7.2 `vector.py`: exact cosine search with the same filters
+- [x] 7.3 `fusion.py`: RRF with deterministic ties and `found_by`
+- [x] 7.4 Verify pg_search DDL, stemmer, boost and score functions on the pinned tag
 
 ## 8. Re-ranker and search service (PR 8)
 

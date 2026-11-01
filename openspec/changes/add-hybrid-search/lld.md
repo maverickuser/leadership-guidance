@@ -560,13 +560,14 @@ Verified in PR 1 (ParadeDB `0.26.2-pg17`, pg_search 0.26.2, pgvector 0.8.6):
 
 Verified in PR 3 (google-genai 2.31, gemini-embedding-2): batching, the 100-per-request limit, normalised output, silent truncation and no way to disable it in the Developer API (see §5.6); invalid dimensions return HTTP 400; `count_tokens` works for the model.
 
+Verified in PR 5 (first full build): `gemini-embedding-2` ~$0.20 and `gemini-3.8-flash` ~$0.75 / $3.75 per million tokens (input / output); 252 posts took ~1.3M embedding tokens, ~$1.27 in all, in 21 minutes at the default pacing.
+
+Verified in PR 7 (same image): match-any, phrase, boost and score queries run on per-generation tables with SQL filters (categories, dates, `kind`) in the same statement; boosts must be literals (a type modifier, so not a query parameter) and are checked as positive numbers before use; stemming lets "delegate" find "Delegation" and "Delegating"; operator words (AND, OR, NOT), quotes, brackets and punctuation in a query are plain text and never cause an error; exact `<=>` cosine search over `halfvec(3072)` with the same filters. On the real archive, "delegate trust" puts the delegation post first.
+
 Still to verify:
 
-- ParadeDB image tag; `pg_search` DDL, English stemmer, boost and score functions; BM25 index on per-schema tables.
-- `gemini-embedding-2` pricing (check before the first full build in PR 5).
 - `Qwen3-Reranker-0.6B` prompt template and latency on MPS.
 - `mcp` SDK version and structured-output API.
-- Summary model pricing and rate limits for the key's tier (before the first full build in PR 5).
 
 ## 16. PR stack
 
