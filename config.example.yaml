@@ -6,3 +6,18 @@ timeout_seconds: 30
 min_word_count: 300       # posts with fewer words are marked "partial"
 output_dir: ../newsletter-archive-data   # next to the repo, so archived posts can never be committed
 user_agent: "newsletter-archive/0.1 (personal archive; one request every 2s)"
+
+# Search (optional; these are the defaults). See openspec/changes/add-hybrid-search/lld.md.
+# search:
+#   embedding_model: gemini-embedding-2
+#   embedding_dimension: 3072
+#   chunk_words: 300
+#   chunk_overlap_words: 50
+#   candidates: 50
+#   rerank_top: 40
+#   db_host: 127.0.0.1
+#   db_port: 5433
+#   db_name: archive
+#   summaries:
+#     enabled: true
+#     model: gemini-2.5-flash

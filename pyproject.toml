@@ -30,6 +30,7 @@ dependencies = [
     "pyyaml>=6.0,<7",
     "python-dotenv>=1.0,<2",
     "jsonschema>=4.20,<5",
+    "psycopg[binary]>=3.2,<4",
 ]
 
 [project.optional-dependencies]
@@ -58,11 +59,19 @@ packages = ["src/newsletter_archive"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-markers = ["slow: uses the real clock (seconds of waiting)"]
+markers = [
+    "slow: uses the real clock (seconds of waiting)",
+    "db: needs the search database (docker compose up -d --wait db); skipped when it isn't running",
+]
 addopts = '-m "not slow"'
 
+[tool.coverage.run]
+source = ["newsletter_archive"]
+branch = true
+relative_files = true
+
 [tool.coverage.report]
-fail_under = 90
+fail_under = 95
 
 [tool.ruff]
 line-length = 110

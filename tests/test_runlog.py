@@ -66,3 +66,16 @@ def test_summary_line():
     assert s.line() == "Summary: discovered=252 fetched=5 ok=4 partial=1 failed=0"
     s.skipped, s.categories_incomplete = 3, True
     assert s.line().endswith("(skipped=3) [categories incomplete]")
+
+
+def test_redacts_api_key_and_db_passwords():
+    from .conftest import TEST_DB_PASSWORD, TEST_GEMINI_KEY
+
+    f = RedactFilter(Secret(TEST_COOKIE), Secret(TEST_GEMINI_KEY), Secret(TEST_DB_PASSWORD), Secret(None))
+    out = f.redact(f"key={TEST_GEMINI_KEY} pw={TEST_DB_PASSWORD}")
+    assert TEST_GEMINI_KEY not in out and TEST_DB_PASSWORD not in out
+    # short secrets are not used for redaction: they would garble ordinary words
+    assert RedactFilter(Secret(None), Secret("archive")).redact("archive index") == "archive index"
+    # any Google-style key is scrubbed, even one the filter wasn't given
+    other = "AIza" + "B" * 35
+    assert RedactFilter(Secret(None)).redact(f"x {other} y") == "x [REDACTED] y"

@@ -3,7 +3,8 @@
 from __future__ import annotations
 
 import os
-from dataclasses import dataclass, replace
+from collections.abc import Callable
+from dataclasses import dataclass, field, fields, replace
 from pathlib import Path
 from typing import Any
 
@@ -14,6 +15,10 @@ from . import __version__
 from .errors import ConfigError
 
 COOKIE_ENV = "NEWSLETTER_COOKIE"
+GEMINI_KEY_ENV = "GEMINI_API_KEY"
+DB_WRITER_PASSWORD_ENV = "ARCHIVE_DB_WRITER_PASSWORD"
+DB_READER_PASSWORD_ENV = "ARCHIVE_DB_READER_PASSWORD"
+DB_PORT_ENV = "ARCHIVE_DB_PORT"
 
 DEFAULTS: dict[str, Any] = {
     "base_url": None,  # required: the newsletter site, set in config.yaml
@@ -23,6 +28,7 @@ DEFAULTS: dict[str, Any] = {
     "min_word_count": 300,
     "output_dir": "../newsletter-archive-data",  # next to the repo, outside git
     "user_agent": f"newsletter-archive/{__version__} (personal archive; one request every 2s)",
+    "search": None,  # optional mapping; see SearchConfig
 }
 
 MIN_DELAY_SECONDS = 2
@@ -57,6 +63,59 @@ class Secret:
 
 
 @dataclass(frozen=True)
+class SummaryConfig:
+    """Settings for the one-summary-per-post layer (see openspec add-hybrid-search, lld.md 5.10)."""
+
+    enabled: bool = True
+    model: str = "gemini-2.5-flash"  # pinned and verified when the summarizer lands
+    max_tokens_per_run: int = 1_500_000
+
+
+@dataclass(frozen=True)
+class SearchConfig:
+    """Settings for indexing and hybrid search. Every field can be set under `search:` in config.yaml."""
+
+    embedding_model: str = "gemini-embedding-2"
+    embedding_dimension: int = 3072
+    embed_batch_size: int = 50
+    embed_rpm: int = 300
+    embed_tpm: int = 1_000_000
+    summary_rpm: int = 60
+    summary_tpm: int = 1_000_000
+    max_embed_tokens_per_run: int = 1_500_000
+    circuit_breaker_failures: int = 3
+    cache_retention_days: int = 90
+    boilerplate_min_posts: int = 5
+    boilerplate_similarity: float = 0.8
+    chunk_words: int = 300
+    chunk_overlap_words: int = 50
+    mass_delete_min: int = 5
+    mass_delete_fraction: float = 0.10
+    quality_gate_max_recall_drop: float = 2.0
+    bm25_boosts: dict[str, float] = field(default_factory=lambda: {"heading": 2.0, "title": 1.5, "body": 1.0})
+    candidates: int = 50
+    rerank_top: int = 40
+    reranker_model: str = "Qwen/Qwen3-Reranker-0.6B"
+    rerank_timeout_seconds: float = 10.0
+    max_per_post: int = 3
+    default_limit: int = 10
+    max_limit: int = 30
+    db_host: str = "127.0.0.1"
+    db_port: int = 5433
+    db_name: str = "archive"
+    summaries: SummaryConfig = field(default_factory=SummaryConfig)
+
+
+SEARCH_FIELDS = {f.name for f in fields(SearchConfig)}
+SUMMARY_FIELDS = {f.name for f in fields(SummaryConfig)}
+BM25_FIELDS = {"heading", "title", "body"}
+
+
+def _empty_secret() -> Secret:
+    return Secret(None)
+
+
+@dataclass(frozen=True)
 class Config:
     """Validated settings for one run. Build it with load_config()."""
 
@@ -68,6 +127,15 @@ class Config:
     output_dir: Path
     user_agent: str
     cookie: Secret
+    search: SearchConfig = field(default_factory=SearchConfig)
+    gemini_api_key: Secret = field(default_factory=_empty_secret)
+    db_writer_password: Secret = field(default_factory=_empty_secret)
+    db_reader_password: Secret = field(default_factory=_empty_secret)
+
+    @property
+    def secrets(self) -> tuple[Secret, ...]:
+        """Every secret value, for log redaction."""
+        return (self.cookie, self.gemini_api_key, self.db_writer_password, self.db_reader_password)
 
     @property
     def manifest_path(self) -> Path:
@@ -111,11 +179,107 @@ def clean_cookie(raw: str | None) -> str:
     return value
 
 
-def _read_cookie(env_file: Path) -> Secret:
-    raw = os.environ.get(COOKIE_ENV)
-    if not raw and env_file.is_file():
-        raw = dotenv_values(env_file).get(COOKIE_ENV)
-    return Secret(clean_cookie(raw))
+def _env_reader(env_file: Path) -> Callable[[str], str | None]:
+    """Look up a variable: the environment wins over .env. The file is parsed once."""
+    file_values = dotenv_values(env_file) if env_file.is_file() else {}
+
+    def read(name: str) -> str | None:
+        return os.environ.get(name) or file_values.get(name)
+
+    return read
+
+
+def _coerce(label: str, value: Any, default: Any) -> Any:
+    """Convert one setting to its default's type, refusing nulls, bools-as-numbers and
+    fractional whole numbers."""
+    kind = type(default)
+    if value is None:
+        raise ConfigError(f"{label} must not be empty")
+    if kind is bool:
+        if not isinstance(value, bool):
+            raise ConfigError(f"{label} must be true or false")
+        return value
+    if isinstance(value, bool):
+        raise ConfigError(f"{label} must be a {kind.__name__}")
+    if kind is int and isinstance(value, float) and not value.is_integer():
+        raise ConfigError(f"{label} must be a whole number")
+    if kind is str and not isinstance(value, str | int | float):
+        raise ConfigError(f"{label} must be text")
+    try:
+        return kind(value)
+    except (TypeError, ValueError):
+        raise ConfigError(f"invalid search setting: {label} must be a {kind.__name__}") from None
+
+
+def _section(label: str, raw: Any, defaults: Any, allowed: set[str]) -> dict[str, Any]:
+    if not isinstance(raw, dict):
+        raise ConfigError(f"{label} must be a mapping of settings")
+    unknown = set(raw) - allowed
+    if unknown:
+        raise ConfigError(f"unknown {label} setting(s): {', '.join(sorted(unknown))}")
+    return dict(raw)
+
+
+def _parse_search(raw: Any, env_port: str | None = None) -> SearchConfig:
+    """Build SearchConfig from the `search:` mapping; unknown keys and bad types are config errors.
+
+    ``env_port`` (ARCHIVE_DB_PORT, also read by docker compose) sets the port unless
+    ``search.db_port`` is given.
+    """
+    defaults = SearchConfig()
+    values = {} if raw is None else _section("search", raw, defaults, SEARCH_FIELDS)
+    if env_port and "db_port" not in values:
+        values["db_port"] = env_port
+    summaries = values.pop("summaries", None)
+    boosts = values.pop("bm25_boosts", None)
+    for name, value in values.items():
+        values[name] = _coerce(f"search.{name}", value, getattr(defaults, name))
+    if summaries is not None:
+        sv = _section("search.summaries", summaries, defaults.summaries, SUMMARY_FIELDS)
+        values["summaries"] = SummaryConfig(
+            **{k: _coerce(f"search.summaries.{k}", v, getattr(defaults.summaries, k)) for k, v in sv.items()}
+        )
+    if boosts is not None:
+        if not isinstance(boosts, dict) or set(boosts) - BM25_FIELDS:
+            raise ConfigError("search.bm25_boosts must map heading, title and body to numbers")
+        values["bm25_boosts"] = {
+            **defaults.bm25_boosts,
+            **{k: _coerce(f"search.bm25_boosts.{k}", v, 1.0) for k, v in boosts.items()},
+        }
+    return SearchConfig(**values)
+
+
+def _validate_search(s: SearchConfig) -> None:
+    positive = (
+        "embedding_dimension", "embed_batch_size", "embed_rpm", "embed_tpm", "summary_rpm",
+        "summary_tpm", "max_embed_tokens_per_run", "circuit_breaker_failures", "cache_retention_days",
+        "boilerplate_min_posts", "chunk_words", "mass_delete_min", "candidates", "rerank_top",
+        "rerank_timeout_seconds", "max_per_post", "default_limit", "max_limit", "db_port",
+    )  # fmt: skip
+    for name in positive:
+        if getattr(s, name) <= 0:
+            raise ConfigError(f"search.{name} must be > 0")
+    if not 1 <= s.embedding_dimension <= 4000:
+        raise ConfigError("search.embedding_dimension must be between 1 and 4000")
+    if not 0 <= s.chunk_overlap_words < s.chunk_words:
+        raise ConfigError("search.chunk_overlap_words must be >= 0 and smaller than search.chunk_words")
+    for name in ("boilerplate_similarity", "mass_delete_fraction"):
+        if not 0 < getattr(s, name) <= 1:
+            raise ConfigError(f"search.{name} must be between 0 and 1")
+    if s.quality_gate_max_recall_drop < 0:
+        raise ConfigError("search.quality_gate_max_recall_drop must be >= 0")
+    if any(v <= 0 for v in s.bm25_boosts.values()):
+        raise ConfigError("search.bm25_boosts values must be > 0")
+    if s.rerank_top > 2 * s.candidates:
+        raise ConfigError("search.rerank_top can't exceed the combined candidates (2 x search.candidates)")
+    if not s.default_limit <= s.max_limit:
+        raise ConfigError("search.default_limit must be <= search.max_limit")
+    if not s.embedding_model or not s.db_name or not s.db_host:
+        raise ConfigError("search.embedding_model, search.db_host and search.db_name must not be empty")
+    if s.summaries.max_tokens_per_run <= 0:
+        raise ConfigError("search.summaries.max_tokens_per_run must be > 0")
+    if s.summaries.enabled and not s.summaries.model:
+        raise ConfigError("search.summaries.model must be set when summaries are enabled")
 
 
 def _cookie_is_valid(value: str) -> bool:
@@ -138,6 +302,7 @@ def _validate(cfg: Config) -> Config:
         raise ConfigError("min_word_count must be >= 0")
     if not cfg.base_url.startswith(("http://", "https://")):
         raise ConfigError("base_url must start with http:// or https://")
+    _validate_search(cfg.search)
     return cfg
 
 
@@ -168,6 +333,7 @@ def load_config(
     if overrides:
         values.update({k: v for k, v in overrides.items() if v is not None})
 
+    read_env = _env_reader(env_file)
     base_dir = path.parent if path.is_file() else Path.cwd()
     output_dir = Path(os.path.expanduser(str(values["output_dir"])))
     if not output_dir.is_absolute():
@@ -186,11 +352,28 @@ def load_config(
             min_word_count=int(values["min_word_count"]),
             output_dir=output_dir,
             user_agent=str(values["user_agent"]),
-            cookie=_read_cookie(env_file),
+            cookie=Secret(clean_cookie(read_env(COOKIE_ENV))),
+            search=_parse_search(values["search"], read_env(DB_PORT_ENV)),
+            gemini_api_key=Secret(read_env(GEMINI_KEY_ENV)),
+            db_writer_password=Secret(read_env(DB_WRITER_PASSWORD_ENV)),
+            db_reader_password=Secret(read_env(DB_READER_PASSWORD_ENV)),
         )
     except (TypeError, ValueError) as e:
         raise ConfigError(f"invalid setting: {e}") from None
     return _validate(cfg)
 
 
-__all__ = ["BACKOFF_SECONDS", "COOKIE_ENV", "DEFAULTS", "Config", "Secret", "clean_cookie", "load_config"]
+__all__ = [
+    "BACKOFF_SECONDS",
+    "COOKIE_ENV",
+    "DB_READER_PASSWORD_ENV",
+    "DB_WRITER_PASSWORD_ENV",
+    "DEFAULTS",
+    "GEMINI_KEY_ENV",
+    "Config",
+    "SearchConfig",
+    "Secret",
+    "SummaryConfig",
+    "clean_cookie",
+    "load_config",
+]

@@ -1,0 +1,27 @@
+# Search database: Postgres 17 with pg_search (BM25) and pgvector, from ParadeDB.
+# Start: docker compose up -d --wait db   (passwords come from .env; see .env.example)
+# Listens on 127.0.0.1 only. Data lives outside the repo, next to the archive.
+name: newsletter-archive
+
+services:
+  db:
+    image: paradedb/paradedb:0.26.2-pg17   # pinned: BM25 SQL syntax changes between releases
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:${ARCHIVE_DB_PORT:-5433}:5432"
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: ${ARCHIVE_DB_ADMIN_PASSWORD:?set ARCHIVE_DB_ADMIN_PASSWORD in .env}
+      POSTGRES_DB: archive
+      ARCHIVE_DB_WRITER_PASSWORD: ${ARCHIVE_DB_WRITER_PASSWORD:?set ARCHIVE_DB_WRITER_PASSWORD in .env}
+      ARCHIVE_DB_READER_PASSWORD: ${ARCHIVE_DB_READER_PASSWORD:?set ARCHIVE_DB_READER_PASSWORD in .env}
+    volumes:
+      - ${ARCHIVE_DB_DATA:-../newsletter-archive-data/postgres}:/var/lib/postgresql/data
+      - ./db/init/20_archive_roles.sh:/docker-entrypoint-initdb.d/20_archive_roles.sh:ro
+    healthcheck:
+      # TCP, not the socket: during first-start setup Postgres runs a socket-only server,
+      # so this passes only after the init scripts (roles) have finished.
+      test: ["CMD-SHELL", "pg_isready -h 127.0.0.1 -U postgres -d archive"]
+      interval: 2s
+      timeout: 3s
+      retries: 30

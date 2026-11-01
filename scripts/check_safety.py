@@ -2,8 +2,8 @@
 """Fail if tracked files could leak private data in this public repo.
 
 Checks: no tracked data/ or .env* files (except .env.example), no real cookie values
-in the cookie env variable or in Ghost member cookies, and no emails or uuids in test
-fixtures. Run in CI and before pushing.
+in the cookie env variable or in Ghost member cookies, no Google API keys, no literal
+database passwords, and no emails or uuids in test fixtures. Run in CI and before pushing.
 """
 
 from __future__ import annotations
@@ -21,6 +21,10 @@ FIXTURE_EMAIL_ALLOW = {"noreply@example.com"}
 # NEWSLETTER_COOKIE=<literal>; placeholders, f-string fields and the test fakes are fine
 ENV_COOKIE_RE = re.compile(r"NEWSLETTER_COOKIE=([^\s'\"]+)")
 ENV_COOKIE_OK = re.compile(r"^(\{|<|ghost-members-ssr|from-file\b)")
+GOOGLE_KEY_RE = re.compile(r"AIza[0-9A-Za-z_\-]{35}")
+# ARCHIVE_DB_*_PASSWORD=<literal> or `: <literal>`; references, placeholders and ci-/test- values are fine
+DB_PASSWORD_RE = re.compile(r"ARCHIVE_DB_[A-Z]+_PASSWORD\s*[:=][ \t]*[\"']?([^\s'\"]+)")
+DB_PASSWORD_OK = re.compile(r"^(\$|\?|\{|<|ci-|test-)")
 
 
 def is_private_path(path: str) -> bool:
@@ -52,6 +56,11 @@ def main() -> int:
         for m in ENV_COOKIE_RE.finditer(text):
             if not ENV_COOKIE_OK.match(m.group(1)):
                 problems.append(f"{path}: NEWSLETTER_COOKIE has what looks like a real value")
+        if GOOGLE_KEY_RE.search(text):
+            problems.append(f"{path}: looks like a Google API key")
+        for m in DB_PASSWORD_RE.finditer(text):
+            if not DB_PASSWORD_OK.match(m.group(1)):
+                problems.append(f"{path}: database password has what looks like a real value")
         if path.startswith("tests/fixtures/"):
             for m in EMAIL_RE.finditer(text):
                 if m.group(0).lower() not in FIXTURE_EMAIL_ALLOW:
