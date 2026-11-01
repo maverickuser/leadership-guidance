@@ -289,6 +289,8 @@ Used only for a new embedding model or dimension (or an explicit `--refresh`).
 
 Commands: `--refresh` builds and swaps; `--refresh --no-swap` builds to `ready`; `--swap` catches up, gates and swaps a `ready` generation later.
 
+Built in PR 6: every command holds the index lock for its whole length (advisory locks are re-entrant per session, so the indexer's own lock nests). A build that ends incomplete (any post failed or not attempted) is never marked ready; the next `--refresh` drops it (schema and row, so its number is reused). A catch-up that can't index every changed post blocks the swap. The quality gate is a pluggable function of (candidate, live) → recall@10 pair; until the evaluation script lands (PR 10) it returns "no evaluation" and the swap goes ahead with a warning. Summaries are reused from the cache across generations, so a model change only re-pays for embeddings.
+
 The query embedder always uses the **active generation's** model and dimension (from `generations`), so queries and passages can't disagree during or after a swap.
 
 ### 5.6 Embedding (`search/embeddings.py`)

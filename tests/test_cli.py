@@ -206,3 +206,13 @@ def test_search_can_be_turned_off_for_run(env):
     env.config.write_text(env.config.read_text() + "search:\n  enabled: false\n", encoding="utf-8")
     r = env.run("run", "--limit", "1")
     assert r.exit_code == 0 and env.index_calls == [] and "Search is turned off" in r.output
+
+
+def test_index_generation_flags(env):
+    assert env.run("index", "--refresh", "--no-swap", "--force").exit_code == 0
+    o = env.index_calls[-1]
+    assert (o.refresh, o.no_swap, o.swap, o.rollback, o.force) == (True, True, False, False, True)
+    assert env.run("index", "--rollback").exit_code == 0 and env.index_calls[-1].rollback
+    for bad in (["--refresh", "--swap"], ["--swap", "--rollback"], ["--no-swap"]):
+        r = env.run("index", *bad)
+        assert r.exit_code == 1 and "use one of --refresh" in r.output
