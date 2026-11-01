@@ -44,3 +44,35 @@ class FetchError(ArchiveError):
 
 class ExtractError(ArchiveError):
     """A single post could not be extracted or validated. Not fatal for the run."""
+
+
+class DatabaseError(ArchiveError):
+    """The search database can't be used. Messages never include passwords or connection strings."""
+
+    exit_code = 1
+
+
+class DatabaseUnavailableError(DatabaseError):
+    def __init__(self, host: str, port: int) -> None:
+        super().__init__(
+            f"Can't reach the search database at {host}:{port}. Start it: docker compose up -d --wait db"
+        )
+
+
+class DatabaseAuthError(DatabaseError):
+    def __init__(self, user: str, env_name: str) -> None:
+        super().__init__(f"The database rejected the password for {user}; check {env_name} in .env")
+
+
+class MissingDbPasswordError(DatabaseError):
+    def __init__(self, env_name: str) -> None:
+        super().__init__(f"{env_name} is not set. Add it to .env (see .env.example).")
+
+
+class SchemaVersionError(DatabaseError):
+    """The database schema is older or newer than this code expects."""
+
+
+class IndexBusyError(DatabaseError):
+    def __init__(self) -> None:
+        super().__init__("An index run is already active; wait for it to finish.")

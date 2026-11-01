@@ -114,3 +114,84 @@ def test_secret_never_shows_value(cfg):
     assert repr(Secret("")) == "Secret(<empty>)"
     assert not Secret("   ")
     assert Secret("x") == Secret("x")
+
+
+# --- search settings and secrets (add-hybrid-search) -------------------------------------------
+
+
+def test_search_defaults(tmp_path):
+    cfg = load_config(tmp_path / "missing.yaml", tmp_path / ".env", overrides=SITE)
+    s = cfg.search
+    assert (s.embedding_model, s.embedding_dimension) == ("gemini-embedding-2", 3072)
+    assert (s.chunk_words, s.chunk_overlap_words, s.candidates, s.rerank_top) == (300, 50, 50, 40)
+    assert s.bm25_boosts == {"heading": 2.0, "title": 1.5, "body": 1.0}
+    assert (s.db_host, s.db_port, s.db_name) == ("127.0.0.1", 5433, "archive")
+    assert s.summaries.enabled and s.summaries.max_tokens_per_run == 1_500_000
+    assert not cfg.gemini_api_key and not cfg.db_writer_password and not cfg.db_reader_password
+
+
+def test_search_overrides_and_nested_sections(tmp_path):
+    p = write(
+        tmp_path / "config.yaml",
+        "search:\n  chunk_words: 400\n  chunk_overlap_words: 100\n  boilerplate_similarity: 0.9\n"
+        "  rerank_timeout_seconds: 5\n  db_port: 6543\n  embedding_dimension: 1536.0\n"
+        "  bm25_boosts: {title: 1}\n"
+        "  summaries: {enabled: false, model: other-model, max_tokens_per_run: 1000}\n",
+    )
+    s = load_config(p, tmp_path / ".env").search
+    assert (s.chunk_words, s.chunk_overlap_words, s.db_port, s.embedding_dimension) == (400, 100, 6543, 1536)
+    assert s.boilerplate_similarity == 0.9 and s.rerank_timeout_seconds == 5.0
+    assert s.bm25_boosts == {"heading": 2.0, "title": 1.0, "body": 1.0}
+    assert not s.summaries.enabled and s.summaries.model == "other-model"
+    assert s.summaries.max_tokens_per_run == 1000
+
+
+@pytest.mark.parametrize(
+    ("yaml_text", "message"),
+    [
+        ("search: [1]\n", "search must be a mapping"),
+        ("search:\n  chunk_size: 3\n", "unknown search setting"),
+        ("search:\n  chunk_words: lots\n", "invalid search setting"),
+        ("search:\n  chunk_words: true\n", "must be a int"),
+        ("search:\n  chunk_words: 2.5\n", "whole number"),
+        ("search:\n  chunk_words: 0\n", "chunk_words must be > 0"),
+        ("search:\n  embedding_dimension: 5000\n", "between 1 and 4000"),
+        ("search:\n  chunk_overlap_words: 300\n", "smaller than search.chunk_words"),
+        ("search:\n  chunk_overlap_words: -1\n", "smaller than search.chunk_words"),
+        ("search:\n  boilerplate_similarity: 1.5\n", "between 0 and 1"),
+        ("search:\n  mass_delete_fraction: 0\n", "between 0 and 1"),
+        ("search:\n  quality_gate_max_recall_drop: -1\n", "recall_drop must be >= 0"),
+        ("search:\n  bm25_boosts: {subtitle: 2}\n", "bm25_boosts must map"),
+        ("search:\n  bm25_boosts: [2]\n", "bm25_boosts must map"),
+        ("search:\n  bm25_boosts: {body: 0}\n", "boosts values must be > 0"),
+        ("search:\n  rerank_top: 101\n", "rerank_top can't exceed"),
+        ("search:\n  default_limit: 40\n", "default_limit must be <="),
+        ("search:\n  db_name: ''\n", "must not be empty"),
+        ("search:\n  summaries: yes\n", "summaries must be a mapping"),
+        ("search:\n  summaries: {mode: x}\n", "unknown search.summaries"),
+        ("search:\n  summaries: {enabled: 1}\n", "enabled must be true or false"),
+        ("search:\n  summaries: {max_tokens_per_run: 0}\n", "max_tokens_per_run must be > 0"),
+        ("search:\n  summaries: {model: ''}\n", "model must be set"),
+    ],
+)
+def test_invalid_search_settings(tmp_path, yaml_text, message):
+    p = write(tmp_path / "config.yaml", yaml_text)
+    with pytest.raises(ConfigError, match=message):
+        load_config(p, tmp_path / ".env")
+
+
+def test_search_secrets_from_env_file_and_environment(tmp_path, monkeypatch):
+    from .conftest import TEST_DB_PASSWORD, TEST_GEMINI_KEY
+
+    env = write(
+        tmp_path / ".env",
+        f"GEMINI_API_KEY={TEST_GEMINI_KEY}\nARCHIVE_DB_WRITER_PASSWORD={TEST_DB_PASSWORD}\n",
+    )
+    monkeypatch.setenv("ARCHIVE_DB_READER_PASSWORD", "from-environment")
+    cfg = load_config(tmp_path / "missing.yaml", env, overrides=SITE)
+    assert cfg.gemini_api_key.reveal() == TEST_GEMINI_KEY
+    assert cfg.db_writer_password.reveal() == TEST_DB_PASSWORD
+    assert cfg.db_reader_password.reveal() == "from-environment"
+    shown = repr(cfg)
+    assert TEST_GEMINI_KEY not in shown and TEST_DB_PASSWORD not in shown
+    assert len(cfg.secrets) == 4

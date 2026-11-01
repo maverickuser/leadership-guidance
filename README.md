@@ -143,6 +143,19 @@ Each `posts/{slug}.json` (schema version 1):
 
 Manifest statuses: `discovered → fetched → ok | partial`, or `failed` with `error` set.
 
+## Search database (in progress)
+
+Hybrid search (BM25 + semantic, served to agents over MCP) is being built; see
+`openspec/changes/add-hybrid-search/`. It needs Docker Desktop and a local Postgres:
+
+```bash
+# once: add GEMINI_API_KEY and three database passwords to .env (see .env.example)
+docker compose up -d --wait db     # ParadeDB (Postgres 17 + pg_search + pgvector) on 127.0.0.1:5433
+```
+
+Data is stored in `../newsletter-archive-data/postgres/` (outside the repo). `archive_writer`
+owns the database (the indexer); `archive_reader` can only read (the MCP server).
+
 ## Development
 
 ```bash
@@ -151,6 +164,7 @@ pre-commit install     # ruff, ruff-format, mypy and the safety check before eac
 
 pytest                 # unit + integration tests; network and DNS are blocked except loopback
 pytest -m slow         # the real-clock spacing test (CI runs everything)
+pytest -m db           # search-database tests (need `docker compose up -d --wait db`; skipped otherwise)
 ruff check . && ruff format --check . && mypy   # lint, format, strict types (CI "lint" job)
 python scripts/check_safety.py   # what CI runs to keep secrets and content out of the repo
 ```
@@ -158,6 +172,7 @@ python scripts/check_safety.py   # what CI runs to keep secrets and content out 
 Update the lockfile after changing dependencies: `pip-compile --extra dev --strip-extras --allow-unsafe -o requirements-dev.lock pyproject.toml`.
 
 - Integration tests run the real CLI and HTTP stack against a fake Ghost site on `127.0.0.1`.
+- CI jobs: `test` (unit, Python 3.11 and 3.12), `integration` (`db` tests against the compose database), `coverage` (unit + integration combined, branch coverage, fails under 95%), `lint`, `safety`. `main` requires all of them.
 - Fixtures are rebuilt from pages saved in `data/inspect/` (git-ignored) with `python scripts/make_fixtures.py`.
 - Specs live in `openspec/specs/`. The original design, low-level design and plan are in `openspec/changes/archive/2026-10-31-add-newsletter-archive/`.
 

@@ -66,7 +66,7 @@ services:
 
 - Data lives in `newsletter-archive-data/postgres/`, outside the repo; survives restarts and upgrades. (Fallback if bind-mount permissions misbehave: a named volume.)
 - `restart: unless-stopped` + Docker Desktop "start at login".
-- `db/init/01-roles.sh` creates the `archive` database, both extensions, and roles `archive_writer` (owns schemas, used by indexing) and `archive_reader` (read-only, used by the MCP server).
+- `db/init/20_archive_roles.sh` creates the `archive` database, both extensions, and roles `archive_writer` (owns schemas, used by indexing) and `archive_reader` (read-only, used by the MCP server).
 
 ### 3.2 Secrets (`.env`, never committed, printed or logged)
 
@@ -455,7 +455,7 @@ LIMIT 50;
 
 ```
 docker-compose.yml
-db/init/01-roles.sh
+db/init/20_archive_roles.sh
 src/newsletter_archive/
   search/
     models.py          # Passage, SearchRequest, SearchResult (Pydantic)
@@ -513,7 +513,7 @@ No test reaches the internet; Postgres on 127.0.0.1 is allowed by the existing n
 | Job | What | Gate |
 |---|---|---|
 | `unit` | pytest, no DB, Python 3.11 and 3.12, coverage data saved | all pass |
-| `integration` | pytest `-m db` against a ParadeDB service container (pinned tag), migrations applied; fakes for Gemini, summarizer, re-ranker; no PyTorch | all pass |
+| `integration` | pytest `-m db` against the compose database (pinned ParadeDB tag), migrations applied; fakes for Gemini, summarizer, re-ranker; no PyTorch | all pass |
 | `coverage` | combines unit + integration coverage, branch coverage on | fails under **95%** |
 | `lint` | ruff check, ruff format, mypy | clean |
 | `safety` | `scripts/check_safety.py` (cookie, keys, DB passwords, site names) | clean |
@@ -547,6 +547,14 @@ No test reaches the internet; Postgres on 127.0.0.1 is allowed by the existing n
 | Key or password leak | `Secret` wrapper; no connection strings in logs; safety check; tests |
 
 ## 15. To verify while building
+
+Verified in PR 1 (ParadeDB `0.26.2-pg17`, pg_search 0.26.2, pgvector 0.8.6):
+- BM25 index: `USING bm25 (passage_id, (col::pdb.simple('stemmer=english','ascii_folding=true')), …)`; `key_field` is deprecated and omitted. Queries: `col ||| 'terms'` (match any), `col ### 'phrase'`, `'term'::pdb.boost(2)`, `pdb.score(passage_id)`; SQL filters combine in the same query.
+- **Stemming runs before accent folding** ("résumé" → `resume`, "resume" → `resum`), so passages store accent-folded `search_title`, `search_heading`, `search_body` (folded in Python) and queries are folded the same way; `title`, `heading`, `body` keep the original text for display.
+- The image installs `vector` and `pg_search` in `template1`, so test databases get them; the roles script is mounted beside the image's own bootstrap script.
+- First-start health check uses TCP so it passes only after the init scripts finish.
+
+Still to verify:
 
 - ParadeDB image tag; `pg_search` DDL, English stemmer, boost and score functions; BM25 index on per-schema tables.
 - `gemini-embedding-2`: per-request batch limit, truncation flag, pricing, whether 3,072-dim output is normalised.
