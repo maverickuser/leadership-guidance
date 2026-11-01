@@ -86,6 +86,10 @@ class SearchConfig:
     summary_rpm: int = 60
     summary_tpm: int = 1_000_000
     max_embed_tokens_per_run: int = 1_500_000
+    # Prices for the cost estimate (USD per million tokens); set them to your tier's rates.
+    embed_usd_per_million_tokens: float = 0.15
+    summary_usd_per_million_tokens: float = 0.50
+    gemini_timeout_seconds: float = 60.0
     circuit_breaker_failures: int = 3
     cache_retention_days: int = 90
     boilerplate_min_posts: int = 5
@@ -282,6 +286,11 @@ def _validate_search(s: SearchConfig) -> None:
     for name in ("boilerplate_similarity", "mass_delete_fraction"):
         if not 0 < getattr(s, name) <= 1:
             raise ConfigError(f"search.{name} must be between 0 and 1")
+    for name in ("embed_usd_per_million_tokens", "summary_usd_per_million_tokens"):
+        if getattr(s, name) < 0:
+            raise ConfigError(f"search.{name} must be >= 0")
+    if s.gemini_timeout_seconds <= 0:
+        raise ConfigError("search.gemini_timeout_seconds must be > 0")
     if s.quality_gate_max_recall_drop < 0:
         raise ConfigError("search.quality_gate_max_recall_drop must be >= 0")
     if any(v <= 0 for v in s.bm25_boosts.values()):

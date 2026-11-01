@@ -43,6 +43,7 @@ Only the two `ghost-members-ssr` cookies matter, and they last several months. I
 archive discover            # stage 1: sitemap + categories -> manifest.json
 archive fetch               # stage 2: download post pages -> raw/
 archive extract             # stages 3-4: raw/ -> posts/{slug}.json (no network)
+archive index               # build or update the search store (needs the database and GEMINI_API_KEY)
 archive run                 # all of the above, in order
 ```
 
@@ -58,7 +59,9 @@ Options:
 
 Start small: `archive run --limit 5`, check the output, then run `archive run` for everything. At 2 seconds per request, a full first run of about 250 posts takes around 10 minutes. Later runs fetch only new posts.
 
-Exit codes: `0` done (individual post failures are listed in the summary), `1` config or cookie missing, or another run is already using the archive folder, `2` cookie expired, `130` interrupted (progress is saved).
+`archive index` options: `--dry-run` (what would change and the estimated cost; nothing is written), `--retry-failed` (retry posts that failed 3 times), `--allow-mass-delete` (allow removing many posts at once), `--yes` (go ahead over the spending ceiling), `--limit N`. It re-indexes only posts whose content, metadata or settings changed, and never pays twice for the same text.
+
+Exit codes: `0` done (individual post failures are listed in the summary), `1` config, cookie or API key missing, or another run is already using the archive folder, `2` cookie expired, `3` (`archive run` only) posts were archived but updating the search index failed, `130` interrupted (progress is saved).
 
 Only one command runs at a time per archive folder; a second one exits with a message instead of overwriting progress.
 

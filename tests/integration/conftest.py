@@ -8,6 +8,7 @@ from typer.testing import CliRunner
 
 import newsletter_archive.cli as cli
 from newsletter_archive.http import Client, RequestsTransport
+from newsletter_archive.search.indexer import IndexReport
 
 from ..conftest import TEST_COOKIE
 from ..fakes import FakeClock
@@ -35,6 +36,8 @@ class Harness:
             return Client(cfg, transport=RequestsTransport(), sleep=self.clock.sleep, clock=self.clock.clock)
 
         monkeypatch.setattr(cli, "make_client", make_client)
+        # These tests cover the scraping stack; the index stage has its own tests in tests/search.
+        monkeypatch.setattr(cli, "index_archive", lambda cfg, options, on_post: IndexReport())
         self.runner = CliRunner()
 
     def run(self, *args: str):

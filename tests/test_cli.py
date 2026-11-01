@@ -147,3 +147,38 @@ def test_version():
 
     r = CliRunner().invoke(cli.app, ["--version"])
     assert r.exit_code == 0 and r.output.strip() == "0.1.0"
+
+
+# --- index stage (add-hybrid-search) -----------------------------------------------------------
+
+
+def test_run_ends_with_index(env):
+    r = env.run("run", "--limit", "2")
+    assert r.exit_code == 0, r.output
+    assert len(env.index_calls) == 1 and env.index_calls[0].limit == 2
+    assert "Index status: ok" in r.output
+
+
+def test_index_command_passes_options(env):
+    r = env.run("index", "--dry-run", "--retry-failed", "--allow-mass-delete", "--yes", "--limit", "3")
+    assert r.exit_code == 0, r.output
+    o = env.index_calls[0]
+    assert (o.dry_run, o.retry_failed, o.allow_mass_delete, o.yes, o.limit) == (True, True, True, True, 3)
+
+
+def test_index_errors_exit_1_alone_and_3_in_run(env):
+    from newsletter_archive.search.gemini import MissingGeminiKeyError
+
+    env.index_result = MissingGeminiKeyError()
+    r = env.run("index")
+    assert r.exit_code == 1 and "GEMINI_API_KEY is not set" in r.output
+    r = env.run("run", "--limit", "1")
+    assert r.exit_code == 3 and "Index step failed" in r.output
+
+
+def test_stuck_posts_exit_3_in_run(env):
+    from newsletter_archive.search.indexer import IndexReport
+
+    env.index_result = IndexReport(stuck=["p1"], status="partial")
+    assert env.run("run", "--limit", "1").exit_code == 3
+    assert env.run("index").exit_code == 0  # the index command itself only reports it

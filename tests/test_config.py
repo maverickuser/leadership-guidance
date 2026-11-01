@@ -161,6 +161,8 @@ def test_search_overrides_and_nested_sections(tmp_path):
         ("search:\n  boilerplate_similarity: 1.5\n", "between 0 and 1"),
         ("search:\n  mass_delete_fraction: 0\n", "between 0 and 1"),
         ("search:\n  quality_gate_max_recall_drop: -1\n", "recall_drop must be >= 0"),
+        ("search:\n  embed_usd_per_million_tokens: -1\n", "embed_usd_per_million_tokens must be >= 0"),
+        ("search:\n  gemini_timeout_seconds: 0\n", "gemini_timeout_seconds must be > 0"),
         ("search:\n  bm25_boosts: {subtitle: 2}\n", "bm25_boosts must map"),
         ("search:\n  bm25_boosts: [2]\n", "bm25_boosts must map"),
         ("search:\n  bm25_boosts: {body: 0}\n", "boosts values must be > 0"),

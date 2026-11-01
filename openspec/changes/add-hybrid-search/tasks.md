@@ -46,12 +46,12 @@
 
 ## 5. Indexer (PR 5)
 
-- [ ] 5.1 `planner.py`: fingerprint diff, missing summaries, deletion guard, embed and summary token ceilings, dry-run estimate
-- [ ] 5.2 `indexer.py`: start (locks, stale runs, migrations) → load → clean → fingerprint → plan → chunk + summarise → embed → write (one transaction per post) → verify → report
-- [ ] 5.3 Failure tracking per stage, 3-attempt skip, `--retry-failed`; summary failure keeps passages
-- [ ] 5.4 Freshness check; cache GC for embeddings and summaries
-- [ ] 5.5 `archive index` options; `archive run` ends with index; exit 3; `scripts/scheduled-run.sh` starts the DB first
-- [ ] 5.6 Indexer tests against real Postgres with fakes: incremental, title change, guard, ceilings, breaker, stale-run abort, concurrent refusal
+- [x] 5.1 `planner.py`: fingerprint diff, missing summaries, deletion guard, embed and summary token ceilings, dry-run estimate
+- [x] 5.2 `indexer.py`: start (locks, stale runs, migrations) → load → clean → fingerprint → plan → chunk + summarise → embed → write (one transaction per post) → verify → report
+- [x] 5.3 Failure tracking per stage, 3-attempt skip, `--retry-failed`; summary failure keeps passages
+- [x] 5.4 Freshness check; cache GC for embeddings and summaries
+- [x] 5.5 `archive index` options; `archive run` ends with index; exit 3; `scripts/scheduled-run.sh` starts the DB first
+- [x] 5.6 Indexer tests against real Postgres with fakes: incremental, title change, guard, ceilings, breaker, stale-run abort, concurrent refusal
 
 ## 6. Generations (PR 6)
 
