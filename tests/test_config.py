@@ -172,12 +172,28 @@ def test_search_overrides_and_nested_sections(tmp_path):
         ("search:\n  summaries: {enabled: 1}\n", "enabled must be true or false"),
         ("search:\n  summaries: {max_tokens_per_run: 0}\n", "max_tokens_per_run must be > 0"),
         ("search:\n  summaries: {model: ''}\n", "model must be set"),
+        ("search:\n  summaries: {model: ~}\n", "summaries.model must not be empty"),
+        ("search:\n  summaries: {max_tokens_per_run: 2.5}\n", "whole number"),
+        ("search:\n  summaries: {max_tokens_per_run: true}\n", "must be a int"),
+        ("search:\n  db_host: ~\n", "db_host must not be empty"),
+        ("search:\n  db_host: [a]\n", "db_host must be text"),
+        ("search:\n  boilerplate_similarity: yes\n", "must be a float"),
+        ("search:\n  bm25_boosts: {body: high}\n", "bm25_boosts.body must be a float"),
     ],
 )
 def test_invalid_search_settings(tmp_path, yaml_text, message):
     p = write(tmp_path / "config.yaml", yaml_text)
     with pytest.raises(ConfigError, match=message):
         load_config(p, tmp_path / ".env")
+
+
+def test_db_port_from_environment_unless_set_in_yaml(tmp_path, monkeypatch):
+    env = write(tmp_path / ".env", "ARCHIVE_DB_PORT=6000\n")
+    assert load_config(tmp_path / "missing.yaml", env, overrides=SITE).search.db_port == 6000
+    monkeypatch.setenv("ARCHIVE_DB_PORT", "6001")
+    assert load_config(tmp_path / "missing.yaml", env, overrides=SITE).search.db_port == 6001
+    p = write(tmp_path / "config.yaml", "search:\n  db_port: 7000\n")
+    assert load_config(p, env).search.db_port == 7000
 
 
 def test_search_secrets_from_env_file_and_environment(tmp_path, monkeypatch):

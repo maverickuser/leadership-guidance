@@ -23,7 +23,7 @@ ENV_COOKIE_RE = re.compile(r"NEWSLETTER_COOKIE=([^\s'\"]+)")
 ENV_COOKIE_OK = re.compile(r"^(\{|<|ghost-members-ssr|from-file\b)")
 GOOGLE_KEY_RE = re.compile(r"AIza[0-9A-Za-z_\-]{35}")
 # ARCHIVE_DB_*_PASSWORD=<literal> or `: <literal>`; references, placeholders and ci-/test- values are fine
-DB_PASSWORD_RE = re.compile(r"ARCHIVE_DB_[A-Z]+_PASSWORD\s*[:=][ \t]*([^\s'\"]+)")
+DB_PASSWORD_RE = re.compile(r"ARCHIVE_DB_[A-Z]+_PASSWORD\s*[:=][ \t]*[\"']?([^\s'\"]+)")
 DB_PASSWORD_OK = re.compile(r"^(\$|\?|\{|<|ci-|test-)")
 
 

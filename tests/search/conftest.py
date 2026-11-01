@@ -27,12 +27,13 @@ from ..conftest import make_config
 
 REPO = Path(__file__).resolve().parents[2]
 ENV_NAMES = ("ARCHIVE_DB_ADMIN_PASSWORD", "ARCHIVE_DB_WRITER_PASSWORD", "ARCHIVE_DB_READER_PASSWORD")
+PORT_ENV = "ARCHIVE_DB_PORT"
 
 
 def _db_env() -> dict[str, str]:
     file_values = dotenv_values(REPO / ".env") if (REPO / ".env").is_file() else {}
     out = {}
-    for name in ENV_NAMES:
+    for name in (*ENV_NAMES, PORT_ENV):
         value = os.environ.get(name) or file_values.get(name)
         if value:
             out[name] = value
@@ -73,7 +74,7 @@ def pg_admin() -> PgAdmin:
     missing = [n for n in ENV_NAMES if n not in env]
     if missing:
         _unavailable(f"missing {', '.join(missing)}")
-    admin = PgAdmin(int(os.environ.get("ARCHIVE_DB_PORT", "5433")), env)
+    admin = PgAdmin(int(env.get(PORT_ENV, "5433")), env)
     try:
         admin.execute("SELECT 1")
     except psycopg.OperationalError as e:
@@ -85,8 +86,12 @@ def pg_admin() -> PgAdmin:
 def db_config(tmp_path, pg_admin: PgAdmin) -> Iterator[Config]:
     """A Config pointing at a fresh, empty test database."""
     name = f"archive_test_{uuid.uuid4().hex[:12]}"
+    # Same hardening as db/init/20_archive_roles.sh applies to the real database.
     pg_admin.execute(f'CREATE DATABASE "{name}" OWNER archive_writer')
-    pg_admin.execute(f'GRANT CONNECT ON DATABASE "{name}" TO archive_reader')
+    pg_admin.execute(f'REVOKE ALL ON DATABASE "{name}" FROM PUBLIC')
+    pg_admin.execute(f'GRANT CONNECT ON DATABASE "{name}" TO archive_writer, archive_reader')
+    pg_admin.execute("REVOKE CREATE ON SCHEMA public FROM PUBLIC", dbname=name)
+    pg_admin.execute("GRANT USAGE ON SCHEMA public TO archive_reader", dbname=name)
     cfg = make_config(tmp_path)
     cfg = replace(
         cfg,

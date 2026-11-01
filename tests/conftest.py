@@ -50,6 +50,7 @@ def _block_network(monkeypatch):
     monkeypatch.setattr(socket.socket, "connect_ex", _guarded_connect_ex)
     monkeypatch.setattr(socket, "getaddrinfo", _guarded_getaddrinfo)
     for name in (
+        "ARCHIVE_DB_PORT",
         "NEWSLETTER_COOKIE",
         "GEMINI_API_KEY",
         "ARCHIVE_DB_WRITER_PASSWORD",

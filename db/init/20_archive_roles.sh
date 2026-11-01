@@ -1,6 +1,8 @@
 #!/bin/bash
 # Runs once, when the database folder is first created (after ParadeDB's own bootstrap).
 # archive_writer owns the archive database (the indexer); archive_reader can only read (the MCP server).
+# Table access for the reader is granted explicitly by the migrations, nothing by default.
+# tests/search/conftest.py applies the same database hardening to each test database.
 set -Eeuo pipefail
 
 : "${ARCHIVE_DB_WRITER_PASSWORD:?missing}"
@@ -18,5 +20,4 @@ EOSQL
 psql -v ON_ERROR_STOP=1 -U "$POSTGRES_USER" -d archive <<-'EOSQL'
 	REVOKE CREATE ON SCHEMA public FROM PUBLIC;
 	GRANT USAGE ON SCHEMA public TO archive_reader;
-	ALTER DEFAULT PRIVILEGES FOR ROLE archive_writer GRANT SELECT ON TABLES TO archive_reader;
 EOSQL

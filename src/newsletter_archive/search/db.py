@@ -22,6 +22,7 @@ from .. import __version__
 from ..config import DB_READER_PASSWORD_ENV, DB_WRITER_PASSWORD_ENV, Config, Secret
 from ..errors import (
     DatabaseAuthError,
+    DatabaseError,
     DatabaseUnavailableError,
     IndexBusyError,
     MissingDbPasswordError,
@@ -40,6 +41,16 @@ INDEX_LOCK_KEY = 7_431_002_101
 MIGRATION_LOCK_KEY = 7_431_002_102
 
 MIGRATION_RE = re.compile(r"^(\d{3})_[a-z0-9_]+\.sql$")
+# libpq messages meaning the server isn't there (as opposed to refusing us).
+_UNREACHABLE_MARKERS = (
+    "connection refused",
+    "could not connect",
+    "timeout expired",
+    "could not translate host name",
+    "no such file or directory",
+    "network is unreachable",
+    "server closed the connection",
+)
 GENERATION_STATUSES = ("building", "ready", "active", "retired")
 
 
@@ -64,15 +75,36 @@ def conninfo(config: Config, role: Role, dbname: str | None = None) -> str:
     )
 
 
+def _connect_error(config: Config, role: Role, error: psycopg.OperationalError) -> DatabaseError:
+    """Turn a libpq connection error into one the user can act on, never quoting secrets."""
+    message = str(error)
+    lowered = message.lower()
+    if "password authentication failed" in lowered:
+        return DatabaseAuthError(ROLE_USERS[role], ROLE_ENV[role])
+    if any(marker in lowered for marker in _UNREACHABLE_MARKERS) and "fatal:" not in lowered:
+        return DatabaseUnavailableError(config.search.db_host, config.search.db_port)
+    # The server answered but refused (unknown database, no CONNECT, too many clients, …).
+    lines = [line.strip() for line in message.strip().splitlines() if line.strip()]
+    reason = lines[-1] if lines else type(error).__name__
+    for secret in (config.db_writer_password, config.db_reader_password):
+        if secret:
+            reason = reason.replace(secret.reveal(), "[REDACTED]")
+    s = config.search
+    return DatabaseError(f"The search database at {s.db_host}:{s.db_port} refused the connection: {reason}")
+
+
 def connect(config: Config, role: Role, *, dbname: str | None = None) -> psycopg.Connection:
-    """Open a connection as the writer or reader role, with errors the user can act on."""
+    """Open an autocommit connection as the writer or reader role.
+
+    Autocommit: each statement commits on its own, and every ``with conn.transaction()`` block
+    is a real transaction that commits when the block ends (never a savepoint inside an
+    implicit transaction), so the session-level index lock never holds a transaction open.
+    """
     info = conninfo(config, role, dbname)
     try:
-        conn = psycopg.connect(info)
+        conn = psycopg.connect(info, autocommit=True)
     except psycopg.OperationalError as e:
-        if "password authentication failed" in str(e):
-            raise DatabaseAuthError(ROLE_USERS[role], ROLE_ENV[role]) from None
-        raise DatabaseUnavailableError(config.search.db_host, config.search.db_port) from None
+        raise _connect_error(config, role, e) from None
     log.debug(
         "connected to %s:%s/%s as %s",
         config.search.db_host,
@@ -178,7 +210,21 @@ def index_lock(conn: psycopg.Connection) -> Iterator[None]:
     try:
         yield
     finally:
+        _release_index_lock(conn)
+
+
+def _release_index_lock(conn: psycopg.Connection) -> None:
+    """Unlock without hiding an error from the body. If the unlock can't run, the lock goes
+    away with the session, so close the connection rather than keep a locked session alive."""
+    if conn.closed:
+        return
+    try:
+        if conn.info.transaction_status == psycopg.pq.TransactionStatus.INERROR:
+            conn.rollback()
         conn.execute("SELECT pg_advisory_unlock(%s)", (INDEX_LOCK_KEY,))
+    except psycopg.Error:
+        log.warning("could not release the index lock cleanly; closing the connection to drop it")
+        conn.close()
 
 
 # --- generations ------------------------------------------------------------------------------
@@ -232,25 +278,42 @@ def create_generation(conn: psycopg.Connection, model: str, dim: int) -> Generat
 
 
 def set_generation_status(conn: psycopg.Connection, generation: int, status: str) -> None:
-    """Set a non-active status. Use activate_generation to make one active."""
+    """Set a non-active status on a generation that isn't active.
+
+    Use activate_generation to make one active; the active one only leaves that state when
+    another is activated, so searches always have a generation to read.
+    """
     if status not in GENERATION_STATUSES or status == "active":
         raise ValueError(f"invalid status for set_generation_status: {status!r}")
     with conn.transaction():
-        cur = conn.execute(
-            "UPDATE public.generations SET status = %s WHERE generation = %s", (status, generation)
-        )
-        if cur.rowcount != 1:
+        row = conn.execute(
+            "SELECT status FROM public.generations WHERE generation = %s FOR UPDATE", (generation,)
+        ).fetchone()
+        if not row:
             raise ValueError(f"no generation {generation}")
+        if row[0] == "active":
+            raise ValueError(f"generation {generation} is active; activate another one first")
+        conn.execute("UPDATE public.generations SET status = %s WHERE generation = %s", (status, generation))
+
+
+ACTIVATABLE = ("ready", "retired")  # retired: rollback to the previous generation
 
 
 def activate_generation(conn: psycopg.Connection, generation: int) -> None:
-    """Atomically make one generation active and retire the previous active one."""
+    """Atomically make a ``ready`` (or, for rollback, ``retired``) generation active and retire
+    the previous active one. A generation still ``building`` can never serve searches."""
     with conn.transaction():
-        exists = conn.execute(
-            "SELECT 1 FROM public.generations WHERE generation = %s FOR UPDATE", (generation,)
+        row = conn.execute(
+            "SELECT status FROM public.generations WHERE generation = %s FOR UPDATE", (generation,)
         ).fetchone()
-        if not exists:
+        if not row:
             raise ValueError(f"no generation {generation}")
+        if row[0] == "active":
+            return
+        if row[0] not in ACTIVATABLE:
+            raise ValueError(
+                f"generation {generation} is {row[0]}; only a ready or retired one can be activated"
+            )
         conn.execute(
             "UPDATE public.generations SET status = 'retired' WHERE status = 'active' AND generation <> %s",
             (generation,),

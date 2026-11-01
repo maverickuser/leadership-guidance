@@ -8,7 +8,7 @@ import psycopg
 import pytest
 
 from newsletter_archive.config import Secret
-from newsletter_archive.errors import DatabaseAuthError, IndexBusyError, SchemaVersionError
+from newsletter_archive.errors import DatabaseAuthError, DatabaseError, IndexBusyError, SchemaVersionError
 from newsletter_archive.search import db
 
 pytestmark = pytest.mark.db
@@ -56,6 +56,21 @@ def test_empty_database_needs_upgrade(db_config):
         db.check_schema(reader)
 
 
+def test_unknown_database_is_not_reported_as_down(db_config):
+    missing = replace(db_config, search=replace(db_config.search, db_name="archive_missing_db"))
+    with pytest.raises(DatabaseError, match="does not exist"):
+        db.connect(missing, "writer")
+
+
+def test_reader_sees_only_what_migrations_grant(db_config, writer):
+    with db.connect(db_config, "reader") as reader:
+        for table in ("embedding_cache", "summary_cache", "index_runs", "index_failures"):
+            with pytest.raises(psycopg.errors.InsufficientPrivilege):
+                reader.execute(f"SELECT 1 FROM {table}")
+        with pytest.raises(psycopg.errors.InsufficientPrivilege):
+            reader.execute("CREATE TABLE sneaky (x int)")
+
+
 def test_wrong_password_is_reported(db_config):
     bad = replace(db_config, db_reader_password=Secret("wrong-password"))
     with pytest.raises(DatabaseAuthError, match="ARCHIVE_DB_READER_PASSWORD"):
@@ -89,7 +104,6 @@ def test_generation_tables_bm25_and_grants(db_config, writer):
 
     with pytest.raises(psycopg.errors.DataException):
         _insert_passage(writer, gen.schema, "post-b#0", "T", "body", dim=3)
-    writer.rollback()
 
     with db.connect(db_config, "reader") as reader:
         assert reader.execute(f"SELECT count(*) FROM {gen.schema}.passages").fetchone() == (2,)
@@ -106,20 +120,63 @@ def test_create_generation_rejects_bad_dimension(writer):
         writer.execute("SELECT create_generation(0, 4)")
 
 
-def test_activate_retires_the_previous_generation(writer):
+def test_generation_lifecycle(writer):
     first = db.create_generation(writer, "m", 4)
     second = db.create_generation(writer, "m", 4)
     assert db.active_generation(writer) is None
+    with pytest.raises(ValueError, match="is building"):
+        db.activate_generation(writer, first.generation)
+    db.set_generation_status(writer, first.generation, "ready")
     db.activate_generation(writer, first.generation)
+    db.activate_generation(writer, first.generation)  # already active: no-op
     assert db.active_generation(writer).generation == 1
+    with pytest.raises(ValueError, match="is active"):
+        db.set_generation_status(writer, first.generation, "retired")
     db.set_generation_status(writer, second.generation, "ready")
     db.activate_generation(writer, second.generation)
-    statuses = {g.generation: g.status for g in db.list_generations(writer)}
-    assert statuses == {1: "retired", 2: "active"}
+    assert {g.generation: g.status for g in db.list_generations(writer)} == {1: "retired", 2: "active"}
+    db.activate_generation(writer, first.generation)  # rollback to the retired one
+    assert {g.generation: g.status for g in db.list_generations(writer)} == {1: "active", 2: "retired"}
     with pytest.raises(ValueError, match="no generation 9"):
         db.activate_generation(writer, 9)
     with pytest.raises(ValueError, match="no generation 9"):
         db.set_generation_status(writer, 9, "ready")
+
+
+def test_work_inside_the_lock_is_committed(db_config):
+    with db.connect(db_config, "writer") as conn:
+        db.apply_migrations(conn)
+        with db.index_lock(conn):
+            db.create_generation(conn, "m", 4)
+        conn.close()  # no explicit commit
+    with db.connect(db_config, "reader") as reader:
+        assert [g.generation for g in db.list_generations(reader)] == [1]
+
+
+def test_lock_released_after_a_failed_transaction(db_config, writer):
+    with pytest.raises(psycopg.errors.UndefinedTable), db.index_lock(writer):
+        writer.execute("BEGIN")
+        writer.execute("SELECT * FROM no_such_table")
+    with db.connect(db_config, "writer") as other, db.index_lock(other):
+        pass
+
+
+def test_lock_dropped_when_the_session_dies(db_config, writer, pg_admin):
+    pid = writer.info.backend_pid
+    with pytest.raises(RuntimeError, match="boom"), db.index_lock(writer):
+        pg_admin.execute(f"SELECT pg_terminate_backend({pid})", dbname=db_config.search.db_name)
+        raise RuntimeError("boom")
+    assert writer.closed
+    with db.connect(db_config, "writer") as other, db.index_lock(other):
+        pass
+
+
+def test_lock_release_skips_a_closed_connection(db_config):
+    conn = db.connect(db_config, "writer")
+    with db.index_lock(conn):
+        conn.close()
+    with db.connect(db_config, "writer") as other, db.index_lock(other):
+        pass
 
 
 def test_index_lock_is_exclusive(db_config, writer):

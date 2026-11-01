@@ -17,6 +17,7 @@ COOKIE_LINE_RE = re.compile(r"(?i)\b(set-)?cookie\s*[:=]\s*[^\n]+")
 GHOST_COOKIE_RE = re.compile(r"ghost-members-ssr(\.sig)?=[^;\s]+")
 GOOGLE_KEY_RE = re.compile(r"AIza[0-9A-Za-z_\-]{35}")
 QUIET_STATUSES = {"skipped", "unchanged"}
+MIN_SECRET_CHARS = 8
 
 post_log = logging.getLogger(f"{LOGGER}.run")
 
@@ -33,9 +34,10 @@ class RedactFilter(logging.Filter):
         for pair in value.split(";"):
             if "=" in pair:
                 v = pair.split("=", 1)[1].strip()
-                if len(v) >= 8:
+                if len(v) >= MIN_SECRET_CHARS:
                     pieces.add(v)
-        pieces.update(o.reveal() for o in others if o)
+        # Same length floor as cookie pieces: a short secret would garble ordinary words.
+        pieces.update(o.reveal() for o in others if len(o.reveal()) >= MIN_SECRET_CHARS)
         self._pieces = sorted(pieces, key=len, reverse=True)
 
     def redact(self, text: str) -> str:

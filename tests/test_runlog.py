@@ -74,6 +74,8 @@ def test_redacts_api_key_and_db_passwords():
     f = RedactFilter(Secret(TEST_COOKIE), Secret(TEST_GEMINI_KEY), Secret(TEST_DB_PASSWORD), Secret(None))
     out = f.redact(f"key={TEST_GEMINI_KEY} pw={TEST_DB_PASSWORD}")
     assert TEST_GEMINI_KEY not in out and TEST_DB_PASSWORD not in out
+    # short secrets are not used for redaction: they would garble ordinary words
+    assert RedactFilter(Secret(None), Secret("archive")).redact("archive index") == "archive index"
     # any Google-style key is scrubbed, even one the filter wasn't given
     other = "AIza" + "B" * 35
     assert RedactFilter(Secret(None)).redact(f"x {other} y") == "x [REDACTED] y"

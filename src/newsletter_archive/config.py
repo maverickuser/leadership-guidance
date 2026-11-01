@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+from collections.abc import Callable
 from dataclasses import dataclass, field, fields, replace
 from pathlib import Path
 from typing import Any
@@ -17,6 +18,7 @@ COOKIE_ENV = "NEWSLETTER_COOKIE"
 GEMINI_KEY_ENV = "GEMINI_API_KEY"
 DB_WRITER_PASSWORD_ENV = "ARCHIVE_DB_WRITER_PASSWORD"
 DB_READER_PASSWORD_ENV = "ARCHIVE_DB_READER_PASSWORD"
+DB_PORT_ENV = "ARCHIVE_DB_PORT"
 
 DEFAULTS: dict[str, Any] = {
     "base_url": None,  # required: the newsletter site, set in config.yaml
@@ -177,68 +179,74 @@ def clean_cookie(raw: str | None) -> str:
     return value
 
 
-def _read_env(name: str, env_file: Path) -> str | None:
-    """The environment wins over .env."""
-    raw = os.environ.get(name)
-    if not raw and env_file.is_file():
-        raw = dotenv_values(env_file).get(name)
-    return raw
+def _env_reader(env_file: Path) -> Callable[[str], str | None]:
+    """Look up a variable: the environment wins over .env. The file is parsed once."""
+    file_values = dotenv_values(env_file) if env_file.is_file() else {}
+
+    def read(name: str) -> str | None:
+        return os.environ.get(name) or file_values.get(name)
+
+    return read
 
 
-def _read_cookie(env_file: Path) -> Secret:
-    return Secret(clean_cookie(_read_env(COOKIE_ENV, env_file)))
+def _coerce(label: str, value: Any, default: Any) -> Any:
+    """Convert one setting to its default's type, refusing nulls, bools-as-numbers and
+    fractional whole numbers."""
+    kind = type(default)
+    if value is None:
+        raise ConfigError(f"{label} must not be empty")
+    if kind is bool:
+        if not isinstance(value, bool):
+            raise ConfigError(f"{label} must be true or false")
+        return value
+    if isinstance(value, bool):
+        raise ConfigError(f"{label} must be a {kind.__name__}")
+    if kind is int and isinstance(value, float) and not value.is_integer():
+        raise ConfigError(f"{label} must be a whole number")
+    if kind is str and not isinstance(value, str | int | float):
+        raise ConfigError(f"{label} must be text")
+    try:
+        return kind(value)
+    except (TypeError, ValueError):
+        raise ConfigError(f"invalid search setting: {label} must be a {kind.__name__}") from None
 
 
-def _read_secret(name: str, env_file: Path) -> Secret:
-    return Secret(_read_env(name, env_file))
-
-
-def _parse_search(raw: Any) -> SearchConfig:
-    """Build SearchConfig from the `search:` mapping; unknown keys and bad types are config errors."""
-    if raw is None:
-        return SearchConfig()
+def _section(label: str, raw: Any, defaults: Any, allowed: set[str]) -> dict[str, Any]:
     if not isinstance(raw, dict):
-        raise ConfigError("search must be a mapping of settings")
-    unknown = set(raw) - SEARCH_FIELDS
+        raise ConfigError(f"{label} must be a mapping of settings")
+    unknown = set(raw) - allowed
     if unknown:
-        raise ConfigError(f"unknown search setting(s): {', '.join(sorted(unknown))}")
-    values = dict(raw)
+        raise ConfigError(f"unknown {label} setting(s): {', '.join(sorted(unknown))}")
+    return dict(raw)
+
+
+def _parse_search(raw: Any, env_port: str | None = None) -> SearchConfig:
+    """Build SearchConfig from the `search:` mapping; unknown keys and bad types are config errors.
+
+    ``env_port`` (ARCHIVE_DB_PORT, also read by docker compose) sets the port unless
+    ``search.db_port`` is given.
+    """
     defaults = SearchConfig()
+    values = {} if raw is None else _section("search", raw, defaults, SEARCH_FIELDS)
+    if env_port and "db_port" not in values:
+        values["db_port"] = env_port
     summaries = values.pop("summaries", None)
     boosts = values.pop("bm25_boosts", None)
-    try:
-        for name, value in values.items():
-            kind = type(getattr(defaults, name))
-            if kind is bool or isinstance(value, bool):
-                raise TypeError(f"search.{name} must be a {kind.__name__}")
-            if kind is int and isinstance(value, float) and not value.is_integer():
-                raise TypeError(f"search.{name} must be a whole number")
-            values[name] = kind(value)
-        if summaries is not None:
-            values["summaries"] = _parse_summaries(summaries)
-        if boosts is not None:
-            if not isinstance(boosts, dict) or set(boosts) - BM25_FIELDS:
-                raise ConfigError("search.bm25_boosts must map heading, title and body to numbers")
-            values["bm25_boosts"] = {**defaults.bm25_boosts, **{k: float(v) for k, v in boosts.items()}}
-    except (TypeError, ValueError) as e:
-        raise ConfigError(f"invalid search setting: {e}") from None
+    for name, value in values.items():
+        values[name] = _coerce(f"search.{name}", value, getattr(defaults, name))
+    if summaries is not None:
+        sv = _section("search.summaries", summaries, defaults.summaries, SUMMARY_FIELDS)
+        values["summaries"] = SummaryConfig(
+            **{k: _coerce(f"search.summaries.{k}", v, getattr(defaults.summaries, k)) for k, v in sv.items()}
+        )
+    if boosts is not None:
+        if not isinstance(boosts, dict) or set(boosts) - BM25_FIELDS:
+            raise ConfigError("search.bm25_boosts must map heading, title and body to numbers")
+        values["bm25_boosts"] = {
+            **defaults.bm25_boosts,
+            **{k: _coerce(f"search.bm25_boosts.{k}", v, 1.0) for k, v in boosts.items()},
+        }
     return SearchConfig(**values)
-
-
-def _parse_summaries(raw: Any) -> SummaryConfig:
-    if not isinstance(raw, dict):
-        raise ConfigError("search.summaries must be a mapping of settings")
-    unknown = set(raw) - SUMMARY_FIELDS
-    if unknown:
-        raise ConfigError(f"unknown search.summaries setting(s): {', '.join(sorted(unknown))}")
-    values = dict(raw)
-    if "enabled" in values and not isinstance(values["enabled"], bool):
-        raise ConfigError("search.summaries.enabled must be true or false")
-    if "model" in values:
-        values["model"] = str(values["model"])
-    if "max_tokens_per_run" in values:
-        values["max_tokens_per_run"] = int(values["max_tokens_per_run"])
-    return SummaryConfig(**values)
 
 
 def _validate_search(s: SearchConfig) -> None:
@@ -325,6 +333,7 @@ def load_config(
     if overrides:
         values.update({k: v for k, v in overrides.items() if v is not None})
 
+    read_env = _env_reader(env_file)
     base_dir = path.parent if path.is_file() else Path.cwd()
     output_dir = Path(os.path.expanduser(str(values["output_dir"])))
     if not output_dir.is_absolute():
@@ -343,11 +352,11 @@ def load_config(
             min_word_count=int(values["min_word_count"]),
             output_dir=output_dir,
             user_agent=str(values["user_agent"]),
-            cookie=_read_cookie(env_file),
-            search=_parse_search(values["search"]),
-            gemini_api_key=_read_secret(GEMINI_KEY_ENV, env_file),
-            db_writer_password=_read_secret(DB_WRITER_PASSWORD_ENV, env_file),
-            db_reader_password=_read_secret(DB_READER_PASSWORD_ENV, env_file),
+            cookie=Secret(clean_cookie(read_env(COOKIE_ENV))),
+            search=_parse_search(values["search"], read_env(DB_PORT_ENV)),
+            gemini_api_key=Secret(read_env(GEMINI_KEY_ENV)),
+            db_writer_password=Secret(read_env(DB_WRITER_PASSWORD_ENV)),
+            db_reader_password=Secret(read_env(DB_READER_PASSWORD_ENV)),
         )
     except (TypeError, ValueError) as e:
         raise ConfigError(f"invalid setting: {e}") from None
