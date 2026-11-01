@@ -13,6 +13,7 @@ from dotenv import dotenv_values
 
 from . import __version__
 from .errors import ConfigError
+from .search.text import squash
 
 COOKIE_ENV = "NEWSLETTER_COOKIE"
 GEMINI_KEY_ENV = "GEMINI_API_KEY"
@@ -256,7 +257,7 @@ def _parse_prefixes(raw: Any) -> tuple[str, ...]:
         return ()
     if not isinstance(raw, list) or not all(isinstance(p, str) and p.strip() for p in raw):
         raise ConfigError("boilerplate_prefixes must be a list of non-empty strings")
-    return tuple(" ".join(p.split()) for p in raw)
+    return tuple(squash(p) for p in raw)
 
 
 def _validate_search(s: SearchConfig) -> None:

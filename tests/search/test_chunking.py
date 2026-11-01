@@ -76,12 +76,33 @@ def test_very_long_sentence_is_split_by_words():
     assert all(c.overlap_words == 0 for c in chunks)  # no whole sentence fits as overlap
 
 
-def test_token_guard_splits_huge_passages():
-    long_word = "x" * 9000
-    chunks = chunk_sections([Section("URL", f"See {long_word} and more words here " + "word " * 40)])
-    assert all(len(c.text) <= chunking.MAX_PASSAGE_TOKENS * chunking.CHARS_PER_TOKEN for c in chunks)
-    assert "".join(c.text.replace(" ", "") for c in chunks).count("x") == 9000
-    assert [c.n for c in chunks] == list(range(len(chunks)))
+LIMIT = chunking.MAX_PASSAGE_TOKENS * chunking.CHARS_PER_TOKEN
+
+
+def test_token_guard_cuts_only_the_oversized_word():
+    url = "https://example.com/" + "x" * 9000
+    chunks = chunk_sections([Section("URL", " ".join(["word"] * 49) + " " + url)])
+    assert [c.word_count for c in chunks] == [49, 1, 1]
+    assert all(len(c.text) <= LIMIT for c in chunks)
+    assert "".join(c.text for c in chunks[1:]) == url
+    assert [c.n for c in chunks] == [0, 1, 2]
+
+
+def test_token_guard_keeps_paragraph_breaks_and_packs_greedily():
+    text = "para one " * 900 + "\n\n" + "para two " * 900
+    parts = chunking._token_guard(text.strip())
+    assert all(len(p) <= LIMIT for p in parts) and len(parts) == 3
+    assert any("\n\n" in p for p in parts)
+    assert chunking._token_guard("short") == ["short"]
+
+
+def test_split_window_never_repeats_only_overlap():
+    s1 = " ".join(["Alpha"] * 214) + " end."
+    s2 = " ".join(["Beta"] * 44) + " end."
+    url = "https://example.com/" + "x" * 9000
+    chunks = chunk_sections([Section("B", f"{s1} {s2}\n\n{url} tail words here.")])
+    assert all(c.overlap_words < c.word_count or c.overlap_words == 0 for c in chunks)
+    assert all(c.overlap_words == 0 for c in chunks[1:])
 
 
 def test_invalid_settings_rejected():
@@ -121,9 +142,21 @@ def test_chunking_properties(sections, chunk_words, data):
     assert chunk_sections(sections, chunk_words, overlap) == chunks
 
 
+TRICKY = (
+    "Ask Dr. Smith about it. We met the team at Acme Inc. Today we start. J. K. Rowling wrote "
+    "a book, e.g. this one. Thanks for joining us. The answer is no. See No. 5 for details. "
+    "Plan A. We moved on, i.e. quickly. Prices rose 2.5 percent in the U.S. Last year was hard."
+)
+
+
 def _golden_posts():
     rng = random.Random(20261101)
-    posts = []
+    posts = [
+        [
+            Section("Tricky", "\n\n".join([TRICKY] * 6)),
+            Section("Link", "Read more at https://example.com/" + "y" * 8500 + " and then continue reading."),
+        ]
+    ]
     for p in range(4):
         secs = [Section(None, section_text(rng, [rng.randint(5, 40)]))]
         for h in range(rng.randint(2, 5)):

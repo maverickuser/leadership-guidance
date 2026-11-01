@@ -10,6 +10,7 @@ to group them. The set is data-driven (no site text in the code) and recomputed 
 from __future__ import annotations
 
 import hashlib
+import logging
 from collections import defaultdict
 from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass
@@ -28,11 +29,18 @@ _rng = np.random.default_rng(20261101)  # fixed: same input, same clusters
 _A = _rng.integers(1, 1 << 29, size=NUM_PERM, dtype=np.uint64)
 _B = _rng.integers(0, 1 << 29, size=NUM_PERM, dtype=np.uint64)
 SAMPLE_CHARS = 200
+LOSS_WARN_FRACTION = 0.2
+
+log = logging.getLogger("newsletter_archive.search.boilerplate")
+
+
+def _key(norm: str) -> str:
+    return hashlib.sha256(norm.encode("utf-8")).hexdigest()
 
 
 def paragraph_key(paragraph: str) -> str:
     """Identity of a paragraph for boilerplate matching: hash of its normalised text."""
-    return hashlib.sha256(normalize_for_matching(paragraph).encode("utf-8")).hexdigest()
+    return _key(normalize_for_matching(paragraph))
 
 
 def _shingles(norm: str) -> frozenset[str]:
@@ -48,7 +56,8 @@ def _signature(shingles: Iterable[str]) -> np.ndarray:
         [int.from_bytes(hashlib.blake2b(s.encode("utf-8"), digest_size=4).digest(), "big") for s in shingles],
         dtype=np.uint64,
     )
-    return ((np.outer(x, _A) + _B) % _PRIME).min(axis=0)
+    signature: np.ndarray = ((np.outer(x, _A) + _B) % _PRIME).min(axis=0)
+    return signature
 
 
 def _jaccard(a: frozenset[str], b: frozenset[str]) -> float:
@@ -99,8 +108,9 @@ class Boilerplate:
     def is_boilerplate(self, paragraph: str) -> bool:
         return paragraph_key(paragraph) in self.keys
 
-    def clean(self, sections: Sequence[Section]) -> CleanResult:
-        """Drop boilerplate paragraphs; sections left empty are dropped."""
+    def clean(self, sections: Sequence[Section], post_id: str | None = None) -> CleanResult:
+        """Drop boilerplate paragraphs; sections left empty are dropped. Warns when a post
+        loses more than ``LOSS_WARN_FRACTION`` of its words (real content may be repeating)."""
         out: list[Section] = []
         removed = removed_words = total = 0
         for sec in sections:
@@ -115,7 +125,14 @@ class Boilerplate:
                     kept.append(para)
             if kept:
                 out.append(Section(sec.heading, "\n\n".join(kept)))
-        return CleanResult(out, removed, removed_words, total)
+        result = CleanResult(out, removed, removed_words, total)
+        if result.loss_fraction > LOSS_WARN_FRACTION:
+            log.warning(
+                "%s: boilerplate filter removed %.0f%% of its words; check the boilerplate list",
+                post_id or "a post",
+                100 * result.loss_fraction,
+            )
+        return result
 
 
 EMPTY = Boilerplate(frozenset(), ())
@@ -138,7 +155,7 @@ def find_boilerplate(
                 norm = normalize_for_matching(para)
                 if len(norm.split()) < min_words:
                     continue
-                key = hashlib.sha256(norm.encode("utf-8")).hexdigest()
+                key = _key(norm)
                 seen_posts[key].add(post_id)
                 norms.setdefault(key, norm)
                 samples.setdefault(key, para)
@@ -149,6 +166,11 @@ def find_boilerplate(
     shingles = [_shingles(norms[k]) for k in keys]
     signatures = np.stack([_signature(s) for s in shingles])
     uf = _UnionFind(len(keys))
+    checked: set[tuple[int, int]] = set()
+
+    def similar(i: int, j: int) -> bool:
+        return _jaccard(shingles[i], shingles[j]) >= similarity
+
     for band in range(BANDS):
         buckets: dict[bytes, list[int]] = defaultdict(list)
         for i, sig in enumerate(signatures):
@@ -156,7 +178,13 @@ def find_boilerplate(
         for members in buckets.values():
             for a_pos, a in enumerate(members):
                 for b in members[a_pos + 1 :]:
-                    if uf.find(a) != uf.find(b) and _jaccard(shingles[a], shingles[b]) >= similarity:
+                    ra, rb = uf.find(a), uf.find(b)
+                    if ra == rb or (a, b) in checked:
+                        continue
+                    checked.add((a, b))
+                    # Join only if the pair is similar AND each side is similar to the other
+                    # cluster's representative, so chains A~B~C can't drift far from A.
+                    if similar(a, b) and similar(a, rb) and similar(b, ra):
                         uf.union(a, b)
 
     groups: dict[int, list[int]] = defaultdict(list)

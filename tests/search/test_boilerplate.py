@@ -84,6 +84,30 @@ def test_order_independent_and_sections_emptied_are_dropped():
     assert result.total_words > result.removed_words > 0
 
 
+def test_clusters_do_not_drift_through_chains():
+    # A~B and B~C are each similar, but A and C are not: C must not join A's cluster
+    base = INTRO.split()
+    b_words = base[:]
+    b_words[10:14] = ["w1", "w2", "w3", "w4"]
+    c_words = b_words[:]
+    c_words[30:34] = ["v1", "v2", "v3", "v4"]
+    a, b, c = INTRO, " ".join(b_words), " ".join(c_words)
+    posts = _posts(5, lambda i: a)
+    posts.update(_posts(1, lambda i: b, start=5))
+    posts.update(_posts(4, lambda i: c, start=6))
+    bp = find_boilerplate(posts, similarity=0.6)
+    assert bp.is_boilerplate(a) and bp.is_boilerplate(b)
+    assert not bp.is_boilerplate(c)
+
+
+def test_heavy_loss_is_warned(caplog):
+    bp = find_boilerplate(_posts(5, lambda i: INTRO))
+    with caplog.at_level("WARNING", logger="newsletter_archive.search.boilerplate"):
+        bp.clean([Section(None, INTRO + "\n\nShort real text here.")], "post-x")
+        bp.clean([Section(None, INTRO + "\n\nShort real text here.")])
+    assert "post-x: boilerplate filter removed" in caplog.text and "a post:" in caplog.text
+
+
 def test_empty_inputs():
     assert find_boilerplate({}) is EMPTY
     assert find_boilerplate({"a": [Section(None, "short")]}) is EMPTY

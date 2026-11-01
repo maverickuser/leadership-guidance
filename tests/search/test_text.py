@@ -34,6 +34,30 @@ def test_sentence_boundaries():
     ]
 
 
+def test_ordinary_words_end_sentences():
+    text = "Thanks for joining us. Next week we start. The answer is no. We move on. Look at the Sun. Done."
+    assert len(split_sentences(text)) == 6
+
+
+def test_abbreviation_rules():
+    assert split_sentences("See No. 5 today. Ask Dr. Smith. Acme Inc. Today.") == [
+        "See No. 5 today.",
+        "Ask Dr. Smith.",
+        "Acme Inc. Today.",
+    ]
+    assert split_sentences("Apples vs. Oranges. Mar. 3 was cold.") == [
+        "Apples vs. Oranges.",
+        "Mar. 3 was cold.",
+    ]
+    assert split_sentences("I said I. Then we left. Grade A. Next.") == [
+        "I said I.",
+        "Then we left.",
+        "Grade A.",
+        "Next.",
+    ]
+    assert split_sentences(". Leading period") == [".", "Leading period"]
+
+
 def test_no_split_before_lowercase_or_inside_numbers():
     assert split_sentences("It costs $3.50 per unit. see you") == ["It costs $3.50 per unit. see you"]
     assert split_sentences("") == [] and split_sentences("   ") == []

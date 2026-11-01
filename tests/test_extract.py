@@ -274,3 +274,13 @@ def test_configured_prefixes_strip_extra_intros():
     # without the configured prefix the first paragraph stops the scan, as before
     body = BeautifulSoup(html, "lxml").section
     assert strip_boilerplate(body) == 0
+
+
+def test_every_leading_intro_is_stripped_and_br_counts_as_space():
+    html = (
+        "<section><p>Hello<br>from the example letter.</p><p>Second intro, the sequel.</p>"
+        "<p>Welcome to my newsletter! hi</p><p>Free members can read some.</p><p>Real.</p></section>"
+    )
+    body = BeautifulSoup(html, "lxml").section
+    assert strip_boilerplate(body, ("Hello from the example letter", "Second intro")) == 4
+    assert body.get_text().strip() == "Real."

@@ -20,6 +20,7 @@ from lxml import etree
 from .errors import ExtractError
 from .models import Extracted, Section
 from .parsing import attr, parse_xml
+from .search.text import squash
 
 log = logging.getLogger("newsletter_archive.extract")
 
@@ -70,7 +71,6 @@ REMOVE_SELECTORS = ", ".join(
 # The standard intro at the top of almost every post. Matched on exact openings, so a
 # post's own italic note (e.g. "I'm writing about something different today!") stays.
 BOILERPLATE_PREFIXES = ("Welcome to my newsletter!", "Free members can read")
-BOILERPLATE_SCAN = 3
 
 HEADING_RE = re.compile(r"^h([1-6])$")
 BLOCK_TAGS = [
@@ -94,8 +94,7 @@ TRAFILATURA_MIN_RATIO = 0.8
 SUMMARY_MAX_CHARS = 400
 
 
-def _squash(text: str) -> str:
-    return " ".join(text.split())
+_squash = squash  # one whitespace rule for extraction, config prefixes and search
 
 
 # -- body cleaning ---------------------------------------------------------
@@ -117,8 +116,8 @@ def strip_boilerplate(body: Tag, extra_prefixes: tuple[str, ...] = ()) -> int:
     """
     prefixes = BOILERPLATE_PREFIXES + extra_prefixes
     removed = 0
-    for el in [c for c in body.children if isinstance(c, Tag)][:BOILERPLATE_SCAN]:
-        if el.name == "p" and _squash(el.get_text()).startswith(prefixes):
+    for el in [c for c in body.children if isinstance(c, Tag)]:
+        if el.name == "p" and _squash(el.get_text(" ")).startswith(prefixes):
             el.decompose()
             removed += 1
         else:

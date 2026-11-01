@@ -16,6 +16,7 @@ Any change to the output for the same input must bump ``CHUNKER_VERSION``
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
 
 from .models import Section
@@ -141,16 +142,30 @@ def _pack(section_text: str, limit: int, overlap_words: int) -> list[tuple[list[
     return windows
 
 
+_TOKEN_RE = re.compile(r"\S+|\s+")
+
+
 def _token_guard(text: str, max_tokens: int = MAX_PASSAGE_TOKENS) -> list[str]:
-    """Split text by words until every part is under the token estimate."""
-    if len(text) <= max_tokens * CHARS_PER_TOKEN:
+    """Split text that is over the token estimate (e.g. a pasted long URL): words are packed
+    greedily up to the character limit, only a word that is itself over the limit is cut, and
+    whitespace (including paragraph breaks) inside each part is kept."""
+    limit = max_tokens * CHARS_PER_TOKEN
+    if len(text) <= limit:
         return [text]
-    ws = words(text)
-    if len(ws) == 1:  # one giant "word": cut it by characters
-        step = max_tokens * CHARS_PER_TOKEN
-        return [text[i : i + step] for i in range(0, len(text), step)]
-    mid = len(ws) // 2
-    return _token_guard(" ".join(ws[:mid]), max_tokens) + _token_guard(" ".join(ws[mid:]), max_tokens)
+    parts: list[str] = []
+    cur = ""
+    for token in _TOKEN_RE.findall(text):
+        pieces = [token] if len(token) <= limit or token.isspace() else [
+            token[i : i + limit] for i in range(0, len(token), limit)
+        ]  # fmt: skip
+        for piece in pieces:
+            if len(cur) + len(piece) > limit and cur.strip():
+                parts.append(cur.strip())
+                cur = ""
+            cur += piece
+    if cur.strip():
+        parts.append(cur.strip())
+    return parts
 
 
 def chunk_sections(sections: list[Section], chunk_words: int = 300, overlap_words: int = 50) -> list[Chunk]:
@@ -160,8 +175,13 @@ def chunk_sections(sections: list[Section], chunk_words: int = 300, overlap_word
     chunks: list[Chunk] = []
     for sec in merge_small_sections(sections):
         for pieces, overlap_count in _pack(sec.text, chunk_words, overlap_words):
+            text = _render(pieces)
             overlap = sum(p.words for p in pieces[:overlap_count])
-            parts = _token_guard(_render(pieces))
+            parts = _token_guard(text)
+            if len(parts) > 1 and overlap_count:
+                # Splitting an oversized window: drop its overlap so no part is only a repeat.
+                parts = _token_guard(_render(pieces[overlap_count:]))
+                overlap = 0
             for i, part in enumerate(parts):
                 chunks.append(
                     Chunk(
