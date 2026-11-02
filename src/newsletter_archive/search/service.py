@@ -93,7 +93,7 @@ class SearchRequest:
         if limit is None:
             n = default_limit
         elif isinstance(limit, bool) or not isinstance(limit, int) or not 1 <= limit <= max_limit:
-            raise SearchError(f"limit must be a whole number from 1 to {max_limit}")
+            raise SearchError(f"limit must be a whole number between 1 and {max_limit}")
         else:
             n = limit
         if category is None:
@@ -171,6 +171,15 @@ class SearchResponse:
 
 
 @dataclass(frozen=True)
+class ArchiveOverview:
+    generation: db.Generation
+    posts: int
+    first: str | None
+    last: str | None
+    categories: list[str]
+
+
+@dataclass(frozen=True)
 class _Row:
     passage_id: str
     post_id: str
@@ -221,6 +230,23 @@ class SearchService:
             with self.connect() as conn:
                 gen = self._active(conn)
                 return gen, all_categories(conn, gen.schema)
+
+        return self._with_db(run)
+
+    def overview(self) -> ArchiveOverview:
+        """What the live index holds (for the MCP tool description)."""
+
+        def run() -> ArchiveOverview:
+            with self.connect() as conn:
+                gen = self._active(conn)
+                row = conn.execute(
+                    sql.SQL("SELECT count(*), min(published_date), max(published_date) FROM {}.posts").format(
+                        sql.Identifier(gen.schema)
+                    )
+                ).fetchone()
+                assert row is not None
+                first, last = (d.isoformat() if isinstance(d, date) else d for d in row[1:])
+                return ArchiveOverview(gen, int(row[0]), first, last, all_categories(conn, gen.schema))
 
         return self._with_db(run)
 

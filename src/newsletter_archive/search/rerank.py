@@ -157,7 +157,10 @@ class Reranking:
     def _load(self, load: Callable[[], Reranker]) -> None:
         try:
             self._model = load()
-        except Exception as e:
+        except ImportError as e:
+            self._error = f"{e}; install it with: pip install -e '.[rerank]'"
+            log.warning("re-ranker unavailable: %s", self._error)
+        except Exception as e:  # any load failure just disables re-ranking
             self._error = f"{type(e).__name__}: {e}"
             log.warning("re-ranker unavailable: %s", self._error)
         finally:

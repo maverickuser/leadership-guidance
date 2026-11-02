@@ -269,3 +269,19 @@ def run(
     """All stages in order: discover, fetch, extract, index. Exit 3 if indexing failed."""
     options = IndexOptions(limit=limit, dry_run=dry_run)
     _execute(["discover", "fetch", "extract", "index"], limit, refresh, dry_run, verbose, config, options)
+
+
+@app.command()
+def mcp(
+    verbose: Verbose = False,
+    config: ConfigPath = Path("config.yaml"),
+) -> None:
+    """Start the local MCP search server on stdin/stdout (for Claude Code, Claude Desktop…)."""
+    try:
+        cfg = load_config(config, config.parent / ".env")
+    except ConfigError as e:
+        typer.echo(f"Error: {e}", err=True)
+        raise typer.Exit(1) from None
+    from . import mcp_server
+
+    mcp_server.serve(cfg, verbose)

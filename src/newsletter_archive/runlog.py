@@ -8,6 +8,7 @@ import sys
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
+from typing import TextIO
 
 from .config import Config, Secret
 
@@ -58,12 +59,12 @@ class RedactFilter(logging.Filter):
         return True
 
 
-def _log_file(logs_dir: Path) -> Path:
+def _log_file(logs_dir: Path, prefix: str = "run") -> Path:
     stamp = datetime.now(UTC).strftime("%Y%m%d-%H%M%S")
-    path = logs_dir / f"run-{stamp}Z.log"
+    path = logs_dir / f"{prefix}-{stamp}Z.log"
     n = 2
     while path.exists():
-        path = logs_dir / f"run-{stamp}Z-{n}.log"
+        path = logs_dir / f"{prefix}-{stamp}Z-{n}.log"
         n += 1
     return path
 
@@ -74,22 +75,25 @@ def _remove_handlers(logger: logging.Logger) -> None:
         h.close()
 
 
-def setup_logging(config: Config, verbose: bool = False) -> Path:
-    """Console (INFO, or DEBUG with --verbose) + DEBUG log file. Returns the log file path."""
+def setup_logging(
+    config: Config, verbose: bool = False, *, stream: TextIO | None = None, prefix: str = "run"
+) -> Path:
+    """Console (INFO, or DEBUG with --verbose) + DEBUG log file. Returns the log file path.
+    ``stream`` defaults to stdout; the MCP server passes stderr (stdout carries the protocol)."""
     logger = logging.getLogger(LOGGER)
     _remove_handlers(logger)
     logger.setLevel(logging.DEBUG)
     logger.propagate = False
     redact = RedactFilter(*config.secrets)
 
-    console = logging.StreamHandler(sys.stdout)
+    console = logging.StreamHandler(stream or sys.stdout)
     console.setLevel(logging.DEBUG if verbose else logging.INFO)
     console.setFormatter(logging.Formatter("%(message)s"))
     console.addFilter(redact)
     logger.addHandler(console)
 
     config.logs_dir.mkdir(parents=True, exist_ok=True)
-    path = _log_file(config.logs_dir)
+    path = _log_file(config.logs_dir, prefix)
     file_handler = logging.FileHandler(path, encoding="utf-8")
     file_handler.setLevel(logging.DEBUG)
     file_handler.setFormatter(logging.Formatter("%(asctime)s %(levelname)s %(message)s"))

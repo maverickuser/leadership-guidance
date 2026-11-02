@@ -75,10 +75,10 @@
 
 ## 9. MCP server (PR 9)
 
-- [ ] 9.1 `mcp_server.py` (FastMCP, stdio): `search(query, limit, category, since, until, kind)`, structured + text output, tool errors
-- [ ] 9.2 Tool description from the active generation: post count, date range, categories, how to use summaries vs passages
-- [ ] 9.3 Logging to file and stderr only; no keys or passage text
-- [ ] 9.4 `archive mcp` command; in-process MCP client tests; README setup for Claude Code and Claude Desktop
+- [x] 9.1 `mcp_server.py` (FastMCP, stdio): `search(query, limit, category, since, until, kind)`, structured + text output, tool errors
+- [x] 9.2 Tool description from the active generation: post count, date range, categories, how to use summaries vs passages
+- [x] 9.3 Logging to file and stderr only; no keys or passage text
+- [x] 9.4 `archive mcp` command; in-process MCP client tests; README setup for Claude Code and Claude Desktop
 
 ## 10. Evaluation, safety and acceptance (PR 10)
 

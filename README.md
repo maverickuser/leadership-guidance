@@ -1,6 +1,6 @@
 # Newsletter Archive
 
-A personal command-line tool that saves the posts **you subscribe to** on a Ghost-based newsletter site as clean, structured JSON on your own computer. Later it can feed search and Q&A over your archive.
+A personal command-line tool that saves the posts **you subscribe to** on a Ghost-based newsletter site as clean, structured JSON on your own computer. Your agent can then search it through a local MCP server.
 
 - **Personal use only.** It uses your own login cookie and reads only what your subscription can read. It never bypasses the paywall.
 - **Polite.** One request at a time, at least 2 seconds apart, with backoff on errors.
@@ -45,6 +45,7 @@ archive fetch               # stage 2: download post pages -> raw/
 archive extract             # stages 3-4: raw/ -> posts/{slug}.json (no network)
 archive index               # build or update the search store (needs the database and GEMINI_API_KEY)
 archive run                 # all of the above, in order
+archive mcp                 # the search server for Claude Code / Claude Desktop (see Search)
 ```
 
 Options:
@@ -107,7 +108,7 @@ launchd runs a missed job when the Mac wakes from sleep, but not if the Mac was 
 | `output_dir` | `../newsletter-archive-data` | relative to `config.yaml` (or the current folder if there is none), or an absolute path |
 | `user_agent` | `newsletter-archive/0.1 (...)` | |
 | `boilerplate_prefixes` | `[]` | extra intro openings to strip from the top of each post; your site's wording stays in your local `config.yaml` |
-| `search` | see `config.example.yaml` | hybrid search settings (in progress) |
+| `search` | see [Search settings](#search-settings-search-in-configyaml) | |
 
 ## Output
 
@@ -148,18 +149,91 @@ Each `posts/{slug}.json` (schema version 1):
 
 Manifest statuses: `discovered → fetched → ok | partial`, or `failed` with `error` set.
 
-## Search database (in progress)
+## Search (MCP server)
 
-Hybrid search (BM25 + semantic, served to agents over MCP) is being built; see
-`openspec/changes/add-hybrid-search/`. It needs Docker Desktop and a local Postgres:
+Claude Code, Claude Desktop or any MCP client can search your archive through a local MCP server. It uses hybrid search: keywords (BM25) plus meaning (Gemini embeddings), re-ranked by a small local model. The server only returns archive data, passages and one stored summary per post. Your agent writes the answer and cites the post URLs.
+
+### Set up (once)
+
+1. Install [Docker Desktop](https://www.docker.com/products/docker-desktop/) and start the database:
+
+   ```bash
+   docker compose up -d --wait db     # ParadeDB (Postgres 17 + pg_search + pgvector) on 127.0.0.1:5433
+   ```
+
+   Its data lives in `../newsletter-archive-data/postgres/`, outside the repo.
+
+2. In `.env`, add `GEMINI_API_KEY` (from [Google AI Studio](https://aistudio.google.com/apikey)) and three database passwords of your choice (see `.env.example`).
+3. Install the local re-ranker (optional, ~1.2 GB download on first use, Apple Silicon or CPU):
+
+   ```bash
+   pip install -e '.[rerank]'
+   ```
+
+   Without it, search still works but isn't re-ranked.
+4. Build the index: `archive index --dry-run` shows the cost, then run `archive index`. For about 250 posts, the first build takes ~20 minutes and costs about $1.30. Later runs only process new or changed posts, and the weekly `archive run` keeps the index up to date.
+
+### Connect your agent
+
+Claude Code:
 
 ```bash
-# once: add GEMINI_API_KEY and three database passwords to .env (see .env.example)
-docker compose up -d --wait db     # ParadeDB (Postgres 17 + pg_search + pgvector) on 127.0.0.1:5433
+claude mcp add newsletter-archive -- /path/to/leadership-guidance/.venv/bin/archive mcp --config /path/to/leadership-guidance/config.yaml
 ```
 
-Data is stored in `../newsletter-archive-data/postgres/` (outside the repo). `archive_writer`
-owns the database (the indexer); `archive_reader` can only read (the MCP server).
+Claude Desktop: add this to `~/Library/Application Support/Claude/claude_desktop_config.json`, then restart the app:
+
+```json
+{
+  "mcpServers": {
+    "newsletter-archive": {
+      "command": "/path/to/leadership-guidance/.venv/bin/archive",
+      "args": ["mcp", "--config", "/path/to/leadership-guidance/config.yaml"]
+    }
+  }
+}
+```
+
+Then ask, for example: *"Using the newsletter archive, how should I give feedback to a senior engineer?"*
+
+The `search` tool takes:
+- `query`
+- `limit` (1–30, default 10)
+- `category` (one or more names)
+- `since` and `until` (`YYYY-MM-DD`)
+- `kind` (`all`, `passages` or `summaries`)
+
+A search takes about 5 seconds. If Gemini is unreachable, results come from keywords only. If the re-ranker isn't installed or is busy, results keep their combined order. Either way, the response says so. The server listens on no network port. It logs to `../newsletter-archive-data/logs/mcp-*.log` and to stderr, never the query text, passage text or any key. It picks up index updates without a restart.
+
+### What is sent to Gemini
+
+- **Indexing:** each passage's text, plus its post title and section heading, is sent for embedding. Each post's cleaned text is sent once to write its summary. Both results are cached, so unchanged text is never sent again.
+- **Searching:** only your query text is sent, for embedding.
+- Your cookie and member details are never sent. The re-ranker runs on your machine.
+
+### Index versions
+
+Changing `search.embedding_model` needs a new index version. `archive index --refresh` builds one beside the live one and then switches to it.
+- `--no-swap`: build without switching; `--swap` switches later.
+- `--rollback`: go back to the previous version.
+- `--force`: switch even if the quality check fails.
+- Every one of these honours `--dry-run`.
+
+### Search settings (`search:` in `config.yaml`)
+
+| Setting | Default | |
+|---|---|---|
+| `enabled` | `true` | `false` skips indexing in `archive run` |
+| `embedding_model` / `embedding_dimension` | `gemini-embedding-2` / `3072` | changing either needs `archive index --refresh` |
+| `summaries.enabled` / `summaries.model` | `true` / `gemini-3.8-flash` | one summary per post, written at index time |
+| `max_embed_tokens_per_run` / `summaries.max_tokens_per_run` | `1500000` each | spending ceilings; `--yes` goes over them |
+| `chunk_words` / `chunk_overlap_words` | `300` / `50` | passage size |
+| `candidates` | `50` | results taken from each of keyword and semantic search |
+| `rerank_top` / `rerank_timeout_seconds` | `20` / `10` | re-ranking takes ~0.2 s per passage on Apple Silicon |
+| `query_timeout_seconds` | `8` | after this, search uses keywords only |
+| `bm25_boosts` | heading `2`, title `1.5`, body `1` | |
+| `max_per_post` | `3` | passages per post in one result list (plus one summary) |
+| `db_host` / `db_port` / `db_name` | `127.0.0.1` / `5433` / `archive` | |
 
 ## Development
 
