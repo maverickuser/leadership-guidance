@@ -194,6 +194,29 @@ def extract(
     _execute(["extract"], limit, refresh, dry_run, verbose, config)
 
 
+def _index_flag_problem(
+    limit: int | None,
+    retry_failed: bool,
+    refresh: bool,
+    no_swap: bool,
+    swap: bool,
+    rollback: bool,
+    force: bool,
+) -> str | None:
+    """Why a combination of `archive index` flags makes no sense, or None."""
+    if sum((refresh, swap, rollback)) > 1:
+        return "use only one of --refresh, --swap or --rollback"
+    if no_swap and not refresh:
+        return "--no-swap only goes with --refresh"
+    if force and not (swap or (refresh and not no_swap)):
+        return "--force only goes with --swap or --refresh (it overrides the quality check before a swap)"
+    if limit and (swap or rollback):
+        return "--limit can't be used with --swap or --rollback: a version goes live only when complete"
+    if retry_failed and (refresh or swap or rollback):
+        return "--retry-failed is for normal runs; --refresh, --swap and --rollback already try every post"
+    return None
+
+
 @app.command()
 def index(
     limit: Limit = None,
@@ -225,10 +248,9 @@ def index(
     config: ConfigPath = Path("config.yaml"),
 ) -> None:
     """Build or update the search store from data/posts/ (needs the database and GEMINI_API_KEY)."""
-    if sum((refresh, swap, rollback)) > 1 or (no_swap and not refresh):
-        typer.echo(
-            "Error: use one of --refresh, --swap or --rollback (--no-swap only with --refresh)", err=True
-        )
+    problem = _index_flag_problem(limit, retry_failed, refresh, no_swap, swap, rollback, force)
+    if problem:
+        typer.echo(f"Error: {problem}", err=True)
         raise typer.Exit(1)
     options = IndexOptions(
         limit, dry_run, retry_failed, allow_mass_delete, yes, refresh, no_swap, swap, rollback, force

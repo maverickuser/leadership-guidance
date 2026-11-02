@@ -209,10 +209,29 @@ def test_search_can_be_turned_off_for_run(env):
 
 
 def test_index_generation_flags(env):
-    assert env.run("index", "--refresh", "--no-swap", "--force").exit_code == 0
+    assert env.run("index", "--refresh", "--force").exit_code == 0
     o = env.index_calls[-1]
-    assert (o.refresh, o.no_swap, o.swap, o.rollback, o.force) == (True, True, False, False, True)
-    assert env.run("index", "--rollback").exit_code == 0 and env.index_calls[-1].rollback
-    for bad in (["--refresh", "--swap"], ["--swap", "--rollback"], ["--no-swap"]):
-        r = env.run("index", *bad)
-        assert r.exit_code == 1 and "use one of --refresh" in r.output
+    assert (o.refresh, o.no_swap, o.swap, o.rollback, o.force) == (True, False, False, False, True)
+    assert env.run("index", "--refresh", "--no-swap", "--limit", "5").exit_code == 0
+    assert env.index_calls[-1].no_swap and env.index_calls[-1].limit == 5
+    assert env.run("index", "--rollback", "--dry-run").exit_code == 0 and env.index_calls[-1].rollback
+
+
+@pytest.mark.parametrize(
+    "bad, message",
+    [
+        (["--refresh", "--swap"], "only one of --refresh"),
+        (["--swap", "--rollback"], "only one of --refresh"),
+        (["--no-swap"], "--no-swap only goes with --refresh"),
+        (["--force"], "--force only goes with"),
+        (["--rollback", "--force"], "--force only goes with"),
+        (["--refresh", "--no-swap", "--force"], "--force only goes with"),
+        (["--swap", "--limit", "3"], "--limit can't be used"),
+        (["--rollback", "--limit", "3"], "--limit can't be used"),
+        (["--refresh", "--retry-failed"], "--retry-failed is for normal runs"),
+    ],
+)
+def test_index_rejects_meaningless_flag_combinations(env, bad, message):
+    calls = len(env.index_calls)
+    r = env.run("index", *bad)
+    assert r.exit_code == 1 and message in r.output and len(env.index_calls) == calls
