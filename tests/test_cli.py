@@ -251,3 +251,15 @@ def test_mcp_command_with_a_broken_config(env):
     env.config.write_text(f"base_url: {BASE}\ndelay_seconds: 0.5\n", encoding="utf-8")
     r = env.run("mcp")
     assert r.exit_code == 1 and "Error:" in r.output
+
+
+def test_mcp_command_reports_start_up_errors(env, monkeypatch):
+    from newsletter_archive import mcp_server
+    from newsletter_archive.errors import MissingDbPasswordError
+
+    def fail(cfg, verbose):
+        raise MissingDbPasswordError("ARCHIVE_DB_READER_PASSWORD")
+
+    monkeypatch.setattr(mcp_server, "serve", fail)
+    r = env.run("mcp")
+    assert r.exit_code == 1 and "ARCHIVE_DB_READER_PASSWORD" in r.output

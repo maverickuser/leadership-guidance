@@ -5,19 +5,25 @@ index time. It never calls a language model; the calling agent writes the answer
 the index through a small read-only connection pool and picks up a new index version
 (the weekly run, a swap) on the next search, without a restart and without the run lock.
 
-Logs go to ``{output_dir}/logs/mcp-*.log`` and stderr, never stdout (stdout carries the
-protocol). They record argument names, result counts, timings and errors, never the query
-text, passage text or any key.
+Start-up never waits for the database: the tool description (post count, date range,
+categories) is filled in by a background thread and refreshed after searches, so it catches
+up once the database is reachable and after weekly updates. Clients that cache the tool list
+see the refreshed description the next time they list tools.
+
+Logs go to ``{output_dir}/logs/mcp-YYYYMMDD.log`` and stderr, never stdout (stdout carries
+the protocol). They record argument names, result counts, timings and errors, never the
+query text, passage text or any key.
 """
 
 from __future__ import annotations
 
 import logging
 import sys
+import threading
 import time
-from collections.abc import Callable
-from contextlib import AbstractContextManager
-from typing import Annotated, Literal
+from collections.abc import Callable, Iterator
+from contextlib import AbstractContextManager, contextmanager
+from typing import TYPE_CHECKING, Annotated, Literal
 
 import psycopg
 from mcp.server.mcpserver import MCPServer
@@ -30,17 +36,21 @@ from .config import Config
 from .errors import ArchiveError
 from .search.service import ArchiveOverview, SearchError, SearchRequest, SearchResponse, SearchService
 
+if TYPE_CHECKING:  # pragma: no cover
+    from psycopg_pool import ConnectionPool
+
 log = logging.getLogger("newsletter_archive.mcp")
 
 SERVER_NAME = "newsletter-archive"
-POOL_MAX = 4
+POOL_MAX = 8  # searches hold a connection only while querying
 POOL_TIMEOUT_SECONDS = 5.0
+DESCRIPTION_REFRESH_SECONDS = 600.0
 
 
-def tool_description(overview: ArchiveOverview | None, max_limit: int = 30) -> str:
+def tool_description(overview: ArchiveOverview | None, default_limit: int = 10, max_limit: int = 30) -> str:
     """What the archive holds and how to search it well (built from the live index)."""
     if overview is None:
-        holding = "A personal archive of a leadership newsletter (the index wasn't reachable at start-up)."
+        holding = "A personal archive of a leadership newsletter (its size and categories load shortly)."
         cats = ""
     else:
         span = f"from {overview.first} to {overview.last}" if overview.first else "with no dates"
@@ -56,8 +66,8 @@ def tool_description(overview: ArchiveOverview | None, max_limit: int = 30) -> s
         'kind: "summaries", then search passages of the most relevant posts. For specific '
         "questions search passages directly. Put exact phrases in double quotes. Always cite the "
         "post title and URL.\n"
-        f"Arguments: query (required), limit (1-{max_limit}, default 10), category (one or more "
-        "category names), since / until (YYYY-MM-DD, inclusive), kind (all | passages | summaries)."
+        f"Arguments: query (required), limit (1-{max_limit}, default {default_limit}), category (one or "
+        "more category names), since / until (YYYY-MM-DD, inclusive), kind (all | passages | summaries)."
     )
 
 
@@ -83,7 +93,60 @@ def render_text(resp: SearchResponse) -> str:
     return "\n".join(head) + "\n\n" + "\n\n".join(blocks)
 
 
-def build_server(service: SearchService, overview: ArchiveOverview | None) -> MCPServer:
+class LiveDescription:
+    """Keeps the `search` tool's description in step with the live index: filled in the
+    background at start-up, then refreshed after a search when the index version changed or
+    ``DESCRIPTION_REFRESH_SECONDS`` passed. Never raises; never blocks a search on failure."""
+
+    def __init__(
+        self, service: SearchService, server: MCPServer, clock: Callable[[], float] = time.monotonic
+    ) -> None:
+        self.service, self.server, self.clock = service, server, clock
+        self.generation: int | None = None
+        self.checked_at: float | None = None
+        self._lock = threading.Lock()
+
+    def start(self) -> threading.Thread:
+        thread = threading.Thread(target=self.refresh, name="mcp-description", daemon=True)
+        thread.start()
+        return thread
+
+    def after_search(self, generation: int) -> None:
+        stale = self.checked_at is None or self.clock() - self.checked_at >= DESCRIPTION_REFRESH_SECONDS
+        if generation != self.generation or stale:
+            self.refresh()
+
+    def refresh(self) -> bool:
+        if not self._lock.acquire(blocking=False):
+            return False  # another refresh is running
+        try:
+            self.checked_at = self.clock()
+            try:
+                overview = self.service.overview()
+            except (ArchiveError, psycopg.Error) as e:
+                log.warning("index not reachable for the tool description (%s); will retry", e)
+                self.checked_at = None  # try again after the next search
+                return False
+            s = self.service.s
+            tool = self.server._tool_manager.get_tool("search")  # the SDK lists tools from these objects
+            if tool is not None:
+                tool.description = tool_description(overview, s.default_limit, s.max_limit)
+            if overview.generation.generation != self.generation:
+                log.info(
+                    "index generation %s: %d posts, %d categories",
+                    overview.generation.generation,
+                    overview.posts,
+                    len(overview.categories),
+                )
+            self.generation = overview.generation.generation
+            return True
+        finally:
+            self._lock.release()
+
+
+def build_server(
+    service: SearchService, overview: ArchiveOverview | None = None
+) -> tuple[MCPServer, LiveDescription]:
     s = service.s
     server = MCPServer(
         SERVER_NAME,
@@ -91,11 +154,12 @@ def build_server(service: SearchService, overview: ArchiveOverview | None) -> MC
         instructions="Search a personal newsletter archive with the `search` tool; cite post URLs.",
         warn_on_duplicate_tools=False,
     )
+    live = LiveDescription(service, server)
 
     def search(
         query: Annotated[str, Field(description="The question or keywords; quote exact phrases.")],
         limit: Annotated[
-            int | None, Field(description="Number of results (default 10; maximum in the tool description).")
+            int | None, Field(description="Number of results (default and maximum in the tool description).")
         ] = None,
         category: Annotated[
             list[str] | str | None, Field(description="Category name(s), case-insensitive.")
@@ -106,10 +170,8 @@ def build_server(service: SearchService, overview: ArchiveOverview | None) -> MC
             Literal["all", "passages", "summaries"], Field(description="Passages, summaries or both.")
         ] = "all",
     ) -> CallToolResult:
-        given = [
-            n for n, v in (("limit", limit), ("category", category), ("since", since), ("until", until)) if v
-        ]
-        args = ["query", *given] + (["kind"] if kind != "all" else [])
+        passed = (("limit", limit), ("category", category), ("since", since), ("until", until))
+        args = ["query", *(n for n, v in passed if v is not None)] + (["kind"] if kind != "all" else [])
         started = time.monotonic()
         try:
             request = SearchRequest.create(
@@ -136,6 +198,7 @@ def build_server(service: SearchService, overview: ArchiveOverview | None) -> MC
             len(resp.notes),
             time.monotonic() - started,
         )
+        live.after_search(resp.generation)
         return CallToolResult(
             content=[TextContent(type="text", text=render_text(resp))], structured_content=resp.to_dict()
         )
@@ -144,14 +207,41 @@ def build_server(service: SearchService, overview: ArchiveOverview | None) -> MC
         search,
         name="search",
         title="Search the newsletter archive",
-        description=tool_description(overview, s.max_limit),
+        description=tool_description(overview, s.default_limit, s.max_limit),
         annotations=ToolAnnotations(read_only_hint=True, destructive_hint=False, open_world_hint=False),
     )
-    return server
+    return server, live
 
 
 def _db_message(e: BaseException) -> str:
     return f"the search database failed ({type(e).__name__}); check it with `docker compose ps`"
+
+
+def pooled_connect(
+    pool: ConnectionPool, config: Config, timeout: float = POOL_TIMEOUT_SECONDS
+) -> Callable[[], AbstractContextManager[psycopg.Connection]]:
+    """Connections from the pool. When none comes in time, say why: connecting directly
+    reports a stopped database, a wrong password or a refusal as it would anywhere else;
+    if that works, every pooled connection is simply busy."""
+    from psycopg_pool import PoolTimeout
+
+    from .search import db
+
+    @contextmanager
+    def connect() -> Iterator[psycopg.Connection]:
+        try:
+            conn = pool.getconn(timeout=timeout)
+        except PoolTimeout:
+            db.connect(config, "reader").close()  # raises the real reason if it can't connect
+            raise SearchError(
+                f"all {pool.max_size} search database connections are busy; try again"
+            ) from None
+        try:
+            yield conn
+        finally:
+            pool.putconn(conn)
+
+    return connect
 
 
 def make_service(config: Config) -> tuple[SearchService, Callable[[], None]]:  # pragma: no cover - real deps
@@ -165,7 +255,7 @@ def make_service(config: Config) -> tuple[SearchService, Callable[[], None]]:  #
 
     s = config.search
     pool = ConnectionPool(
-        db.conninfo(config, "reader"),
+        db.conninfo(config, "reader"),  # MissingDbPasswordError before anything is opened
         min_size=1,
         max_size=POOL_MAX,
         kwargs={"autocommit": True},
@@ -174,12 +264,14 @@ def make_service(config: Config) -> tuple[SearchService, Callable[[], None]]:  #
         name="archive-reader",
     )
     pool.open(wait=False)  # never blocks start-up; a stopped database fails each search instead
-    reranking = Reranking(qwen_loader(s.reranker_model, config.output_dir), s.rerank_timeout_seconds)
-
-    def connect() -> AbstractContextManager[psycopg.Connection]:
-        return pool.connection(timeout=POOL_TIMEOUT_SECONDS)
-
-    service = SearchService(config, connect, gemini_query_embedder(config), reranking)
+    try:
+        reranking = Reranking(qwen_loader(s.reranker_model, config.output_dir), s.rerank_timeout_seconds)
+        service = SearchService(
+            config, pooled_connect(pool, config), gemini_query_embedder(config), reranking
+        )
+    except BaseException:
+        pool.close()
+        raise
 
     def close() -> None:
         reranking.close()
@@ -189,35 +281,25 @@ def make_service(config: Config) -> tuple[SearchService, Callable[[], None]]:  #
 
 
 def serve(config: Config, verbose: bool = False) -> None:  # pragma: no cover - runs the stdio loop
+    """Run the server until the client disconnects. Raises ArchiveError (e.g. a missing
+    database password) before serving if it can't start."""
     from .runlog import close_logging, setup_logging
 
     path = setup_logging(config, verbose, stream=sys.stderr, prefix="mcp")
-    log.info("MCP server %s starting (log: %s)", __version__, path)
-    if not config.gemini_api_key:
-        log.warning("GEMINI_API_KEY is not set: searches will use keywords only")
-    service, close = make_service(config)
-    overview = _overview(service)
     try:
-        build_server(service, overview).run("stdio")
+        log.info("MCP server %s starting (log: %s)", __version__, path)
+        if not config.gemini_api_key:
+            log.warning("GEMINI_API_KEY is not set: searches will use keywords only")
+        service, close = make_service(config)
+        try:
+            server, live = build_server(service)
+            live.start()
+            server.run("stdio")
+        finally:
+            close()
+            log.info("MCP server stopped")
     finally:
-        close()
-        log.info("MCP server stopped")
         close_logging()
 
 
-def _overview(service: SearchService) -> ArchiveOverview | None:
-    try:
-        overview = service.overview()
-    except (ArchiveError, psycopg.Error) as e:
-        log.warning("index not reachable at start-up (%s); the tool description is generic", e)
-        return None
-    log.info(
-        "index generation %s: %d posts, %d categories",
-        overview.generation.generation,
-        overview.posts,
-        len(overview.categories),
-    )
-    return overview
-
-
-__all__ = ["build_server", "render_text", "serve", "tool_description"]
+__all__ = ["LiveDescription", "build_server", "pooled_connect", "render_text", "serve", "tool_description"]

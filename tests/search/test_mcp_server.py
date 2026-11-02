@@ -78,8 +78,10 @@ def text(result):
 
 
 def test_description_without_an_index_is_generic():
-    d = mcp_server.tool_description(None)
-    assert "wasn't reachable" in d and 'kind: "summaries"' in d and "Valid categories" not in d
+    d = mcp_server.tool_description(None, default_limit=5)
+    assert (
+        "load shortly" in d and "default 5" in d and 'kind: "summaries"' in d and "Valid categories" not in d
+    )
 
 
 def test_render_text_with_no_results():
@@ -106,7 +108,7 @@ def test_tool_is_listed_with_a_description_from_the_index(cfg):
     svc = make_service(cfg)
     overview = svc.overview()
     assert (overview.posts, overview.first, overview.last) == (3, "2025-01-01", "2025-06-01")
-    [tool] = tools(mcp_server.build_server(svc, overview))
+    [tool] = tools(mcp_server.build_server(svc, overview)[0])
     assert tool.name == "search" and tool.annotations.read_only_hint is True
     assert "3 posts" in tool.description and "from 2025-01-01 to 2025-06-01" in tool.description
     assert "Valid categories: Career, Hiring, Leadership." in tool.description
@@ -120,7 +122,7 @@ def test_tool_is_listed_with_a_description_from_the_index(cfg):
 
 @db_only
 def test_search_returns_structured_and_readable_results(cfg):
-    server = mcp_server.build_server(make_service(cfg), None)
+    server = mcp_server.build_server(make_service(cfg), None)[0]
     result = call(server, {"query": '"bar raiser"', "limit": 3})
     assert not result.is_error
     data = result.structured_content
@@ -136,7 +138,7 @@ def test_search_returns_structured_and_readable_results(cfg):
 
 @db_only
 def test_filters_and_summaries(cfg):
-    server = mcp_server.build_server(make_service(cfg), None)
+    server = mcp_server.build_server(make_service(cfg), None)[0]
     data = call(server, {"query": "team", "since": "2025-02-01", "limit": 30}).structured_content
     assert {r["post"]["id"] for r in data["results"]} == {"hiring", "career"}
     data = call(server, {"query": "team", "kind": "summaries", "category": "hiring"}).structured_content
@@ -154,20 +156,20 @@ def test_filters_and_summaries(cfg):
     ],
 )
 def test_bad_arguments_are_tool_errors(cfg, args, message):
-    result = call(mcp_server.build_server(make_service(cfg), None), args)
+    result = call(mcp_server.build_server(make_service(cfg), None)[0], args)
     assert result.is_error and message in text(result)
 
 
 @db_only
 def test_schema_rejects_an_unknown_kind(cfg):
-    result = call(mcp_server.build_server(make_service(cfg), None), {"query": "x", "kind": "passage"})
+    result = call(mcp_server.build_server(make_service(cfg), None)[0], {"query": "x", "kind": "passage"})
     assert result.is_error
 
 
 @db_only
 def test_gemini_outage_gives_keyword_only_results(cfg):
     svc = make_service(cfg, embedder=RuntimeError("Gemini unavailable (HTTP 503)"))
-    result = call(mcp_server.build_server(svc, None), {"query": "bar raiser"})
+    result = call(mcp_server.build_server(svc, None)[0], {"query": "bar raiser"})
     data = result.structured_content
     assert not result.is_error and not data["semantic"] and data["results"]
     assert "semantic search skipped: Gemini unavailable" in data["notes"][0] and "semantic: no" in text(
@@ -177,7 +179,7 @@ def test_gemini_outage_gives_keyword_only_results(cfg):
 
 @db_only
 def test_new_posts_appear_without_a_restart(cfg):
-    server = mcp_server.build_server(make_service(cfg), None)
+    server = mcp_server.build_server(make_service(cfg), None)[0]
     assert "fresh-post" not in json.dumps(call(server, {"query": "team", "limit": 30}).structured_content)
     index(cfg, [*records(), post("fresh-post", 9, [(None, FILLER + " A brand new weekly post.")], day=7)])
     data = call(server, {"query": "brand new weekly", "limit": 30}).structured_content
@@ -186,7 +188,7 @@ def test_new_posts_appear_without_a_restart(cfg):
 
 @db_only
 def test_no_index_is_a_tool_error(db_config):
-    result = call(mcp_server.build_server(make_service(small_config(db_config)), None), {"query": "x"})
+    result = call(mcp_server.build_server(make_service(small_config(db_config)), None)[0], {"query": "x"})
     assert result.is_error and "run `archive index`" in text(result)
 
 
@@ -200,14 +202,14 @@ def test_database_errors_are_tool_errors(cfg):
 
     svc = make_service(cfg)
     broken = Broken(cfg, svc.connect, svc.embedder_factory)
-    result = call(mcp_server.build_server(broken, None), {"query": "x"})
+    result = call(mcp_server.build_server(broken, None)[0], {"query": "x"})
     assert result.is_error and "search database failed (InsufficientPrivilege)" in text(result)
 
 
 @db_only
 def test_logs_name_arguments_but_not_the_query(cfg, caplog):
     caplog.set_level("INFO", logger="newsletter_archive.mcp")
-    call(mcp_server.build_server(make_service(cfg), None), {"query": "secret question text", "limit": 2})
+    call(mcp_server.build_server(make_service(cfg), None)[0], {"query": "secret question text", "limit": 2})
     logged = "\n".join(r.getMessage() for r in caplog.records)
     assert "search args=['query', 'limit'] results=2" in logged and "secret question" not in logged
 
@@ -251,16 +253,80 @@ def test_archive_mcp_over_stdio_keeps_stdout_for_the_protocol(cfg, tmp_path, pg_
     assert logs and "search args=['query', 'limit']" in logs[0].read_text(encoding="utf-8")
 
 
-@db_only
-def test_start_up_overview_and_its_fallback(cfg, db_config, caplog):
-    caplog.set_level("INFO", logger="newsletter_archive.mcp")
-    assert mcp_server._overview(make_service(cfg)).posts == 3
-    assert "index generation 1: 3 posts, 3 categories" in caplog.text
-    assert mcp_server._overview(make_service(small_config(replace_db(db_config)))) is None
-    assert "index not reachable at start-up" in caplog.text
-
-
 def replace_db(cfg):
     from dataclasses import replace
 
     return replace(cfg, search=replace(cfg.search, db_name="no_such_database"))
+
+
+# -- review fixes ------------------------------------------------------------------------------
+
+
+@db_only
+def test_description_fills_in_after_start_and_follows_the_index(cfg):
+    now = [0.0]
+    svc = make_service(cfg)
+    server, live = mcp_server.build_server(svc)
+    live.clock = lambda: now[0]
+    [tool] = tools(server)
+    assert "load shortly" in tool.description  # start-up never waited for the database
+    live.start().join(5)
+    [tool] = tools(server)
+    assert (
+        "3 posts" in tool.description and "Valid categories: Career, Hiring, Leadership." in tool.description
+    )
+    assert live.generation == 1
+    index(cfg, [*records(), post("new-cat", 8, [(None, FILLER)], category="Strategy", day=8)])
+    live.after_search(1)  # same version, checked recently: no refresh
+    assert "4 posts" not in tools(server)[0].description
+    now[0] += mcp_server.DESCRIPTION_REFRESH_SECONDS
+    from newsletter_archive.search.keyword import clear_category_cache
+
+    clear_category_cache()  # categories are cached for a minute on their own
+    live.after_search(1)
+    assert "4 posts" in tools(server)[0].description and "Strategy" in tools(server)[0].description
+
+
+@db_only
+def test_description_refresh_survives_a_missing_index(db_config, caplog):
+    svc = make_service(small_config(db_config))
+    _, live = mcp_server.build_server(svc)
+    assert live.refresh() is False and live.checked_at is None
+    assert "index not reachable for the tool description" in caplog.text
+    live._lock.acquire()
+    try:
+        assert live.refresh() is False  # another refresh is already running
+    finally:
+        live._lock.release()
+
+
+@db_only
+def test_logged_argument_names_include_falsy_values(cfg, caplog):
+    caplog.set_level("INFO", logger="newsletter_archive.mcp")
+    call(mcp_server.build_server(make_service(cfg))[0], {"query": "x", "limit": 0, "category": []})
+    assert "search args=['query', 'limit', 'category'] error=SearchError" in caplog.text
+
+
+@db_only
+def test_pooled_connections_explain_why_none_came(cfg):
+    from dataclasses import replace
+
+    from psycopg_pool import ConnectionPool
+
+    from newsletter_archive.config import Secret
+    from newsletter_archive.errors import DatabaseAuthError
+    from newsletter_archive.search.service import SearchError
+
+    info = db.conninfo(cfg, "reader")
+    with ConnectionPool(info, min_size=1, max_size=1, kwargs={"autocommit": True}) as pool:
+        connect = mcp_server.pooled_connect(pool, cfg, timeout=0.3)
+        with connect() as conn:
+            assert conn.execute("SELECT 1").fetchone() == (1,)
+            with pytest.raises(SearchError, match="all 1 search database connections are busy"), connect():
+                pass
+    wrong = replace(cfg, db_reader_password=Secret("not-the-password"))
+    bad_info = info.replace(f"password={cfg.db_reader_password.reveal()}", "password=not-the-password")
+    with ConnectionPool(bad_info, min_size=0, max_size=1, open=False) as pool:
+        pool.open(wait=False)
+        with pytest.raises(DatabaseAuthError), mcp_server.pooled_connect(pool, wrong, timeout=0.3)():
+            pass

@@ -26,6 +26,7 @@ log = logging.getLogger("newsletter_archive.search.rerank")
 INSTRUCTION = "Given a question, find passages from a leadership newsletter that answer it"
 MAX_TOKENS = 512  # per query + document pair, prompt included
 BATCH_SIZE = 8
+OPTIONAL_MODULES = ("torch", "transformers")  # the rerank extra
 
 # From the model card (Qwen/Qwen3-Reranker-0.6B, "Using Transformers"), verbatim.
 PREFIX = (
@@ -157,8 +158,9 @@ class Reranking:
     def _load(self, load: Callable[[], Reranker]) -> None:
         try:
             self._model = load()
-        except ImportError as e:
-            self._error = f"{e}; install it with: pip install -e '.[rerank]'"
+        except ModuleNotFoundError as e:
+            hint = "; install it with: pip install -e '.[rerank]'" if e.name in OPTIONAL_MODULES else ""
+            self._error = f"{e}{hint}"
             log.warning("re-ranker unavailable: %s", self._error)
         except Exception as e:  # any load failure just disables re-ranking
             self._error = f"{type(e).__name__}: {e}"
