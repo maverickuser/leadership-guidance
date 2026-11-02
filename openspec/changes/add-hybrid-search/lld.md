@@ -473,6 +473,7 @@ src/newsletter_archive/
     planner.py         # fingerprint diff, guards, cost estimate (pure over inputs)
     indexer.py         # orchestration: start → report
     generations.py     # build, catch-up, gate, swap, rollback
+    filters.py         # category, date and kind filters (shared)
     keyword.py         # safe BM25 query + SQL
     vector.py          # exact vector search SQL
     fusion.py          # RRF, diversification (pure)

@@ -18,12 +18,17 @@ class Fused:
 
 def rrf(lists: Mapping[str, Sequence[str]], k: int = RRF_K) -> list[Fused]:
     """score = Σ 1 / (k + rank). Passages found by both lists rise above those found by one at
-    similar positions. Deterministic: ties go to the better single rank, then the passage id."""
+    similar positions. Repeats within one list count once. Deterministic: ties go to the better
+    single rank, then the passage id."""
     scores: dict[str, float] = {}
     best: dict[str, int] = {}
     found: dict[str, list[str]] = {}
     for name in sorted(lists):
+        seen: set[str] = set()
         for rank, pid in enumerate(lists[name], start=1):
+            if pid in seen:  # a repeated id counts once, at its first (best) rank
+                continue
+            seen.add(pid)
             scores[pid] = scores.get(pid, 0.0) + 1.0 / (k + rank)
             best[pid] = min(best.get(pid, rank), rank)
             found.setdefault(pid, []).append(name)

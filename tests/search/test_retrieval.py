@@ -3,8 +3,9 @@ from datetime import date
 import pytest
 
 from newsletter_archive.search import keyword
+from newsletter_archive.search.filters import Filters, filter_sql
 from newsletter_archive.search.fusion import diversify, rrf
-from newsletter_archive.search.keyword import Filters, build_keyword_query, filter_sql
+from newsletter_archive.search.keyword import build_keyword_query
 
 
 def test_keyword_query_words_phrases_and_folding():
@@ -12,7 +13,7 @@ def test_keyword_query_words_phrases_and_folding():
     assert q.terms == "give feedback bar raiser cafe" and q.phrases == ("bar raiser",)
     assert build_keyword_query("what is it").terms == "what is it"  # only stop words: keep them
     assert build_keyword_query("   ").empty and build_keyword_query("?!*").empty
-    assert build_keyword_query("don't 'quote'").terms == "don't quote"
+    assert build_keyword_query("don't 'quote'").terms == "quote"  # split like the index: don + t
     assert build_keyword_query('"!!"').phrases == ()
 
 
@@ -20,7 +21,7 @@ def test_keyword_query_words_phrases_and_folding():
 def test_operators_are_plain_words():
     q = build_keyword_query('what\'s "bar raiser" AND (hiring)?')
     assert (
-        q.phrases == ("bar raiser",) and q.terms == "what's bar raiser hiring"
+        q.phrases == ("bar raiser",) and q.terms == "bar raiser hiring"
     )  # "AND" is just the stop word "and"
 
 
@@ -52,3 +53,22 @@ def test_diversify_caps_passages_and_summaries_per_post():
 def test_boost_must_be_a_positive_number(bad):
     with pytest.raises(ValueError, match="positive number"):
         keyword._boost(bad)
+
+
+def test_contractions_and_typographic_quotes():
+    q = build_keyword_query("What’s the best way to delegate? It’s about “bar raiser” you’re told")
+    assert q.terms == "best way delegate bar raiser told" and q.phrases == ("bar raiser",)
+    assert build_keyword_query("‘single’ quotes").terms == "single quotes"
+
+
+def test_kind_must_be_known():
+    with pytest.raises(ValueError, match="kind must be one of all, passages, summaries"):
+        Filters(kind="passage")
+
+
+def test_rrf_counts_a_repeated_id_once_at_its_first_rank():
+    fused = {f.passage_id: f for f in rrf({"keyword": ["a", "b", "a"], "semantic": ["b"]})}
+    assert fused["a"].found_by == ("keyword",) and fused["a"].score == pytest.approx(1 / 61)
+    assert fused["b"].found_by == ("keyword", "semantic")
+    assert [f.passage_id for f in rrf({"keyword": ["a", "a", "c"]})] == ["a", "c"]
+    assert {f.passage_id: f.best_rank for f in rrf({"keyword": ["a", "a", "c"]})}["c"] == 3

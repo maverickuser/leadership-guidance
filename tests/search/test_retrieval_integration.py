@@ -9,9 +9,9 @@ import pytest
 
 from newsletter_archive.search import db
 from newsletter_archive.search.embeddings import passage_input
+from newsletter_archive.search.filters import Filters
 from newsletter_archive.search.indexer import Indexer, IndexOptions
 from newsletter_archive.search.keyword import (
-    Filters,
     all_categories,
     build_keyword_query,
     keyword_search,
@@ -131,3 +131,71 @@ def test_vector_search_nearest_first_with_filters(store):
     assert vector_search(conn, schema, v, Filters(), 3)[0] == row[0]
     hiring = vector_search(conn, schema, v, Filters(categories=("Hiring",)), 10)
     assert hiring and all(h.startswith("phrase-hit") for h in hiring)
+
+
+def small_store(db_config, records):
+    cfg = small_config(db_config)
+    write_archive(cfg, records)
+    conn = db.connect(cfg, "writer")
+    Indexer(cfg, conn, lambda *_: FakeEmbedder(dim=8), lambda: FakeSummarizer()).run(IndexOptions())
+    return cfg, conn, db.active_generation(conn).schema
+
+
+def test_vector_search_works_on_a_fresh_reader_connection(store):
+    cfg, _conn, schema = store
+    v = np.ones(8, dtype=np.float32) / np.sqrt(8)
+    with db.connect(cfg, "reader") as reader:  # nothing else has registered pgvector here
+        assert len(vector_search(reader, schema, v, Filters(), 3)) == 3
+        assert len(vector_search(reader, schema, v, Filters(), 3)) == 3  # registered once
+
+
+def test_phrase_in_a_heading_outranks_the_same_phrase_in_a_body(db_config):
+    _, conn, schema = small_store(
+        db_config,
+        [
+            post("in-body", 1, [("Other things", FILLER + " Every loop has a bar raiser.")]),
+            post("in-heading", 2, [("Bar raiser", FILLER)]),
+        ],
+    )
+    with conn:
+        hits = keyword_search(conn, schema, build_keyword_query('"bar raiser"'), Filters(), BOOSTS, 10)
+        assert ids(hits)[:2] == ["in-heading", "in-body"]
+
+
+def test_categories_differing_only_by_case_are_all_kept(db_config):
+    _, conn, schema = small_store(
+        db_config,
+        [
+            post("upper", 1, [(None, FILLER)], category="Leadership"),
+            post("lower", 2, [(None, FILLER)], category="leadership"),
+            post("other", 3, [(None, FILLER)], category="Career"),
+        ],
+    )
+    with conn:
+        resolved, unknown = resolve_categories(conn, schema, ["LEADERSHIP"])
+        assert sorted(resolved) == ["Leadership", "leadership"] and unknown == []
+        hits = keyword_search(
+            conn,
+            schema,
+            build_keyword_query("teams"),
+            Filters(categories=resolved, kind="passages"),
+            BOOSTS,
+            20,
+        )
+        assert set(ids(hits)) == {"upper", "lower"}
+
+
+def test_category_list_is_cached_briefly(store):
+    from newsletter_archive.search import keyword as kw
+
+    _, conn, schema = store
+    kw.clear_category_cache()
+    now = [100.0]
+    assert "Brand new" not in kw.all_categories(conn, schema, clock=lambda: now[0])
+    conn.execute(
+        f"UPDATE {schema}.posts SET categories = categories || 'Brand new'::text WHERE post_id = 'cafe'"
+    )
+    now[0] += 10
+    assert "Brand new" not in kw.all_categories(conn, schema, clock=lambda: now[0])  # cached
+    now[0] += kw.CATEGORY_CACHE_SECONDS
+    assert "Brand new" in kw.all_categories(conn, schema, clock=lambda: now[0])
