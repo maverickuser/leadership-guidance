@@ -151,6 +151,7 @@ class Reranking:
         self._loaded = threading.Event()
         self._worker = ThreadPoolExecutor(max_workers=1, thread_name_prefix="rerank")
         self._busy: Future[list[float]] | None = None
+        self._submit_lock = threading.Lock()
         threading.Thread(target=self._load, args=(load,), name="rerank-load", daemon=True).start()
 
     def _load(self, load: Callable[[], Reranker]) -> None:
@@ -175,11 +176,12 @@ class Reranking:
         model = self._model
         if model is None:
             raise RerankerUnavailableError(f"re-ranker {self.status}")
-        if self._busy is not None and not self._busy.done():
-            raise RerankerUnavailableError("re-ranker still busy with an earlier search")
-        self._busy = self._worker.submit(model.score, query, list(documents))
+        with self._submit_lock:  # check and submit together: concurrent searches never queue
+            if self._busy is not None and not self._busy.done():
+                raise RerankerUnavailableError("re-ranker still busy with an earlier search")
+            busy = self._busy = self._worker.submit(model.score, query, list(documents))
         try:
-            scores = self._busy.result(timeout=self.timeout)
+            scores = busy.result(timeout=self.timeout)
         except FutureTimeout:
             raise RerankerUnavailableError(f"re-ranker took longer than {self.timeout:g}s") from None
         except Exception as e:

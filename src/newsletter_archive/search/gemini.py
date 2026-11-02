@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import logging
 import random
+import threading
 import time
 from collections.abc import Callable
 from dataclasses import dataclass, field
@@ -93,6 +94,7 @@ class TokenBucket:
         self.clock = clock
         self.sleep = sleep
         self.updated = clock()
+        self._lock = threading.Lock()  # shared by concurrent searches
 
     def _refill(self) -> None:
         now = self.clock()
@@ -104,13 +106,14 @@ class TokenBucket:
         A request bigger than the whole bucket waits for a full bucket and goes through."""
         amount = min(float(amount), self.capacity)
         waited = 0.0
-        self._refill()
-        while self.tokens < amount:
-            wait = (amount - self.tokens) / self.refill_per_second
-            self.sleep(wait)
-            waited += wait
+        with self._lock:
             self._refill()
-        self.tokens -= amount
+            while self.tokens < amount:
+                wait = (amount - self.tokens) / self.refill_per_second
+                self.sleep(wait)
+                waited += wait
+                self._refill()
+            self.tokens -= amount
         return waited
 
 
@@ -163,6 +166,7 @@ class GeminiClient:
     tpm: int
     breaker_failures: int = 3
     timeout_seconds: float = DEFAULT_TIMEOUT_SECONDS
+    retry_delays: tuple[float, ...] = RETRY_DELAYS_SECONDS  # () = one attempt (interactive queries)
     sdk_factory: Callable[[str, float], Any] | None = None
     sleep: Callable[[float], None] = time.sleep
     clock: Callable[[], float] = time.monotonic
@@ -218,14 +222,14 @@ class GeminiClient:
                     raise GeminiAuthError(status or 0) from None
                 if not is_retryable(e):
                     raise GeminiRequestError(f"Gemini {what} failed: {_describe(e)}") from None
-                if attempt >= len(RETRY_DELAYS_SECONDS):
+                if attempt >= len(self.retry_delays):
                     self._fail()
                     raise GeminiUnavailableError(
                         f"Gemini {what} still failing after {attempt} retries: {_describe(e)}"
                     ) from None
                 delay = _retry_after(e)
                 if delay is None:
-                    delay = RETRY_DELAYS_SECONDS[attempt] * (1 + 0.25 * self.jitter())
+                    delay = self.retry_delays[attempt] * (1 + 0.25 * self.jitter())
                 log.info("Gemini %s failed (%s); retrying in %.1fs", what, _describe(e), delay)
                 self.stats.retries += 1
                 self.sleep(delay)

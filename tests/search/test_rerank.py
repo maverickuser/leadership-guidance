@@ -99,3 +99,26 @@ def test_hub_goes_offline_once_the_model_is_cached(tmp_path, monkeypatch):
     configure_hub("Org/Model", tmp_path)
     assert is_cached("Org/Model", tmp_path) and os.environ["HF_HUB_OFFLINE"] == "1"
     assert os.environ["TRANSFORMERS_OFFLINE"] == "1"
+
+
+def test_concurrent_calls_never_queue_behind_each_other():
+    r = loaded(FakeReranker(delay=0.3))
+    errors, started = [], threading.Event()
+
+    def first():
+        started.set()
+        r.score("q", ["a"])
+
+    t = threading.Thread(target=first)
+    t.start()
+    started.wait(2)
+    for _ in range(100):  # until the first call has been submitted
+        if r._busy is not None:
+            break
+        threading.Event().wait(0.005)
+    try:
+        r.score("q", ["b"])
+    except RerankerUnavailableError as e:
+        errors.append(str(e))
+    t.join()
+    assert errors == ["re-ranker still busy with an earlier search"]

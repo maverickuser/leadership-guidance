@@ -180,3 +180,23 @@ def test_status_helpers():
     err = api_error(500)
     err.code = None
     assert gemini._status(err) is None and not gemini.is_retryable(ValueError())
+
+
+def test_no_retries_when_retry_delays_is_empty():
+    calls, sleeps = [], []
+
+    def fn(sdk):
+        calls.append(1)
+        raise api_error(503)
+
+    client = GeminiClient(
+        Secret(TEST_GEMINI_KEY),
+        rpm=60,
+        tpm=10_000,
+        retry_delays=(),
+        sdk_factory=lambda k, t: object(),
+        sleep=sleeps.append,
+    )
+    with pytest.raises(GeminiUnavailableError, match="after 0 retries"):
+        client.call(fn, 10, "query")
+    assert calls == [1] and sleeps == []

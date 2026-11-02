@@ -47,3 +47,12 @@ def test_defaults_and_normalising():
 def test_invalid_requests_say_what_is_allowed(kwargs, message):
     with pytest.raises(SearchError, match=message):
         SearchRequest.create(**kwargs)
+
+
+def test_kind_must_be_a_string_and_datetimes_become_dates():
+    from datetime import datetime
+
+    with pytest.raises(SearchError, match="kind must be one of"):
+        SearchRequest.create("q", kind=["passages"])
+    r = SearchRequest.create("q", since=datetime(2025, 1, 1, 15, 30), until=date(2025, 2, 1))
+    assert r.since == date(2025, 1, 1) and type(r.since) is date

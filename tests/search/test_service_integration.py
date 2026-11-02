@@ -204,3 +204,109 @@ def test_gemini_query_embedder(cfg, monkeypatch):
     svc.embedder_factory = gemini_query_embedder(cfg)  # no key
     resp = ask(svc, "bar raiser")
     assert not resp.semantic and "GEMINI_API_KEY" in resp.notes[0]
+
+
+# -- review fixes ------------------------------------------------------------------------------
+
+
+def test_a_vector_query_error_is_an_error_not_semantic_skipped(cfg):
+    build(cfg)
+    wrong_size = FakeEmbedder(model="fake-model", dim=4)  # the index holds 8-dimension vectors
+    wrong_size.dim = 8  # claims the right size, returns the wrong one
+    wrong_size.embed = lambda texts: FakeEmbedder(dim=4).embed(texts)
+    with pytest.raises(psycopg.Error):
+        ask(service(cfg, embedder=wrong_size), "bar raiser")
+
+
+def test_semantic_search_pauses_after_a_failure(cfg):
+    from newsletter_archive.search.service import SEMANTIC_PAUSE_SECONDS
+
+    build(cfg)
+    calls, now = [], [0.0]
+
+    class Down(FakeEmbedder):
+        def embed(self, texts):
+            calls.append(1)
+            raise RuntimeError("503 unavailable")
+
+    svc = service(cfg, embedder=Down(dim=8), clock=lambda: now[0])
+    assert "503 unavailable" in ask(svc, "bar raiser").notes[0] and calls == [1]
+    paused = ask(svc, "bar raiser")
+    assert not paused.semantic and "paused for 30s" in paused.notes[0] and calls == [1]
+    now[0] += SEMANTIC_PAUSE_SECONDS + 1
+    ask(svc, "bar raiser")
+    assert calls == [1, 1]
+
+
+def test_any_reranker_error_degrades_instead_of_failing(cfg):
+    build(cfg)
+
+    class Raises:
+        def score(self, query, documents):
+            raise RuntimeError("MPS out of memory")
+
+    class Short:
+        def score(self, query, documents):
+            return [1.0]
+
+    resp = ask(service(cfg, reranker=Raises()), "bar raiser")
+    assert not resp.reranked and "MPS out of memory" in resp.notes[0] and resp.results
+    resp = ask(service(cfg, reranker=Short()), "bar raiser")
+    assert not resp.reranked and "wrong number of scores" in resp.notes[0]
+
+
+def test_reranked_results_are_all_reranked_even_past_rerank_top(cfg):
+    build(cfg)
+    small = replace(cfg, search=replace(cfg.search, rerank_top=2))
+    seen = []
+
+    class Count(FakeReranker):
+        def score(self, query, documents):
+            seen.append(len(documents))
+            return [1.0 - i / 100 for i in range(len(documents))]
+
+    resp = ask(service(small, reranker=Count()), "team", limit=6)
+    assert seen == [6] and len(resp.results) <= 6
+    scores = [r.score for r in resp.results]
+    assert scores == sorted(scores, reverse=True) and min(scores) > 0.9
+
+
+def test_index_dropped_under_a_cached_generation_retries(cfg):
+    from newsletter_archive.search.generations import Generations
+
+    build(cfg)
+    svc = service(cfg)
+    assert ask(svc, "team").generation == 1
+    with db.connect(cfg, "writer") as conn:
+        factory = lambda: Indexer(cfg, conn, lambda *_: FakeEmbedder(dim=8), lambda: FakeSummarizer())  # noqa: E731
+        Generations(cfg, conn, factory).refresh(IndexOptions())
+        conn.execute("DROP SCHEMA idx_g1 CASCADE")
+        conn.execute("DELETE FROM generations WHERE generation = 1")
+    assert ask(svc, "team").generation == 2  # the cached 1 was forgotten and the search retried
+
+
+def test_categories_maps_a_lost_database(cfg):
+    @contextmanager
+    def connect():
+        raise psycopg.OperationalError("server closed the connection")
+        yield
+
+    svc = SearchService(cfg, connect, lambda m, d: FakeEmbedder(model=m, dim=d))
+    with pytest.raises(SearchError, match="docker compose up -d --wait db"):
+        svc.categories()
+
+
+def test_gemini_query_embedder_shares_one_client(cfg, monkeypatch):
+    from newsletter_archive.config import Secret
+    from newsletter_archive.search import gemini
+    from newsletter_archive.search.service import gemini_query_embedder
+
+    from ..conftest import TEST_GEMINI_KEY
+    from .fakes import FakeSDK
+
+    made = []
+    monkeypatch.setattr(gemini, "_default_sdk", lambda key, timeout: made.append(timeout) or FakeSDK())
+    make = gemini_query_embedder(replace(cfg, gemini_api_key=Secret(TEST_GEMINI_KEY)))
+    a, b = make("fake-model", 8), make("fake-model", 8)
+    a.embed(["x"]), b.embed(["y"])
+    assert a.client is b.client and a.client.retry_delays == () and made == [cfg.search.query_timeout_seconds]
