@@ -182,7 +182,13 @@ class Generations:
         active = db.active_generation(self.conn)
         gate = None
         if active is not None and active.generation != candidate.generation:
-            gate = self.gate(candidate, active)
+            try:
+                gate = self.gate(candidate, active)
+            except ArchiveError as e:  # the check itself couldn't run (e.g. Gemini down)
+                if not force:
+                    raise GenerationError(f"{e}; not swapped") from None
+                log.warning("quality check failed (%s); swapping anyway (--force)", e)
+                gate = None
             if gate is None:
                 log.warning("no evaluation file: swapping without a quality check")
             elif gate[1] - gate[0] > s.quality_gate_max_recall_drop and not force:

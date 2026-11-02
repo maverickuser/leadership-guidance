@@ -72,3 +72,10 @@ def test_rrf_counts_a_repeated_id_once_at_its_first_rank():
     assert fused["b"].found_by == ("keyword", "semantic")
     assert [f.passage_id for f in rrf({"keyword": ["a", "a", "c"]})] == ["a", "c"]
     assert {f.passage_id: f.best_rank for f in rrf({"keyword": ["a", "a", "c"]})}["c"] == 3
+
+
+def test_rrf_weights_favour_a_list():
+    lists = {"keyword": ["k", "both"], "semantic": ["s", "both"]}
+    assert rrf(lists)[0].passage_id == "both"
+    weighted = rrf({"keyword": ["k"], "semantic": ["s"]}, weights={"semantic": 2.0})
+    assert [f.passage_id for f in weighted] == ["s", "k"] and weighted[0].score == pytest.approx(2 / 61)

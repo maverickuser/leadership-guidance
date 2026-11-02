@@ -82,8 +82,8 @@
 
 ## 10. Evaluation, safety and acceptance (PR 10)
 
-- [ ] 10.1 `scripts/eval_search.py`: tagged questions, recall@10 and MRR per stage, with and without summaries, per question type
-- [ ] 10.2 Write ~30 eval questions (local, intent, global, multi-hop) in the git-ignored `eval-queries.yaml`
-- [ ] 10.3 Safety-check rules for API keys and DB passwords; secret grep tests over logs and tool responses
-- [ ] 10.4 Acceptance on the real archive: full index, cost and timing recorded, eval run, tune boosts and candidates
-- [ ] 10.5 Decide from the eval: contextual retrieval needed? (rule in `lld.md` §13)
+- [x] 10.1 `scripts/eval_search.py`: tagged questions, recall@10 and MRR per stage, with and without summaries, per question type
+- [x] 10.2 Write ~30 eval questions (local, intent, global, multi-hop) in the git-ignored `eval-queries.yaml`
+- [x] 10.3 Safety-check rules for API keys and DB passwords; secret grep tests over logs and tool responses
+- [x] 10.4 Acceptance on the real archive: full index, cost and timing recorded, eval run, tune boosts and candidates
+- [x] 10.5 Decide from the eval: contextual retrieval needed? (rule in `lld.md` §13)

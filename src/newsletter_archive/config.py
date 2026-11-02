@@ -101,6 +101,8 @@ class SearchConfig:
     mass_delete_fraction: float = 0.10
     quality_gate_max_recall_drop: float = 2.0
     bm25_boosts: dict[str, float] = field(default_factory=lambda: {"heading": 2.0, "title": 1.5, "body": 1.0})
+    # RRF weight per list; semantic 2 measured best on the evaluation (PR 10)
+    fusion_weights: dict[str, float] = field(default_factory=lambda: {"keyword": 1.0, "semantic": 2.0})
     candidates: int = 50
     rerank_top: int = 20  # ~0.22 s per pair on Apple MPS (measured in PR 8)
     reranker_model: str = "Qwen/Qwen3-Reranker-0.6B"
@@ -118,6 +120,7 @@ class SearchConfig:
 SEARCH_FIELDS = {f.name for f in fields(SearchConfig)}
 SUMMARY_FIELDS = {f.name for f in fields(SummaryConfig)}
 BM25_FIELDS = {"heading", "title", "body"}
+FUSION_FIELDS = {"keyword", "semantic"}
 THINKING_LEVELS = ("", "minimal", "low", "medium", "high")
 
 
@@ -243,6 +246,7 @@ def _parse_search(raw: Any, env_port: str | None = None) -> SearchConfig:
         values["db_port"] = env_port
     summaries = values.pop("summaries", None)
     boosts = values.pop("bm25_boosts", None)
+    weights = values.pop("fusion_weights", None)
     for name, value in values.items():
         values[name] = _coerce(f"search.{name}", value, getattr(defaults, name))
     if summaries is not None:
@@ -259,6 +263,13 @@ def _parse_search(raw: Any, env_port: str | None = None) -> SearchConfig:
         values["bm25_boosts"] = {
             **defaults.bm25_boosts,
             **{k: _coerce(f"search.bm25_boosts.{k}", v, 1.0) for k, v in boosts.items()},
+        }
+    if weights is not None:
+        if not isinstance(weights, dict) or set(weights) - FUSION_FIELDS:
+            raise ConfigError("search.fusion_weights must map keyword and semantic to numbers")
+        values["fusion_weights"] = {
+            **defaults.fusion_weights,
+            **{k: _coerce(f"search.fusion_weights.{k}", v, 1.0) for k, v in weights.items()},
         }
     return SearchConfig(**values)
 
@@ -298,6 +309,8 @@ def _validate_search(s: SearchConfig) -> None:
         raise ConfigError("search.quality_gate_max_recall_drop must be >= 0")
     if any(v <= 0 for v in s.bm25_boosts.values()):
         raise ConfigError("search.bm25_boosts values must be > 0")
+    if any(v <= 0 for v in s.fusion_weights.values()):
+        raise ConfigError("search.fusion_weights values must be > 0")
     if s.rerank_top > 2 * s.candidates:
         raise ConfigError("search.rerank_top can't exceed the combined candidates (2 x search.candidates)")
     if not s.default_limit <= s.max_limit:
