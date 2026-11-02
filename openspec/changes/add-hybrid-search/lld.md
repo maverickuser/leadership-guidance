@@ -360,7 +360,7 @@ Phase 1's extractor matched one intro wording and stopped at the first non-match
 3. **BM25 top-50**: safe query builder (keep `"quoted phrases"`, drop stop words unless nothing else is left, escape each term, OR-join). Boosts heading × 2, title × 1.5, body × 1 (`bm25_boosts`, tunable by the eval script). Filters in the same SQL.
 4. **Vector top-50**: exact cosine distance over passages passing the filters.
 5. **RRF**: `score = Σ 1/(60 + rank)`; ties → better single rank, then `passage_id`; keep `found_by`.
-6. **Re-rank** the top 40 with Qwen3 (§7).
+6. **Re-rank** the top `rerank_top` (20) with Qwen3 (§7).
 7. **Diversify**: at most 3 passages and 1 summary per post.
 8. **Hydrate** and return the top `limit`.
 
@@ -397,10 +397,18 @@ LIMIT 50;
 
 - `Qwen/Qwen3-Reranker-0.6B` (Apache 2.0, ~1.2 GB), cached in `{output_dir}/models/`, offline after first download.
 - `transformers` (`AutoModelForCausalLM`) on Apple MPS (CPU fallback), fp16, batch size 8.
-- Yes/no relevance prompt from the model card (instruction: "Given a question, find passages from a leadership newsletter that answer it"); score = probability of "yes". Template copied from the model card in PR 6.
+- Yes/no relevance prompt from the model card (instruction: "Given a question, find passages from a leadership newsletter that answer it"); score = probability of "yes". Template copied verbatim from the model card in PR 8.
 - Pair input: query + `"{title} — {heading}\n{body}"`, truncated to 512 tokens.
 - Loaded at MCP server start (background thread); timeout `rerank_timeout_seconds` (10).
-- `Reranker` protocol; tests use `FakeReranker`. Expected ~1–2 s for 40 pairs (measured by the eval script).
+- `Reranker` protocol; tests use `FakeReranker`.
+
+Built in PR 8:
+- torch and transformers are an optional extra (`pip install -e '.[rerank]'`): torch 2.14.1, transformers 5.20.2. CI doesn't install them (on Linux, torch pulls in gigabytes of GPU libraries). Without the extra, searches still run, with `reranked: false`.
+- `Reranking` loads the model in a background thread and enforces the timeout. Scoring runs in one worker thread; while an earlier call is still running, a new search gets `reranked: false` instead of queuing.
+- Once the model is cached, Hugging Face runs fully offline with telemetry off. Background Hub checks had delayed process exit by minutes.
+- **Measured on this Mac (MPS, fp16):** ~0.22 s per pair for real passages (median 287 tokens). 40 pairs took ~9 s, just under the 10 s timeout, so `rerank_top` defaults to **20** (~4.7 s). fp32 on MPS took 10 s, bf16 14 s and CPU 19 s; batch size made no difference. The evaluation (PR 10) decides between 20, 40 and no re-ranking.
+- Query embedding: one Gemini client per query (an earlier outage never keeps the breaker open), `query_timeout_seconds` 8; measured ~0.7 s.
+- Request validation uses a plain dataclass (`SearchRequest.create`), not Pydantic; the MCP SDK validates the JSON schema first in PR 9.
 
 ## 8. MCP server (`mcp_server.py`, started by `archive mcp`)
 
@@ -445,7 +453,7 @@ LIMIT 50;
 | `mass_delete_min` / `mass_delete_fraction` | `5` / `0.10` |
 | `quality_gate_max_recall_drop` | `2` (points) |
 | `bm25_boosts` | heading `2`, title `1.5`, body `1` |
-| `candidates` / `rerank_top` | `50` / `40` |
+| `candidates` / `rerank_top` | `50` / `20` |
 | `reranker_model` / `rerank_timeout_seconds` | `Qwen/Qwen3-Reranker-0.6B` / `10` |
 | `max_per_post` / `default_limit` / `max_limit` | `3` / `10` / `30` |
 | `db_host` / `db_port` / `db_name` | `127.0.0.1` / `5433` / `archive` |
@@ -567,7 +575,6 @@ Verified in PR 7 (same image): match-any, phrase, boost and score queries run on
 
 Still to verify:
 
-- `Qwen3-Reranker-0.6B` prompt template and latency on MPS.
 - `mcp` SDK version and structured-output API.
 
 ## 16. PR stack

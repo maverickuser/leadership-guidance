@@ -19,7 +19,9 @@ user_agent: "newsletter-archive/0.1 (personal archive; one request every 2s)"
 #   chunk_words: 300
 #   chunk_overlap_words: 50
 #   candidates: 50
-#   rerank_top: 40
+#   rerank_top: 20
+#   rerank_timeout_seconds: 10
+#   query_timeout_seconds: 8
 #   db_host: 127.0.0.1
 #   db_port: 5433
 #   db_name: archive

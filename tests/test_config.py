@@ -123,7 +123,7 @@ def test_search_defaults(tmp_path):
     cfg = load_config(tmp_path / "missing.yaml", tmp_path / ".env", overrides=SITE)
     s = cfg.search
     assert (s.embedding_model, s.embedding_dimension) == ("gemini-embedding-2", 3072)
-    assert (s.chunk_words, s.chunk_overlap_words, s.candidates, s.rerank_top) == (300, 50, 50, 40)
+    assert (s.chunk_words, s.chunk_overlap_words, s.candidates, s.rerank_top) == (300, 50, 50, 20)
     assert s.bm25_boosts == {"heading": 2.0, "title": 1.5, "body": 1.0}
     assert (s.db_host, s.db_port, s.db_name) == ("127.0.0.1", 5433, "archive")
     assert s.summaries.enabled and s.summaries.max_tokens_per_run == 1_500_000
