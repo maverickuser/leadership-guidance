@@ -249,7 +249,7 @@ Measured on the current archive: 207 copies of 3 boilerplate paragraphs remain i
 
 1. Split every eligible post into paragraphs; keep those with ≥ 8 words; normalise (lowercase, strip punctuation, collapse spaces).
 2. **Exact groups**: by sha256 of the normalised text.
-3. **Near-duplicate groups**: word 5-gram shingles → MinHash (64 permutations, in-repo numpy code) → LSH banding to find candidate pairs → exact Jaccard ≥ `boilerplate_similarity` (0.8) → union-find clusters. (~7,500 paragraphs: well under a second.)
+3. **Near-duplicate groups**: word 5-gram shingles → MinHash (64 permutations, in-repo numpy code) → LSH banding (16 × 4) to find candidate pairs → exact Jaccard ≥ `boilerplate_similarity` (0.8) → union-find clusters. Measured on the archive: 1.5 s, 3 clusters (the welcome intros' 3 wordings merged into one). With 5-gram shingles a one-word change only stays above 0.8 for paragraphs of ~50+ words, which real intros are.
 4. A cluster whose members appear in ≥ `boilerplate_min_posts` (5) **distinct posts** is boilerplate. Remove its paragraphs from those posts before chunking.
 5. Warn for any post losing > 20% of its words (protects real content that happens to repeat).
 6. Store the set in the generation's `boilerplate` table (cluster, hash, post count, sample) for inspection. The set is recomputed every run; its effect flows through fingerprints (§5.2).
@@ -319,9 +319,9 @@ The query embedder always uses the **active generation's** model and dimension (
 
 Anthropic's method prepends a 50–100-token, chunk-specific context written by an LLM that reads the whole post, before embedding and BM25. Their tests: failed retrievals down 35% (embeddings), 49% (+ BM25), 67% (+ re-ranking). Here: ~3,600 LLM calls once (whole post cached per post), for example a Gemini model on the existing key; whole posts sent to that model. If accepted: a `context` column on passages, included in the embedding input and BM25 body, with its prompt version in the fingerprint.
 
-### 5.9 Related phase-1 fix
+### 5.9 Related phase-1 fix (done in PR 2)
 
-Phase 1's extractor matched one intro wording and stopped at the first non-matching paragraph. Fix: boilerplate patterns in the local, git-ignored `config.yaml`, applied to the first few paragraphs, then `archive extract --refresh` (offline). The index-time filter stays as the safety net.
+Phase 1's extractor matched one intro wording and stopped at the first non-matching paragraph. Measured: 79 posts had boilerplate only in the leading paragraphs, 38 had it deeper (positions 3–16, after the post's own opener). Fix: extra intro prefixes in the local, git-ignored `config.yaml` (`boilerplate_prefixes`); the stop-at-first-non-match rule is kept so real content near the top is never removed (spec delta `content-extraction`). After `archive extract --refresh`, boilerplate in post JSON fell from 208 to 38 paragraphs; the index-time filter removes the rest.
 
 ### 5.10 Post summaries (`search/summaries.py`)
 

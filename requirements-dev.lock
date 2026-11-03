@@ -41,6 +41,8 @@ filelock==4.2.5
     #   virtualenv
 htmldate==1.11.0
     # via trafilatura
+hypothesis==6.170.1
+    # via newsletter-archive (pyproject.toml)
 identify==2.6.20
     # via pre-commit
 idna==3.20
@@ -74,6 +76,8 @@ mypy-extensions==1.1.0
     # via mypy
 nodeenv==1.11.1
     # via pre-commit
+numpy==2.4.6
+    # via newsletter-archive (pyproject.toml)
 packaging==26.3
     # via
     #   pytest
@@ -136,6 +140,8 @@ shellingham==1.5.4
     # via typer
 six==1.17.0
     # via python-dateutil
+sortedcontainers==2.4.0
+    # via hypothesis
 soupsieve==3.0.4
     # via beautifulsoup4
 tld==0.13.2

@@ -173,11 +173,11 @@ def test_unexpected_exception_is_contained(cfg, monkeypatch):
     calls = {"n": 0}
     real = store.extract_post
 
-    def flaky(html, url):
+    def flaky(html, url, prefixes=()):
         calls["n"] += 1
         if calls["n"] == 1:
             raise RuntimeError("parser exploded")
-        return real(html, url)
+        return real(html, url, prefixes)
 
     monkeypatch.setattr(store, "extract_post", flaky)
     result = run_extract(cfg, m)

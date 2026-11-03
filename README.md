@@ -103,6 +103,8 @@ launchd runs a missed job when the Mac wakes from sleep, but not if the Mac was 
 | `min_word_count` | `300` | posts with fewer words, or with a paywall box in the body, are `partial` |
 | `output_dir` | `../newsletter-archive-data` | relative to `config.yaml` (or the current folder if there is none), or an absolute path |
 | `user_agent` | `newsletter-archive/0.1 (...)` | |
+| `boilerplate_prefixes` | `[]` | extra intro openings to strip from the top of each post; your site's wording stays in your local `config.yaml` |
+| `search` | see `config.example.yaml` | hybrid search settings (in progress) |
 
 ## Output
 

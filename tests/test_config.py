@@ -211,3 +211,19 @@ def test_search_secrets_from_env_file_and_environment(tmp_path, monkeypatch):
     shown = repr(cfg)
     assert TEST_GEMINI_KEY not in shown and TEST_DB_PASSWORD not in shown
     assert len(cfg.secrets) == 4
+
+
+def test_boilerplate_prefixes(tmp_path):
+    p = write(tmp_path / "config.yaml", "boilerplate_prefixes:\n  - '  Hello   there '\n")
+    assert load_config(p, tmp_path / ".env").boilerplate_prefixes == ("Hello there",)
+    assert (
+        load_config(tmp_path / "missing.yaml", tmp_path / ".env", overrides=SITE).boilerplate_prefixes == ()
+    )
+    for bad in (
+        "boilerplate_prefixes: hello\n",
+        "boilerplate_prefixes: ['']\n",
+        "boilerplate_prefixes: [3]\n",
+    ):
+        p = write(tmp_path / "config.yaml", bad)
+        with pytest.raises(ConfigError, match="boilerplate_prefixes"):
+            load_config(p, tmp_path / ".env")
