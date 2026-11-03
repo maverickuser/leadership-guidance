@@ -10,6 +10,7 @@ import pytest
 
 SCRIPT = Path(__file__).resolve().parents[1] / "scripts" / "check_safety.py"
 FAKE_GOOGLE_KEY = "AIza" + "Sy" + "x" * 33  # built at runtime so this file never holds one
+PW_VAR = "ARCHIVE_DB_{}_" + "PASSWORD"  # split so the safety check does not flag this file
 
 
 def run_check(tmp_path: Path, files: dict[str, str]) -> subprocess.CompletedProcess[str]:
@@ -26,8 +27,8 @@ def run_check(tmp_path: Path, files: dict[str, str]) -> subprocess.CompletedProc
     "files, problem",
     [
         ({"notes.md": f"key = {FAKE_GOOGLE_KEY}\n"}, "looks like a Google API key"),
-        ({"compose.yml": "ARCHIVE_DB_READER_PASSWORD=hunter2hunter2\n"}, "database password"),
-        ({"config.yml": "ARCHIVE_DB_WRITER_PASSWORD: 'Sup3rS3cret!'\n"}, "database password"),
+        ({"compose.yml": PW_VAR.format("READER") + "=hunter2hunter2\n"}, "database password"),
+        ({"config.yml": PW_VAR.format("WRITER") + ": 'Sup3rS3cret!'\n"}, "database password"),
         ({".env": "GEMINI_API_KEY=x\n"}, "private file is tracked"),
     ],
 )

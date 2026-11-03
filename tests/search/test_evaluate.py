@@ -10,6 +10,7 @@ from newsletter_archive.search.evaluate import (
     Question,
     Report,
     load_questions,
+    memoized,
     post_ranking,
     recall_at,
     reciprocal_rank,
@@ -49,6 +50,10 @@ def test_load_questions(tmp_path):
         ("questions:\n  - {id: a, type: local, expected: [x]}\n", "needs a question"),
         ("questions:\n  - {id: a, type: local, question: q, expected: []}\n", "non-empty list of post ids"),
         (
+            "questions:\n  - {id: a, type: local, question: " + "x" * 1001 + ", expected: [x]}\n",
+            "over 1000 characters",
+        ),
+        (
             "questions:\n  - {id: a, type: local, question: q, expected: [x]}\n  - {id: a, type: local, question: q, expected: [x]}\n",
             "duplicate id",
         ),
@@ -83,12 +88,20 @@ def test_report_tables_rules_and_json():
     report = Report(
         [
             outcome("q1", "local", True, full),
-            outcome("q2", "intent", True, {**full, "reranked": (0.5, 0.25)}, missing=("p",), seconds=3.0),
+            outcome(
+                "q2",
+                "intent",
+                True,
+                {**full, "combined": (0.5, 0.5), "reranked": (0.5, 0.25)},
+                missing=("p",),
+                seconds=3.0,
+            ),
             outcome("q1", "local", False, {"keyword": (0.0, 0.0)}, semantic=False, reranked=False),
         ],
         generation=2,
         model="m",
         rerank_top=20,
+        unknown_expected={"q2": ["gone"]},
     )
     assert report.score("reranked", True) == (0.75, 0.625, 2)
     assert report.score("reranked", False) is None and report.score("keyword", True, "intent") == (
@@ -102,14 +115,44 @@ def test_report_tables_rules_and_json():
     assert "latency per search: median 1.0s, p90 3.0s" in text
     assert "warning: 1 searches ran without semantic search or re-ranking" in text
     assert "contextual retrieval: needed" in text and "q2 (intent): p" in text
+    assert "warning: q2 expects posts that aren't in the index: gone" in text
     d = report.to_dict()
     assert d["overall"]["with_summaries"]["reranked"] == {"recall_at_10": 0.75, "mrr": 0.625, "n": 2}
     assert d["overall"]["passages_only"]["semantic"] is None and d["contextual_retrieval_needed"] is True
-    assert d["questions"][1]["missing"] == ["p"]
+    assert d["questions"][1]["missing"] == ["p"] and d["unknown_expected"] == {"q2": ["gone"]}
+
+
+def test_contextual_rule_looks_at_retrieval_not_reranking():
+    scores = {"keyword": (0.5, 0.5), "semantic": (1.0, 1.0), "combined": (1.0, 1.0), "reranked": (0.5, 0.5)}
+    assert Report([outcome("a", "local", True, scores)]).needs_contextual_retrieval() is False
+    keyword_only = {"keyword": (0.2, 0.2)}  # semantic search never ran: nothing to judge
+    assert Report([outcome("a", "local", True, keyword_only)]).needs_contextual_retrieval() is None
+
+
+def test_p90_is_the_nearest_rank():
+    report = Report([outcome(f"q{i}", "local", True, {}, seconds=float(i)) for i in range(1, 11)])
+    assert "median 5.5s, p90 9.0s" in "\n".join(report.lines())
+
+
+def test_memoized_embedder_embeds_each_text_once_per_model():
+    from .fakes import FakeEmbedder
+
+    made = []
+
+    def factory(model, dim):
+        made.append(FakeEmbedder(model=model, dim=dim))
+        return made[-1]
+
+    memo = memoized(factory)
+    first = memo("m", 4).embed(["a", "b"])
+    again = memo("m", 4).embed(["b", "a"])
+    other = memo("n", 4).embed(["a"])
+    assert [b for e in made for b in e.batches] == [["a", "b"], ["a"]]
+    assert (first[0] == again[1]).all() and memo("m", 4).model == "m" and len(other) == 1
 
 
 def test_contextual_rule_passes_and_handles_no_local_questions():
-    good = {"keyword": (1.0, 1.0)}
+    good = {"keyword": (1.0, 1.0), "combined": (1.0, 1.0)}
     assert Report([outcome("a", "local", True, good)]).needs_contextual_retrieval() is False
     assert Report([outcome("a", "global", True, good)]).needs_contextual_retrieval() is None
     assert "contextual retrieval" not in "\n".join(Report([outcome("a", "global", True, good)]).lines())

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import math
 import os
 from collections.abc import Callable
 from dataclasses import dataclass, field, fields, replace
@@ -120,7 +121,6 @@ class SearchConfig:
 SEARCH_FIELDS = {f.name for f in fields(SearchConfig)}
 SUMMARY_FIELDS = {f.name for f in fields(SummaryConfig)}
 BM25_FIELDS = {"heading", "title", "body"}
-FUSION_FIELDS = {"keyword", "semantic"}
 THINKING_LEVELS = ("", "minimal", "low", "medium", "high")
 
 
@@ -258,20 +258,21 @@ def _parse_search(raw: Any, env_port: str | None = None) -> SearchConfig:
             parsed["thinking_level"] = parsed["thinking_level"].strip().lower()
         values["summaries"] = SummaryConfig(**parsed)
     if boosts is not None:
-        if not isinstance(boosts, dict) or set(boosts) - BM25_FIELDS:
-            raise ConfigError("search.bm25_boosts must map heading, title and body to numbers")
-        values["bm25_boosts"] = {
-            **defaults.bm25_boosts,
-            **{k: _coerce(f"search.bm25_boosts.{k}", v, 1.0) for k, v in boosts.items()},
-        }
+        values["bm25_boosts"] = _number_map(
+            "bm25_boosts", boosts, defaults.bm25_boosts, "heading, title and body"
+        )
     if weights is not None:
-        if not isinstance(weights, dict) or set(weights) - FUSION_FIELDS:
-            raise ConfigError("search.fusion_weights must map keyword and semantic to numbers")
-        values["fusion_weights"] = {
-            **defaults.fusion_weights,
-            **{k: _coerce(f"search.fusion_weights.{k}", v, 1.0) for k, v in weights.items()},
-        }
+        values["fusion_weights"] = _number_map(
+            "fusion_weights", weights, defaults.fusion_weights, "keyword and semantic"
+        )
     return SearchConfig(**values)
+
+
+def _number_map(name: str, raw: Any, defaults: dict[str, float], keys: str) -> dict[str, float]:
+    """A ``{key: number}`` setting merged over its defaults (bm25_boosts, fusion_weights)."""
+    if not isinstance(raw, dict) or set(raw) - set(defaults):
+        raise ConfigError(f"search.{name} must map {keys} to numbers")
+    return {**defaults, **{k: _coerce(f"search.{name}.{k}", v, 1.0) for k, v in raw.items()}}
 
 
 def _parse_prefixes(raw: Any) -> tuple[str, ...]:
@@ -307,10 +308,9 @@ def _validate_search(s: SearchConfig) -> None:
         raise ConfigError("search.gemini_timeout_seconds must be > 0")
     if s.quality_gate_max_recall_drop < 0:
         raise ConfigError("search.quality_gate_max_recall_drop must be >= 0")
-    if any(v <= 0 for v in s.bm25_boosts.values()):
-        raise ConfigError("search.bm25_boosts values must be > 0")
-    if any(v <= 0 for v in s.fusion_weights.values()):
-        raise ConfigError("search.fusion_weights values must be > 0")
+    for name in ("bm25_boosts", "fusion_weights"):
+        if not all(math.isfinite(v) and v > 0 for v in getattr(s, name).values()):
+            raise ConfigError(f"search.{name} values must be positive numbers")
     if s.rerank_top > 2 * s.candidates:
         raise ConfigError("search.rerank_top can't exceed the combined candidates (2 x search.candidates)")
     if not s.default_limit <= s.max_limit:

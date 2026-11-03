@@ -238,6 +238,10 @@ class SearchService:
 
         return self._with_db(run)
 
+    def resume_semantic(self) -> None:
+        """Lift the pause after a failed query embedding, so the next search tries again."""
+        self._semantic_paused_until = 0.0
+
     def categories(self) -> tuple[db.Generation, list[str]]:
         def run() -> tuple[db.Generation, list[str]]:
             with self.connect() as conn:
@@ -338,8 +342,8 @@ class SearchService:
             except RerankerUnavailableError as e:
                 notes.append(f"results not re-ranked: {e}")
             except Exception as e:
-                notes.append(f"results not re-ranked: re-ranker failed: {self._redact(_reason(e))}")
-                log.warning("re-ranker failed: %s", self._redact(_reason(e)))
+                notes.append(f"results not re-ranked: re-ranker failed: {_reason(e)}")
+                log.warning("re-ranker failed: %s", _reason(e))  # log handlers redact
         elif order:
             notes.append("results not re-ranked: no re-ranker configured")
         if trace is not None:
@@ -376,7 +380,7 @@ class SearchService:
             "until": req.until.isoformat() if req.until else None,
             "kind": req.kind,
         }
-        notes = [self._redact(n) for n in notes]
+        notes = [self._redact(n) for n in notes]  # the one place notes are made safe
         return SearchResponse(req.query, filt, semantic, reranked, results, notes, gen.generation)
 
     def _active(self, conn: psycopg.Connection) -> db.Generation:
@@ -402,7 +406,7 @@ class SearchService:
         except FutureTimeout:
             problem = f"embedding the query took over {self.s.query_timeout_seconds:g}s"
         except Exception as e:
-            problem = self._redact(_reason(e))
+            problem = _reason(e)
         log.info("query embedding failed: %s", problem)
         self._semantic_paused_until = self.clock() + SEMANTIC_PAUSE_SECONDS
         return None, problem

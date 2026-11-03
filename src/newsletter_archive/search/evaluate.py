@@ -19,20 +19,27 @@ combined-stage recall@10 (with summaries) with the live one's, in points (0-100)
 
 from __future__ import annotations
 
+import logging
+import math
 import statistics
 import time
-from collections.abc import Callable, Iterable, Iterator, Sequence
+from collections.abc import Callable, Iterable, Sequence
+from contextlib import AbstractContextManager
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+import numpy as np
 import psycopg
 import yaml
+from psycopg import sql
 
 from ..config import Config
 from ..errors import ArchiveError
 from . import db
-from .service import Scorer, SearchRequest, SearchService
+from .service import MAX_QUERY_CHARS, QueryEmbedder, Scorer, SearchRequest, SearchService
+
+log = logging.getLogger("newsletter_archive.search.evaluate")
 
 STAGES = ("keyword", "semantic", "combined", "reranked")
 RETURNED = "returned"  # the final results the agent receives (after the per-post cap and limit)
@@ -81,6 +88,8 @@ def load_questions(path: Path) -> list[Question]:
             raise EvalFileError(f"{where} ({qid}): type must be one of {', '.join(TYPES)}")
         if not isinstance(text, str) or not text.strip():
             raise EvalFileError(f"{where} ({qid}) needs a question")
+        if len(text.strip()) > MAX_QUERY_CHARS:
+            raise EvalFileError(f"{where} ({qid}): the question is over {MAX_QUERY_CHARS} characters")
         if not isinstance(expected, list) or not expected or not all(isinstance(e, str) for e in expected):
             raise EvalFileError(f"{where} ({qid}): expected must be a non-empty list of post ids")
         seen.add(qid)
@@ -127,6 +136,7 @@ class Report:
     generation: int | None = None
     model: str = ""
     rerank_top: int = 0
+    unknown_expected: dict[str, list[str]] = field(default_factory=dict)  # question id -> post ids
 
     def outcomes_for(self, summaries: bool, qtype: str | None = None) -> list[Outcome]:
         return [
@@ -146,10 +156,10 @@ class Report:
         return next((s for s in reversed(STAGES) if self.score(s, True) is not None), "keyword")
 
     def needs_contextual_retrieval(self) -> bool | None:
-        """lld §13: True when local or intent recall@10 (final stage, with summaries) is below
-        0.8; None when there are no such questions."""
-        stage = self.best_stage()
-        found = [self.score(stage, True, t) for t in ("local", "intent")]
+        """lld §13: True when local or intent recall@10 at the combined (retrieval) stage, with
+        summaries, is below 0.8; None when there are no such questions or semantic search never
+        ran. Re-ranking is left out: the rule is about what retrieval finds."""
+        found = [self.score("combined", True, t) for t in ("local", "intent")]
         recalls = [f[0] for f in found if f is not None]
         return None if not recalls else min(recalls) < CONTEXT_RULE_RECALL
 
@@ -178,7 +188,7 @@ class Report:
             out.append(f"  {stage:<10}{'':<34}{'  '.join(cells)}")
         seconds = sorted(o.seconds for o in self.outcomes)
         if seconds:
-            p90 = seconds[min(len(seconds) - 1, int(0.9 * len(seconds)))]
+            p90 = seconds[max(0, math.ceil(0.9 * len(seconds)) - 1)]
             out += ["", f"latency per search: median {statistics.median(seconds):.1f}s, p90 {p90:.1f}s"]
         degraded = [o for o in self.outcomes if not o.semantic or not o.reranked]
         if degraded:
@@ -196,6 +206,8 @@ class Report:
                     else "not needed (local and intent ≥ 0.8)"
                 )
             )
+        for qid, ids in self.unknown_expected.items():
+            out.append(f"warning: {qid} expects posts that aren't in the index: {', '.join(ids)}")
         misses = [o for o in self.outcomes_for(True) if o.missing]
         if misses:
             out += ["", f"questions missing expected posts in the final top {K} (with summaries):"]
@@ -216,6 +228,7 @@ class Report:
             },
             "by_type": {t: {st: cell(self.score(st, True, t)) for st in ROWS} for t in TYPES},
             "contextual_retrieval_needed": self.needs_contextual_retrieval(),
+            "unknown_expected": self.unknown_expected,
             "questions": [
                 {
                     "id": o.question.id,
@@ -240,14 +253,21 @@ def evaluate(
 ) -> Report:
     """Run every question in each variant (summaries on / off) through the service."""
     report = Report(rerank_top=service.s.rerank_top)
+    known: set[str] | None = None
     for q in questions:
         for summaries in variants:
             request = SearchRequest.create(q.question, K, kind="all" if summaries else "passages")
             trace: dict[str, Any] = {}
+            service.resume_semantic()  # score each question on its own, not on an earlier failure
             started = clock()
             resp = service.search(request, generation=generation, trace=trace)
             seconds = clock() - started
             report.generation = resp.generation
+            if known is None:
+                known = _known_posts(service, generation or _generation_of(service, resp.generation))
+            unknown = [e for e in q.expected if e not in known]
+            if unknown:
+                report.unknown_expected[q.id] = unknown
             post_of = trace["post_of"]
             # A stage is scored only if it really ran: semantic and combined need the query
             # embedding (combined alone would just repeat keyword), reranked needs the re-ranker.
@@ -272,6 +292,19 @@ def evaluate(
     return report
 
 
+def _generation_of(service: SearchService, number: int) -> db.Generation:
+    with service.connect() as conn:
+        return next(g for g in db.list_generations(conn) if g.generation == number)
+
+
+def _known_posts(service: SearchService, generation: db.Generation) -> set[str]:
+    with service.connect() as conn:
+        rows = conn.execute(
+            sql.SQL("SELECT post_id FROM {}.posts").format(sql.Identifier(generation.schema))
+        ).fetchall()
+    return {r[0] for r in rows}
+
+
 class GateError(ArchiveError):
     """The quality gate couldn't score both versions fairly (e.g. Gemini failed)."""
 
@@ -281,21 +314,43 @@ def quality_gate(
 ) -> Callable[[db.Generation, db.Generation], tuple[float, float] | None]:
     """A gate for ``Generations``: (candidate, live) → their combined-stage recall@10 with
     summaries, in points. The combined stage isolates the embedding model (what a new version
-    changes) and needs no re-ranker. Raises GateError if semantic search failed for any
-    question, since keyword-only scores would make the comparison meaningless."""
+    changes) and needs no re-ranker.
+
+    The candidate is scored first. If semantic search fails for any of its questions, the check
+    can't run (GateError: try again, or --force). If the candidate scores fine but the live
+    version can't be embedded at all, its model is most likely retired (a common reason to
+    refresh): there is nothing to compare with, so the gate returns None and the swap goes
+    ahead with a warning. A partial failure on the live version is treated as an outage."""
+
+    def score(gen: db.Generation) -> tuple[float, int]:
+        report = evaluate(service, questions, generation=gen, variants=(True,))
+        failed = sum(1 for o in report.outcomes if not o.semantic)
+        sc = report.score("combined", True)
+        return (100 * sc[0] if sc else 0.0), failed
 
     def gate(candidate: db.Generation, active: db.Generation) -> tuple[float, float] | None:
-        points = []
-        for gen in (candidate, active):
-            report = evaluate(service, questions, generation=gen, variants=(True,))
-            if any(not o.semantic for o in report.outcomes):
-                raise GateError(
-                    f"quality check incomplete: semantic search failed for generation {gen.generation}; "
-                    "run again when Gemini is reachable, or use --force"
-                )
-            sc = report.score("combined", True)
-            points.append(100 * sc[0] if sc else 0.0)
-        return points[0], points[1]
+        candidate_points, failed = score(candidate)
+        if failed:
+            raise GateError(
+                f"quality check incomplete: semantic search failed for {failed} questions on generation "
+                f"{candidate.generation}; run again when Gemini is reachable"
+            )
+        live_points, failed = score(active)
+        if failed == len(questions):
+            log.warning(
+                "the live generation %s (%s) can't embed queries any more (model retired?): "
+                "no quality comparison; candidate recall@10 %.1f",
+                active.generation,
+                active.embedding_model,
+                candidate_points,
+            )
+            return None
+        if failed:
+            raise GateError(
+                f"quality check incomplete: semantic search failed for {failed} questions on generation "
+                f"{active.generation}; run again when Gemini is reachable"
+            )
+        return candidate_points, live_points
 
     return gate
 
@@ -309,18 +364,42 @@ def eval_path(config: Config) -> Path:
     return config.output_dir / EVAL_FILE
 
 
+class _MemoEmbedder:
+    """Remembers query vectors: each question runs in two variants (kind doesn't change the
+    embedding), and the gate scores two versions that may share a model."""
+
+    def __init__(self, inner: QueryEmbedder, memo: dict[tuple[str, int, str], np.ndarray]) -> None:
+        self.inner, self.memo = inner, memo
+        self.model, self.dim = inner.model, inner.dim
+
+    def embed(self, texts: Sequence[str]) -> list[np.ndarray]:
+        missing = [t for t in texts if (self.model, self.dim, t) not in self.memo]
+        if missing:
+            for t, v in zip(missing, self.inner.embed(missing), strict=True):
+                self.memo[(self.model, self.dim, t)] = v
+        return [self.memo[(self.model, self.dim, t)] for t in texts]
+
+
+def memoized(factory: Callable[[str, int], QueryEmbedder]) -> Callable[[str, int], QueryEmbedder]:
+    memo: dict[tuple[str, int, str], np.ndarray] = {}
+    return lambda model, dim: _MemoEmbedder(factory(model, dim), memo)
+
+
 def reader_service(config: Config, reranker: Scorer | None = None) -> SearchService:
-    """A search service on direct reader connections with the real Gemini query embedder."""
-    from contextlib import contextmanager
+    """A search service for evaluation: one reused reader connection (single-threaded; reopened
+    if it drops) and the real Gemini query embedder with each query embedded once."""
+    from contextlib import nullcontext
 
     from .service import gemini_query_embedder
 
-    @contextmanager
-    def connect() -> Iterator[psycopg.Connection]:
-        with db.connect(config, "reader") as conn:
-            yield conn
+    held: list[psycopg.Connection] = []
 
-    return SearchService(config, connect, gemini_query_embedder(config), reranker)
+    def connect() -> AbstractContextManager[psycopg.Connection]:
+        if not held or held[0].closed or held[0].broken:
+            held[:] = [db.connect(config, "reader")]
+        return nullcontext(held[0])
+
+    return SearchService(config, connect, memoized(gemini_query_embedder(config)), reranker)
 
 
 def gate_for(config: Config) -> Callable[[db.Generation, db.Generation], tuple[float, float] | None] | None:

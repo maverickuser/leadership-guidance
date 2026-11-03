@@ -165,7 +165,8 @@ def test_search_overrides_and_nested_sections(tmp_path):
         ("search:\n  gemini_timeout_seconds: 0\n", "gemini_timeout_seconds must be > 0"),
         ("search:\n  bm25_boosts: {subtitle: 2}\n", "bm25_boosts must map"),
         ("search:\n  bm25_boosts: [2]\n", "bm25_boosts must map"),
-        ("search:\n  bm25_boosts: {body: 0}\n", "boosts values must be > 0"),
+        ("search:\n  bm25_boosts: {body: 0}\n", "boosts values must be positive numbers"),
+        ("search:\n  fusion_weights: {semantic: .nan}\n", "weights values must be positive numbers"),
         ("search:\n  rerank_top: 101\n", "rerank_top can't exceed"),
         ("search:\n  default_limit: 40\n", "default_limit must be <="),
         ("search:\n  db_name: ''\n", "must not be empty"),
@@ -244,7 +245,8 @@ def test_fusion_weights(tmp_path):
     path.write_text("base_url: https://www.example.com\nsearch:\n  fusion_weights: {semantic: 3}\n")
     assert load_config(path).search.fusion_weights == {"keyword": 1.0, "semantic": 3.0}
     for bad, message in (
-        ("{semantic: 0}", "must be > 0"),
+        ("{semantic: 0}", "must be positive numbers"),
+        ("{semantic: .nan}", "must be positive numbers"),
         ("{vibes: 1}", "map keyword and semantic"),
         ("[1]", "map keyword"),
     ):

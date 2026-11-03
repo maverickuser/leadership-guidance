@@ -919,14 +919,12 @@ def index_archive(config: Config, options: IndexOptions, on_post: PostCallback =
         if not (options.refresh or options.swap or options.rollback):
             return Indexer(config, conn, embedder, summarizer, on_post).run(options)
         from .evaluate import gate_for
-        from .generations import Generations
+        from .generations import Generations, no_gate
 
-        gate = None if options.rollback or options.dry_run else gate_for(config)  # only swaps are gated
+        will_swap = not options.dry_run and (options.swap or (options.refresh and not options.no_swap))
+        gate = gate_for(config) if will_swap else None  # only swaps are gated
         gens = Generations(
-            config,
-            conn,
-            lambda: Indexer(config, conn, embedder, summarizer, on_post),
-            **({"gate": gate} if gate else {}),
+            config, conn, lambda: Indexer(config, conn, embedder, summarizer, on_post), gate=gate or no_gate
         )
         if options.rollback:
             result = gens.rollback(options)
