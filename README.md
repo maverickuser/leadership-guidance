@@ -167,6 +167,7 @@ pre-commit install     # ruff, ruff-format, mypy and the safety check before eac
 pytest                 # unit + integration tests; network and DNS are blocked except loopback
 pytest -m slow         # the real-clock spacing test (CI runs everything)
 pytest -m db           # search-database tests (need `docker compose up -d --wait db`; skipped otherwise)
+ARCHIVE_API_TESTS=1 pytest -m api   # opt-in checks against the real Gemini API (needs GEMINI_API_KEY; never in CI)
 ruff check . && ruff format --check . && mypy   # lint, format, strict types (CI "lint" job)
 python scripts/check_safety.py   # what CI runs to keep secrets and content out of the repo
 ```

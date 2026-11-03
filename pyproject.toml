@@ -32,6 +32,8 @@ dependencies = [
     "jsonschema>=4.20,<5",
     "psycopg[binary]>=3.2,<4",
     "numpy>=2.0,<3",
+    "google-genai>=2.31,<3",
+    "pgvector>=0.5,<0.6",
 ]
 
 [project.optional-dependencies]
@@ -64,6 +66,7 @@ testpaths = ["tests"]
 markers = [
     "slow: uses the real clock (seconds of waiting)",
     "db: needs the search database (docker compose up -d --wait db); skipped when it isn't running",
+    "api: calls the real Gemini API; skipped unless ARCHIVE_API_TESTS=1",
 ]
 addopts = '-m "not slow"'
 

@@ -76,7 +76,7 @@ def test_very_long_sentence_is_split_by_words():
     assert all(c.overlap_words == 0 for c in chunks)  # no whole sentence fits as overlap
 
 
-LIMIT = chunking.MAX_PASSAGE_TOKENS * chunking.CHARS_PER_TOKEN
+LIMIT = chunking.MAX_PASSAGE_CHARS
 
 
 def test_token_guard_cuts_only_the_oversized_word():

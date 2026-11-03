@@ -295,14 +295,14 @@ The query embedder always uses the **active generation's** model and dimension (
 
 | Concern | Design |
 |---|---|
-| SDK | `google-genai`: `client.models.embed_content(model="gemini-embedding-2", contents=[...], config={"output_dimensionality": 3072})` (verified in PR 3) |
+| SDK | `google-genai` 2.31: `client.models.embed_content(model="gemini-embedding-2", contents=[Content(parts=[Part(text=t)]) for t in batch], config=EmbedContentConfig(output_dimensionality=3072))`. **Verified in PR 3:** a plain list of strings is embedded as ONE input, so each text must be its own `Content`; batch results equal single calls (cosine 1.0); at most 100 texts per request (HTTP 400 above). |
 | Input format | No `task_type` on this model; task in the text. Passage `title: {post title} \| text: {heading}\n{body}` (heading omitted when null). Query `task: search result \| query: {q}`. `EMBED_INPUT_VERSION` is in the fingerprint. |
-| Cache | Key `sha256(exact input text)` + model + dim. Stored as float32 `vector(3072)`; cast to `halfvec` on write. `last_used_at` updated on hits. |
-| Truncation | Never silent: SDK/API truncation disabled where available (flag verified in PR 3); 2,000-token chunk guard; tokens per batch logged. |
-| Pacing | Token bucket for requests and tokens per minute (`embed_rpm`, `embed_tpm`, set to the key's quota tier); ≤ 2 batches in flight. |
+| Cache | Key `sha256(exact input text)` + model + dim. Stored as float32 `vector`; cast to `halfvec` on write. `last_used_at` updated on hits; estimates read without touching it. Each batch is cached as soon as it returns, so a later failure never wastes paid work. |
+| Truncation | Never silent. **Verified in PR 3:** the API silently truncates over-long input (a 9,000-token text was accepted) and `auto_truncate=False` is rejected in Developer API mode. So every embedding input is capped at 8,000 characters (under 8,192 tokens even at one character per token) and refused before sending above that; chunking caps passage bodies at 7,000 characters, leaving room for the title and heading (`CHUNKER_VERSION` 2). Token counts (characters / 4) are used only for pacing and cost. |
+| Pacing | Token bucket for requests and tokens per minute (`embed_rpm`, `embed_tpm`, set to the key's quota tier); one batch at a time (simpler than 2 in flight; ~37 batches for the whole archive). |
 | Retries | 429, 5xx, timeouts, connection errors: 2, 4, 8, 16 s with jitter, honouring `Retry-After`. 400/401/403: no retry. |
-| Circuit breaker | 3 consecutive batches failed after retries → no more API calls this run; remaining posts recorded failed (stage `embed`); run status `partial`. |
-| Validation | Response count = request count; each vector exactly `dim` values, finite, non-zero norm; then L2-normalised. Otherwise the batch fails. |
+| Circuit breaker | 3 consecutive calls failed after retries, or returned unusable responses → no more API calls this run; remaining posts recorded failed (stage `embed`); run status `partial`. Invalid requests (400/404) don't count; programming errors propagate unchanged. Every request has a 60 s timeout (`HttpOptions`), treated as a retryable timeout. |
+| Validation | Response count = request count; each vector exactly `dim` values, finite, non-zero norm; then L2-normalised (the API already returns unit vectors at 3,072 and 768, verified). Otherwise the batch fails. |
 | Batching | `embed_batch_size` (default 50, capped at the API's per-request limit). |
 | Cache GC | End of run: delete cache rows whose hash no live, ready or retired generation references and whose `last_used_at` is older than `cache_retention_days` (90). |
 | Not used | Gemini async batch mode (~50% cheaper, up to 24 h): ~1M tokens once makes the saving small. |
@@ -554,10 +554,12 @@ Verified in PR 1 (ParadeDB `0.26.2-pg17`, pg_search 0.26.2, pgvector 0.8.6):
 - The image installs `vector` and `pg_search` in `template1`, so test databases get them; the roles script is mounted beside the image's own bootstrap script.
 - First-start health check uses TCP so it passes only after the init scripts finish.
 
+Verified in PR 3 (google-genai 2.31, gemini-embedding-2): batching, the 100-per-request limit, normalised output, silent truncation and no way to disable it in the Developer API (see §5.6); invalid dimensions return HTTP 400; `count_tokens` works for the model.
+
 Still to verify:
 
 - ParadeDB image tag; `pg_search` DDL, English stemmer, boost and score functions; BM25 index on per-schema tables.
-- `gemini-embedding-2`: per-request batch limit, truncation flag, pricing, whether 3,072-dim output is normalised.
+- `gemini-embedding-2` pricing (check before the first full build in PR 5).
 - `Qwen3-Reranker-0.6B` prompt template and latency on MPS.
 - `mcp` SDK version and structured-output API.
 - Gemini Flash-class model id for summaries, its pricing, rate limits and `generate_content` config fields.
