@@ -25,4 +25,5 @@ user_agent: "newsletter-archive/0.1 (personal archive; one request every 2s)"
 #   db_name: archive
 #   summaries:
 #     enabled: true
-#     model: gemini-2.5-flash
+#     model: gemini-3.8-flash
+#     thinking_level: low

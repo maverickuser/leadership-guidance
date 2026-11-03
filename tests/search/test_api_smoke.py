@@ -1,4 +1,4 @@
-"""Opt-in checks against the real Gemini API (costs a fraction of a cent).
+"""Opt-in checks against the real Gemini API (embeddings and one summary; under a cent).
 
 Run: ARCHIVE_API_TESTS=1 pytest -m api tests/search/test_api_smoke.py
 Skipped otherwise, and never in CI. Uses GEMINI_API_KEY from the environment or .env.
@@ -50,3 +50,24 @@ def test_real_embeddings_are_separate_normalised_and_meaningful(live_client):
     assert all(abs(float(np.linalg.norm(v)) - 1) < 1e-3 for v in vectors)
     assert float(vectors[2] @ vectors[0]) > float(vectors[2] @ vectors[1])
     assert live_client.stats.calls - live_client.stats.retries == 2
+
+
+def test_real_summary_is_complete(live_client):
+    from newsletter_archive.config import SummaryConfig
+    from newsletter_archive.search.models import Section
+    from newsletter_archive.search.summaries import GeminiSummarizer
+
+    defaults = SummaryConfig()
+    body = " ".join(
+        [
+            "Delegation is how a manager multiplies the team's impact.",
+            "Start by delegating outcomes, not tasks, and agree what done looks like.",
+            "Check in on a schedule the person sets, and resist taking the work back.",
+            "The RACI model helps make ownership explicit for larger projects.",
+        ]
+        * 6
+    )
+    result = GeminiSummarizer(live_client, defaults.model, defaults.thinking_level).summarize(
+        "How to delegate well", [Section(None, body)]
+    )
+    assert 60 <= len(result.text.split()) <= 200

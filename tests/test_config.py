@@ -173,6 +173,7 @@ def test_search_overrides_and_nested_sections(tmp_path):
         ("search:\n  summaries: {max_tokens_per_run: 0}\n", "max_tokens_per_run must be > 0"),
         ("search:\n  summaries: {model: ''}\n", "model must be set"),
         ("search:\n  summaries: {model: ~}\n", "summaries.model must not be empty"),
+        ("search:\n  summaries: {thinking_level: extreme}\n", "thinking_level must be one of"),
         ("search:\n  summaries: {max_tokens_per_run: 2.5}\n", "whole number"),
         ("search:\n  summaries: {max_tokens_per_run: true}\n", "must be a int"),
         ("search:\n  db_host: ~\n", "db_host must not be empty"),
@@ -227,3 +228,8 @@ def test_boilerplate_prefixes(tmp_path):
         p = write(tmp_path / "config.yaml", bad)
         with pytest.raises(ConfigError, match="boilerplate_prefixes"):
             load_config(p, tmp_path / ".env")
+
+
+def test_thinking_level_is_normalised(tmp_path):
+    p = write(tmp_path / "config.yaml", "search:\n  summaries: {thinking_level: ' Low '}\n")
+    assert load_config(p, tmp_path / ".env").search.summaries.thinking_level == "low"
