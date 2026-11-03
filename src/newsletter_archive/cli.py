@@ -1,4 +1,4 @@
-"""Command-line entry point: archive discover | fetch | extract | run."""
+"""Command-line entry point: archive discover | fetch | extract | index | run."""
 
 from __future__ import annotations
 
@@ -6,6 +6,7 @@ import logging
 from pathlib import Path
 from typing import Annotated, Optional
 
+import psycopg
 import typer
 
 from . import __version__
@@ -15,6 +16,7 @@ from .errors import ArchiveError, ConfigError, MissingCookieError, NotSignedInEr
 from .fetch import run_fetch
 from .http import Client
 from .runlog import RunSummary, close_logging, log_post, setup_logging
+from .search.indexer import IndexOptions, index_archive
 from .store import load_manifest, run_extract, run_lock
 
 log = logging.getLogger("newsletter_archive.cli")
@@ -41,6 +43,40 @@ def make_client(config: Config) -> Client:
     return Client(config)
 
 
+INDEX_FAILED_IN_RUN = 3  # `archive run`: indexing failed or a post is stuck (the weekly job notifies)
+
+
+def _index_stage(config: Config, options: IndexOptions, stages: list[str]) -> int:
+    """Run the index stage and log its report. Returns the exit code it contributes.
+
+    Under `archive run`, any index problem becomes exit 3 so the weekly job notifies, while the
+    earlier stages' work is kept. Under `archive index`, errors keep their own exit code."""
+    in_run = stages != ["index"]
+    if in_run and not config.search.enabled:
+        log.info("Search is turned off (search.enabled: false); skipping the index stage")
+        return 0
+    try:
+        report = index_archive(config, options, on_post=log_post)
+    except (ArchiveError, psycopg.Error) as e:
+        if not in_run:
+            raise
+        log.error("Index step failed: %s", e)
+        log.error(
+            "New posts are archived. To archive without search, set search.enabled: false in config.yaml"
+        )
+        return INDEX_FAILED_IN_RUN
+    except Exception:  # unexpected, under `run`: keep the traceback, still notify as an index failure
+        if not in_run:
+            raise
+        log.exception("Index step failed unexpectedly")
+        return INDEX_FAILED_IN_RUN
+    for line in report.lines():
+        log.info(line)
+    if in_run and (report.stuck or report.breaker_open):
+        return INDEX_FAILED_IN_RUN
+    return 0
+
+
 def _execute(
     stages: list[str],
     limit: int | None,
@@ -48,6 +84,7 @@ def _execute(
     dry_run: bool,
     verbose: bool,
     config_path: Path,
+    index_options: IndexOptions | None = None,
 ) -> None:
     try:
         config = load_config(config_path, config_path.parent / ".env")
@@ -90,6 +127,8 @@ def _execute(
                     summary.partial += er.partial
                     summary.failed += er.failed
                     summary.unchanged += er.unchanged
+                elif stage == "index":
+                    code = max(code, _index_stage(config, index_options or IndexOptions(), stages))
     except NotSignedInError as e:
         log.error(str(e))
         code = e.exit_code
@@ -156,6 +195,28 @@ def extract(
 
 
 @app.command()
+def index(
+    limit: Limit = None,
+    dry_run: Annotated[
+        bool,
+        typer.Option("--dry-run", help="Show what would be indexed and the estimated cost; change nothing."),
+    ] = False,
+    retry_failed: Annotated[
+        bool, typer.Option("--retry-failed", help="Retry posts that failed 3 times with the same content.")
+    ] = False,
+    allow_mass_delete: Annotated[
+        bool, typer.Option("--allow-mass-delete", help="Allow removing many posts at once.")
+    ] = False,
+    yes: Annotated[bool, typer.Option("--yes", help="Go ahead even if over the spending ceiling.")] = False,
+    verbose: Verbose = False,
+    config: ConfigPath = Path("config.yaml"),
+) -> None:
+    """Build or update the search store from data/posts/ (needs the database and GEMINI_API_KEY)."""
+    options = IndexOptions(limit, dry_run, retry_failed, allow_mass_delete, yes)
+    _execute(["index"], limit, False, dry_run, verbose, config, options)
+
+
+@app.command()
 def run(
     limit: Limit = None,
     refresh: Refresh = False,
@@ -163,5 +224,6 @@ def run(
     verbose: Verbose = False,
     config: ConfigPath = Path("config.yaml"),
 ) -> None:
-    """All stages in order: discover, fetch, extract."""
-    _execute(["discover", "fetch", "extract"], limit, refresh, dry_run, verbose, config)
+    """All stages in order: discover, fetch, extract, index. Exit 3 if indexing failed."""
+    options = IndexOptions(limit=limit, dry_run=dry_run)
+    _execute(["discover", "fetch", "extract", "index"], limit, refresh, dry_run, verbose, config, options)

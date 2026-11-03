@@ -33,6 +33,10 @@ class EmbeddingError(GeminiError):
     """An input can't be embedded safely."""
 
 
+class EmbeddingInputError(EmbeddingError):
+    """An input that must not be sent (empty, or too long and would be truncated)."""
+
+
 class EmbeddingResponseError(GeminiResponseError, EmbeddingError):
     """The API returned embeddings we can't use."""
 
@@ -57,9 +61,9 @@ def check_input(text: str) -> None:
     """Raise EmbeddingError for an input the API would reject or silently truncate. The indexer
     calls this per post first, so one bad input fails only its post."""
     if not text.strip():
-        raise EmbeddingError("empty embedding input")
+        raise EmbeddingInputError("empty embedding input")
     if len(text) > MAX_EMBED_CHARS:
-        raise EmbeddingError(
+        raise EmbeddingInputError(
             f"embedding input is {len(text)} characters, over the {MAX_EMBED_CHARS}-character cap; "
             "it would be truncated, so it was not sent"
         )
@@ -171,6 +175,14 @@ class EmbeddingCache:
         ).fetchall()
         return {r[0] for r in rows}
 
+    def missing(self, texts: Sequence[str]) -> tuple[int, int]:
+        """(estimated tokens to embed the texts not cached, how many of ``texts`` are cached).
+        Read-only, so a dry run changes nothing."""
+        unique = {text_key(t): t for t in texts}
+        cached = self.has_many(sorted(unique))
+        tokens = sum(estimate_tokens(t) for k, t in unique.items() if k not in cached)
+        return tokens, sum(1 for t in texts if text_key(t) in cached)
+
     def put_many(self, vectors: dict[str, np.ndarray]) -> None:
         if not vectors:
             return
@@ -224,6 +236,4 @@ class CachedEmbedder:
     def missing_tokens(self, texts: Sequence[str]) -> int:
         """Estimated tokens to embed the texts not yet cached (for the spending ceiling).
         Read-only, so a dry run changes nothing."""
-        unique = {text_key(t): t for t in texts}
-        cached = self.cache.has_many(sorted(unique))
-        return sum(estimate_tokens(t) for k, t in unique.items() if k not in cached)
+        return self.cache.missing(texts)[0]

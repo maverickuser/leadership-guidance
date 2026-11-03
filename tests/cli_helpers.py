@@ -9,6 +9,7 @@ from typer.testing import CliRunner
 
 import newsletter_archive.cli as cli
 from newsletter_archive.http import Client
+from newsletter_archive.search.indexer import IndexReport
 
 from .conftest import TEST_COOKIE
 from .fakes import FakeClock, FakeTransport
@@ -30,6 +31,17 @@ class CliEnv:
             "make_client",
             lambda cfg: Client(cfg, transport=self.transport, sleep=self.clock.sleep, clock=self.clock.clock),
         )
+        # The index stage is stubbed here (it needs the database); see tests/search for it.
+        self.index_calls: list = []
+        self.index_result: object = IndexReport()
+
+        def fake_index(cfg, options, on_post):
+            self.index_calls.append(options)
+            if isinstance(self.index_result, BaseException):
+                raise self.index_result
+            return self.index_result
+
+        monkeypatch.setattr(cli, "index_archive", fake_index)
         self.runner = CliRunner()
 
     def run(self, *args: str):

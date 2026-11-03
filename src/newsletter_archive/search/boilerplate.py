@@ -108,7 +108,9 @@ class Boilerplate:
     def is_boilerplate(self, paragraph: str) -> bool:
         return paragraph_key(paragraph) in self.keys
 
-    def clean(self, sections: Sequence[Section], post_id: str | None = None) -> CleanResult:
+    def clean(
+        self, sections: Sequence[Section], post_id: str | None = None, warn: bool = True
+    ) -> CleanResult:
         """Drop boilerplate paragraphs; sections left empty are dropped. Warns when a post
         loses more than ``LOSS_WARN_FRACTION`` of its words (real content may be repeating)."""
         out: list[Section] = []
@@ -126,7 +128,7 @@ class Boilerplate:
             if kept:
                 out.append(Section(sec.heading, "\n\n".join(kept)))
         result = CleanResult(out, removed, removed_words, total)
-        if result.loss_fraction > LOSS_WARN_FRACTION:
+        if warn and result.loss_fraction > LOSS_WARN_FRACTION:
             log.warning(
                 "%s: boilerplate filter removed %.0f%% of its words; check the boilerplate list",
                 post_id or "a post",

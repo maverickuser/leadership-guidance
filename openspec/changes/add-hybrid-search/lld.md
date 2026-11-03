@@ -492,7 +492,9 @@ archive mcp [--verbose] [--config PATH]
 archive run            # discover → fetch → extract → index; exit 3 if indexing failed or freshness tripped
 ```
 
-`scripts/scheduled-run.sh` starts the database first (`docker compose up -d db`, waits for healthy) and notifies on exit 3. Docker Desktop must start at login.
+`scripts/scheduled-run.sh` starts the database first (`docker compose up -d --wait db`) and notifies on exit 3. Docker Desktop must start at login.
+
+Built in PR 5 (deviations from the plan above): `--limit N` indexes the first N eligible posts but boilerplate is always found across every post (so fingerprints never depend on the limit) and posts outside the limit are never treated as removed; the first generation is created only after the spending ceiling passes, so a refused run leaves nothing behind; a dry run applies schema migrations but writes no data; Gemini clients are created only when there is something to send; each post is embedded in its own call(s) so a failure stays with that post. `archive run` with the database down still archives new posts and exits 3.
 
 ## 12. Testing
 
