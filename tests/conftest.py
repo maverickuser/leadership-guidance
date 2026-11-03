@@ -14,6 +14,9 @@ FIXTURES = Path(__file__).parent / "fixtures"
 # Fake cookie values. They are allowlisted by scripts/check_safety.py.
 TEST_COOKIE = "ghost-members-ssr=TESTSECRET123; ghost-members-ssr.sig=SIGSECRET456"
 SECRET_PARTS = ("TESTSECRET123", "SIGSECRET456")
+# Fake search secrets, shaped like the real ones. Allowlisted by scripts/check_safety.py.
+TEST_GEMINI_KEY = "AIza" + "TESTKEY" + "0" * 28
+TEST_DB_PASSWORD = "test-db-password-123"
 
 _LOOPBACK = {"127.0.0.1", "::1", "localhost"}
 _real_connect = socket.socket.connect
@@ -46,7 +49,14 @@ def _block_network(monkeypatch):
     monkeypatch.setattr(socket.socket, "connect", _guarded_connect)
     monkeypatch.setattr(socket.socket, "connect_ex", _guarded_connect_ex)
     monkeypatch.setattr(socket, "getaddrinfo", _guarded_getaddrinfo)
-    monkeypatch.delenv("NEWSLETTER_COOKIE", raising=False)
+    for name in (
+        "ARCHIVE_DB_PORT",
+        "NEWSLETTER_COOKIE",
+        "GEMINI_API_KEY",
+        "ARCHIVE_DB_WRITER_PASSWORD",
+        "ARCHIVE_DB_READER_PASSWORD",
+    ):
+        monkeypatch.delenv(name, raising=False)
 
 
 def make_config(tmp_path: Path, **overrides) -> Config:

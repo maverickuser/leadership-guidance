@@ -15,28 +15,35 @@ LOGGER = "newsletter_archive"
 REDACTED = "[REDACTED]"
 COOKIE_LINE_RE = re.compile(r"(?i)\b(set-)?cookie\s*[:=]\s*[^\n]+")
 GHOST_COOKIE_RE = re.compile(r"ghost-members-ssr(\.sig)?=[^;\s]+")
+GOOGLE_KEY_RE = re.compile(r"AIza[0-9A-Za-z_\-]{35}")
 QUIET_STATUSES = {"skipped", "unchanged"}
+MIN_SECRET_CHARS = 8
 
 post_log = logging.getLogger(f"{LOGGER}.run")
 
 
 class RedactFilter(logging.Filter):
-    """Scrubs the cookie (whole value, each name=value pair, Cookie lines) from every record."""
+    """Scrubs secrets from every record: the cookie (whole value, each name=value pair, Cookie
+    lines), any other secret values passed in (API key, database passwords), and anything
+    shaped like a Google API key."""
 
-    def __init__(self, secret: Secret) -> None:
+    def __init__(self, secret: Secret, *others: Secret) -> None:
         super().__init__()
         value = secret.reveal()
         pieces = {value} if value else set()
         for pair in value.split(";"):
             if "=" in pair:
                 v = pair.split("=", 1)[1].strip()
-                if len(v) >= 8:
+                if len(v) >= MIN_SECRET_CHARS:
                     pieces.add(v)
+        # Same length floor as cookie pieces: a short secret would garble ordinary words.
+        pieces.update(o.reveal() for o in others if len(o.reveal()) >= MIN_SECRET_CHARS)
         self._pieces = sorted(pieces, key=len, reverse=True)
 
     def redact(self, text: str) -> str:
         for piece in self._pieces:
             text = text.replace(piece, REDACTED)
+        text = GOOGLE_KEY_RE.sub(REDACTED, text)
         text = GHOST_COOKIE_RE.sub(lambda m: m.group(0).split("=", 1)[0] + "=" + REDACTED, text)
         return COOKIE_LINE_RE.sub(lambda m: f"{'Set-' if m.group(1) else ''}Cookie: {REDACTED}", text)
 
@@ -73,7 +80,7 @@ def setup_logging(config: Config, verbose: bool = False) -> Path:
     _remove_handlers(logger)
     logger.setLevel(logging.DEBUG)
     logger.propagate = False
-    redact = RedactFilter(config.cookie)
+    redact = RedactFilter(*config.secrets)
 
     console = logging.StreamHandler(sys.stdout)
     console.setLevel(logging.DEBUG if verbose else logging.INFO)

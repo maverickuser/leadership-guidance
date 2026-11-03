@@ -5,7 +5,7 @@
 
 ## Every PR (definition of done)
 
-- CI green: `unit` (Python 3.11, 3.12), `integration` (ParadeDB service), `coverage` (combined, branch coverage, fails under 95%), `lint` (ruff, mypy), `safety`
+- CI green: `test` (unit, Python 3.11 and 3.12), `integration` (compose database), `coverage` (combined, branch coverage, fails under 95%), `lint` (ruff, mypy), `safety`
 - New code ships with its tests; coverage of the PR's new modules ≥ 95%
 - Claude runs `/code-review high` on the PR and fixes findings before handing over
 - PR template checklist filled (tasks covered, spec scenarios, tests, coverage line, no secrets)
@@ -13,14 +13,14 @@
 
 ## 1. Postgres setup (PR 1)
 
-- [ ] 1.1 `docker-compose.yml` with a pinned `paradedb/paradedb` tag, `127.0.0.1:5433`, bind mount `{output_dir}/postgres`, health check, restart policy
-- [ ] 1.2 `db/init/01-roles.sh`: `archive_writer` and `archive_reader` roles, passwords from `.env`
-- [ ] 1.3 `migrations/001_init.sql`: extensions, `schema_version`, `generations`, `embedding_cache`, `summary_cache`, `index_runs`, `index_failures` (key post + stage), `create_generation(n)` with `passages.kind`, `posts.summary_sha256`, BM25 index
-- [ ] 1.4 `search/db.py`: connection pools per role, migrations runner, advisory lock, active-generation lookup
-- [ ] 1.5 Config: `search` section incl. `summaries`, validation; `.env.example` with `GEMINI_API_KEY` and DB passwords; secrets in the `Secret` wrapper
-- [ ] 1.6 CI pipeline: split `unit` and `integration` jobs; ParadeDB service container in `integration`; `coverage` job combines both and gates at 95% with branch coverage; `db` pytest marker, DB tests skipped locally when no DB is up
-- [ ] 1.7 `fail_under = 95`, `branch = true`; `pragma: no cover` allowed only on thin real-API/model adapters (tested by opt-in local smoke tests)
-- [ ] 1.8 PR template: search checklist items (coverage line, `/code-review` done, no API keys or DB passwords)
+- [x] 1.1 `docker-compose.yml` with a pinned `paradedb/paradedb` tag, `127.0.0.1:5433`, bind mount `{output_dir}/postgres`, health check, restart policy
+- [x] 1.2 `db/init/20_archive_roles.sh`: `archive_writer` and `archive_reader` roles, passwords from `.env`
+- [x] 1.3 `migrations/001_init.sql`: extensions, `schema_version`, `generations`, `embedding_cache`, `summary_cache`, `index_runs`, `index_failures` (key post + stage), `create_generation(n)` with `passages.kind`, `posts.summary_sha256`, BM25 index
+- [x] 1.4 `search/db.py`: connections per role (pool added with the MCP server in PR 9), migrations runner, advisory lock, active-generation lookup
+- [x] 1.5 Config: `search` section incl. `summaries`, validation; `.env.example` with `GEMINI_API_KEY` and DB passwords; secrets in the `Secret` wrapper
+- [x] 1.6 CI pipeline: split `unit` and `integration` jobs; `integration` starts the compose database (same pinned ParadeDB image); `coverage` job combines both and gates at 95% with branch coverage; `db` pytest marker, DB tests skipped locally when no DB is up
+- [x] 1.7 `fail_under = 95`, `branch = true`; `pragma: no cover` allowed only on thin real-API/model adapters (tested by opt-in local smoke tests)
+- [x] 1.8 PR template: search checklist items (coverage line, `/code-review` done, no API keys or DB passwords)
 
 ## 2. Pure preprocessing (PR 2)
 

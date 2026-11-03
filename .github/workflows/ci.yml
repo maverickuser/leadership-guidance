@@ -13,12 +13,15 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  # Unit tests: no database. Coverage is gated in the `coverage` job, not here.
   test:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     strategy:
       matrix:
         python-version: ["3.11", "3.12"]
+    env:
+      COVERAGE_FILE: .coverage.unit-${{ matrix.python-version }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
@@ -27,7 +30,64 @@ jobs:
           cache: pip
           cache-dependency-path: requirements-dev.lock
       - run: pip install -r requirements-dev.lock && pip install --no-deps -e .
-      - run: pytest -q -m "slow or not slow" --cov=newsletter_archive --cov-report=term-missing
+      - run: pytest -q -m "(slow or not slow) and not db" --cov=newsletter_archive --cov-report= --cov-fail-under=0
+      - if: matrix.python-version == '3.12'
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: coverage-unit
+          path: .coverage.unit-3.12
+          include-hidden-files: true
+          retention-days: 3
+
+  # Integration tests: the real search database from docker-compose.yml (pinned ParadeDB),
+  # with fake Gemini, summarizer and re-ranker. A missing database fails the job.
+  integration:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      ARCHIVE_DB_ADMIN_PASSWORD: ci-admin-password
+      ARCHIVE_DB_WRITER_PASSWORD: ci-writer-password
+      ARCHIVE_DB_READER_PASSWORD: ci-reader-password
+      ARCHIVE_DB_DATA: ${{ github.workspace }}/../pgdata
+      ARCHIVE_REQUIRE_DB: "1"
+      COVERAGE_FILE: .coverage.integration
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: requirements-dev.lock
+      - run: docker compose up -d --wait db
+      - run: pip install -r requirements-dev.lock && pip install --no-deps -e .
+      - run: pytest -q -m db --cov=newsletter_archive --cov-report= --cov-fail-under=0
+      - if: failure()
+        run: docker compose logs db
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: coverage-integration
+          path: .coverage.integration
+          include-hidden-files: true
+          retention-days: 3
+
+  # Combined unit + integration coverage with branch coverage; fails under 95% (pyproject.toml).
+  coverage:
+    needs: [test, integration]
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: "3.12"
+      - run: pip install "coverage==7.17.0"
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          pattern: coverage-*
+          merge-multiple: true
+      - run: coverage combine .coverage.unit-3.12 .coverage.integration
+      - run: coverage report --format=markdown >> "$GITHUB_STEP_SUMMARY" || true
+      - run: coverage report --show-missing
 
   lint:
     runs-on: ubuntu-latest

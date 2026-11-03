@@ -88,14 +88,18 @@ pluggy==1.7.0
     #   pytest-cov
 pre-commit==4.7.0
     # via newsletter-archive (pyproject.toml)
+psycopg==3.3.6
+    # via newsletter-archive (pyproject.toml)
+psycopg-binary==3.3.6
+    # via psycopg
 pygments==2.21.0
     # via
     #   pytest
     #   rich
 pytest==9.2.0
     # via
-    #   pytest-cov
     #   newsletter-archive (pyproject.toml)
+    #   pytest-cov
 pytest-cov==7.1.0
     # via newsletter-archive (pyproject.toml)
 python-dateutil==3.0.0
@@ -110,8 +114,8 @@ pytz==2026.6
     # via dateparser
 pyyaml==6.0.3
     # via
-    #   pre-commit
     #   newsletter-archive (pyproject.toml)
+    #   pre-commit
 referencing==0.37.0
     # via
     #   jsonschema
@@ -148,6 +152,7 @@ typing-extensions==4.16.0
     # via
     #   beautifulsoup4
     #   mypy
+    #   psycopg
     #   referencing
 tzdata==2026.6
     # via python-dateutil
