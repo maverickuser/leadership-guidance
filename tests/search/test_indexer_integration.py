@@ -67,7 +67,7 @@ def make(cfg, conn, embedder=None, summarizer=None, posts=None):
     embedder = embedder or FakeEmbedder(dim=8)
     summarizer = summarizer if summarizer is not None else FakeSummarizer()
     lines = []
-    indexer = Indexer(cfg, conn, lambda: embedder, lambda: summarizer, lambda *a: lines.append(a))
+    indexer = Indexer(cfg, conn, lambda *_: embedder, lambda: summarizer, lambda *a: lines.append(a))
     return indexer, embedder, summarizer, lines
 
 
@@ -243,7 +243,7 @@ def test_circuit_breaker_stops_calls_without_counting_attempts(cfg, conn):
     assert rows(conn, "SELECT count(*) FROM index_failures") == [(0,)]  # never counted as tries
     # an incomplete first build is not served
     assert report.build_incomplete and db.active_generation(conn) is None
-    assert "First build incomplete" in "\n".join(report.lines())
+    assert "Build incomplete" in "\n".join(report.lines())
     report, *_ = run(cfg, conn)  # healthy again: the build completes and goes live
     assert sorted(report.indexed) == ["post-1", "post-2", "post-3"] and not report.build_incomplete
     assert db.active_generation(conn).generation == 1

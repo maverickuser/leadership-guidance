@@ -67,6 +67,8 @@ log = logging.getLogger("newsletter_archive.search.indexer")
 
 ELIGIBLE = ("ok", "partial")
 STUCK_AFTER_RUNS = 2
+# Failures no index version can fix (bad JSON, no text left): they never block a build or a swap.
+PERMANENT_STAGES = ("load", "chunk")
 PostCallback = Callable[[str, str, str, str | None], None]
 
 
@@ -102,6 +104,12 @@ class IndexOptions:
     retry_failed: bool = False
     allow_mass_delete: bool = False
     yes: bool = False
+    # index versions (generations.py)
+    refresh: bool = False  # build a new generation with the configured model
+    no_swap: bool = False  # with refresh: build it but don't make it live
+    swap: bool = False  # make the newest ready generation live
+    rollback: bool = False  # make the previous generation live again
+    force: bool = False  # swap even if the quality gate says the new one is worse
 
 
 @dataclass
@@ -128,6 +136,8 @@ class IndexReport:
     not_attempted: list[str] = field(default_factory=list)  # breaker open: nothing was sent
     breaker_open: bool = False
     build_incomplete: bool = False
+    limited: bool = False  # --limit left eligible posts out of this run
+    notes: list[str] = field(default_factory=list)  # e.g. from a swap or rollback
     elapsed_seconds: float = 0.0
     status: str = "ok"
 
@@ -179,9 +189,10 @@ class IndexReport:
                 "failures); they will be tried next run"
             )
         if self.build_incomplete:
-            out.append("First build incomplete: it becomes searchable once every post has indexed")
+            out.append("Build incomplete: this index version becomes searchable once every post has indexed")
         for post_id in self.stuck:
             out.append(f"Stuck: {post_id} has not indexed in {STUCK_AFTER_RUNS}+ runs")
+        out.extend(self.notes)
         out.append(f"Index status: {self.status} in {self.elapsed_seconds:.1f}s")
         return out
 
@@ -191,6 +202,7 @@ class _Loaded:
     prepared: dict[str, Prepared]
     load_failed: dict[str, str]
     left_out: set[str]
+    eligible: set[str]  # every post that loaded, chosen by --limit or not
     fetched_at: dict[str, str | None]
     boilerplate: Boilerplate
 
@@ -219,15 +231,24 @@ def load_posts(config: Config) -> tuple[dict[str, Post], dict[str, str], set[str
     return posts, failed, keep
 
 
+def blocking_failures(report: IndexReport) -> list[str]:
+    """Posts whose failure stops a build going live or a swap: anything that failed for a
+    reason a retry could fix, or wasn't attempted. Bad JSON and empty posts don't count."""
+    failed = [pid for pid, v in report.failed.items() if v.split(":", 1)[0] not in PERMANENT_STAGES]
+    return failed + report.not_attempted
+
+
 class Indexer:
     """One index run. ``embedder`` and ``summarizer`` are created only if the run needs them,
-    so a dry run never needs the API key."""
+    so a dry run never needs the API key. ``embedder_factory(model, dim)`` builds the embedder
+    for the target generation's own model, which may differ from the config while a new
+    version waits to be swapped in."""
 
     def __init__(
         self,
         config: Config,
         conn: psycopg.Connection,
-        embedder_factory: Callable[[], Any],
+        embedder_factory: Callable[[str, int], Any],
         summarizer_factory: Callable[[], Any] | None,
         on_post: PostCallback = _no_callback,
     ) -> None:
@@ -237,23 +258,50 @@ class Indexer:
         self.embedder_factory = embedder_factory
         self.summarizer_factory = summarizer_factory if self.s.summaries.enabled else None
         self.on_post = on_post
-        self._embedder: CachedEmbedder | None = None
-        self._summarizer: CachedSummarizer | None = None
+        self.model, self.dim = self.s.embedding_model, self.s.embedding_dimension  # set per run
+        self.track_failures = True  # set per run
 
     # -- run ------------------------------------------------------------------------------------
 
-    def run(self, options: IndexOptions) -> IndexReport:
+    def run(
+        self,
+        options: IndexOptions,
+        target: db.Generation | str | None = None,
+        activate_first_build: bool = True,
+    ) -> IndexReport:
+        """Index into the active generation (or start the first build) by default.
+
+        ``target="new"`` builds a fresh generation with the configured model (``--refresh``);
+        a Generation updates that one (resuming a build, or catching up before a swap or
+        rollback). Neither is activated here when ``activate_first_build`` is False:
+        generations.py decides when to swap.
+
+        Failure counters (``public.index_failures``) belong to the live index: only the default
+        run reads and updates them, so building or catching up another version never skips
+        posts because of the live one's failures, nor adds to its counters.
+        """
         started = time.monotonic()
         report = IndexReport()
         with db.index_lock(self.conn):
             db.apply_migrations(self.conn)  # schema setup only; a dry run writes no data
             if not options.dry_run:
                 self._abort_stale_runs()
-            loaded = self._load(options.limit, report, record=not options.dry_run)
-            gen, report.mode = self._target()  # nothing is created until the checks below pass
+            self.track_failures = target is None
+            loaded = self._load(options.limit, report, record=self.track_failures and not options.dry_run)
+            if target == "new":
+                gen = None
+            elif isinstance(target, db.Generation):
+                gen = target
+            else:
+                gen = self._target(report)  # nothing is created until the checks below pass
+            report.mode = "build" if gen is None or gen.status == "building" else "incremental"
+            if gen is not None:
+                self.model, self.dim = gen.embedding_model, gen.embedding_dim
+            else:
+                self.model, self.dim = self.s.embedding_model, self.s.embedding_dimension
             report.generation = gen.generation if gen else 0
             stored = self._stored(gen) if gen else {}
-            failures = self._failures()
+            failures = self._failures() if self.track_failures else {}
             plan = make_plan(
                 loaded.prepared,
                 stored,
@@ -276,7 +324,7 @@ class Indexer:
                 return report
             self._check_ceiling(report.estimate, options.yes)
             if gen is None:
-                gen = db.create_generation(self.conn, self.s.embedding_model, self.s.embedding_dimension)
+                gen = db.create_generation(self.conn, self.model, self.dim)
                 report.generation = gen.generation
             run_id = self._start_run(report.mode, gen.generation)
             try:
@@ -286,13 +334,13 @@ class Indexer:
                 stored = self._stored(gen)
                 self._verify(gen, loaded, stored, report)
                 if gen.status == "building":
-                    if self._build_complete(report):
+                    report.build_incomplete = not self._build_complete(report, loaded, stored)
+                    if activate_first_build and not report.build_incomplete:
                         db.set_generation_status(self.conn, gen.generation, "ready")
                         db.activate_generation(self.conn, gen.generation)
                         log.info("generation %s is now active", gen.generation)
-                    else:
-                        report.build_incomplete = True
-                self._freshness(loaded, stored, report)
+                if self.track_failures:
+                    self._freshness(loaded, stored, report)
                 self._gc()
                 problems = report.failed or report.summaries_failed or report.not_attempted
                 report.status = "partial" if problems or report.build_incomplete else "ok"
@@ -313,13 +361,14 @@ class Indexer:
         for slug, problem in load_failed.items():
             report.failed[slug] = f"load: {problem}"
             if record:
-                self._record_failure(slug, "load", problem, "")
+                self._record_failure(slug, "load", problem, "")  # the live index's counters only
         boilerplate = find_boilerplate(
             {pid: list(p.sections) for pid, p in posts.items()},
             min_posts=self.s.boilerplate_min_posts,
             similarity=self.s.boilerplate_similarity,
         )
         chosen = list(posts)[:limit] if limit else list(posts)
+        report.limited = len(chosen) < len(posts)
         left_out = (set(posts) - set(chosen)) | kept
         prepared: dict[str, Prepared] = {}
         for pid in chosen:
@@ -331,21 +380,38 @@ class Indexer:
             fp = post_fingerprint(post, cleaned.sections, self.s)
             prepared[pid] = Prepared(post, cleaned.sections, fp, cleaned.loss_fraction)
         fetched = {pid: p.fetched_at for pid, p in posts.items()}
-        return _Loaded(prepared, load_failed, left_out, fetched, boilerplate)
+        return _Loaded(prepared, load_failed, left_out, set(posts), fetched, boilerplate)
 
-    def _target(self) -> tuple[db.Generation | None, str]:
-        """The generation to update; None when the first build still has to create one."""
+    def _target(self, report: IndexReport) -> db.Generation | None:
+        """The generation to update; None when the first build still has to create one.
+
+        The live generation is updated with its own model. If the config names another model,
+        that is fine only while a version built with it waits for ``--swap``; otherwise a new
+        version is needed first (ModelChangedError)."""
         active = db.active_generation(self.conn)
         model, dim = self.s.embedding_model, self.s.embedding_dimension
+        gens = db.list_generations(self.conn)
         if active is not None:
             if (active.embedding_model, active.embedding_dim) != (model, dim):
-                raise ModelChangedError(active, model, dim)
-            return active, "incremental"
-        for gen in reversed(db.list_generations(self.conn)):
+                waiting = [
+                    g
+                    for g in gens
+                    if g.status in ("ready", "building")
+                    and (g.embedding_model, g.embedding_dim) == (model, dim)
+                ]
+                if not waiting:
+                    raise ModelChangedError(active, model, dim)
+                report.notes.append(
+                    f"Updated generation {active.generation} ({active.embedding_model}); generation "
+                    f"{waiting[-1].generation} ({model}) is {waiting[-1].status}: finish it with "
+                    "`archive index --refresh` or make it live with `archive index --swap`"
+                )
+            return active
+        for gen in reversed(gens):
             if gen.status == "building" and (gen.embedding_model, gen.embedding_dim) == (model, dim):
                 log.info("resuming the first build of generation %s", gen.generation)
-                return gen, "build"
-        return None, "build"
+                return gen
+        return None
 
     def _stored(self, gen: db.Generation) -> dict[str, Stored]:
         rows = self.conn.execute(
@@ -372,7 +438,7 @@ class Indexer:
     def _estimate(self, loaded: _Loaded, plan: Plan, inputs: dict[str, list[str]]) -> Estimate:
         """Tokens and cost for what isn't cached yet. Read-only: a dry run changes nothing."""
         texts = [t for pid in plan.to_index for t in inputs[pid]]
-        cache = EmbeddingCache(self.conn, self.s.embedding_model, self.s.embedding_dimension)
+        cache = EmbeddingCache(self.conn, self.model, self.dim)
         embed_tokens, cached = cache.missing(texts)
         summaries_needed = summary_tokens = 0
         if self.s.summaries.enabled:
@@ -419,11 +485,14 @@ class Indexer:
             self.on_post(pid, "index", "would remove", None)
 
     @staticmethod
-    def _build_complete(report: IndexReport) -> bool:
-        """A first build goes live only when every post that can be indexed was: nothing failed
-        (bad JSON aside, which needs a fix in the archive) and nothing was left unattempted."""
-        failed = [v for v in report.failed.values() if not v.startswith("load:")]
-        return not failed and not report.not_attempted
+    def _build_complete(report: IndexReport, loaded: _Loaded, stored: dict[str, Stored]) -> bool:
+        """A build is complete when every post that can be indexed is in it: nothing failed
+        for a reason a retry could fix, nothing was left unattempted, and no post was left out
+        (by --limit, or by an earlier limited run of this build). Posts that gave up after
+        MAX_ATTEMPTS don't hold it back."""
+        permanent = {pid for pid, v in report.failed.items() if v.split(":", 1)[0] in PERMANENT_STAGES}
+        missing = loaded.eligible - set(stored) - permanent - set(report.skipped)
+        return not missing and not blocking_failures(report)
 
     def _index(
         self,
@@ -438,7 +507,12 @@ class Indexer:
         if not todo:
             return  # nothing to send: don't even create the API clients
         summary_only_ids = set(plan.summary_only)
-        raw = self.embedder_factory()
+        raw = self.embedder_factory(self.model, self.dim)
+        if (raw.model, raw.dim) != (self.model, self.dim):
+            raise IndexError_(
+                f"embedder uses {raw.model} ({raw.dim}) but generation {gen.generation} "
+                f"needs {self.model} ({self.dim})"
+            )
         embedder = CachedEmbedder(raw, EmbeddingCache(self.conn, raw.model, raw.dim))
         summarizer: CachedSummarizer | None = None
         if self.summarizer_factory is not None:
@@ -504,7 +578,8 @@ class Indexer:
                 self._fail(pid, "write", f"{type(e).__name__}: {e}", p, report)
                 continue
             report.summaries += 1 if summary is not None else 0
-            self._clear_failures(pid, summary_ok=summary is not None or summarizer is None)
+            if self.track_failures:
+                self._clear_failures(pid, summary_ok=summary is not None or summarizer is None)
             self.on_post(pid, "index", "summarised" if summary_only else "indexed", None)
         if summarizer is not None:
             summarizer.flush()
@@ -516,7 +591,8 @@ class Indexer:
             report.summaries_failed[pid] = problem
         else:
             report.failed[pid] = f"{stage}: {problem}"
-        self._record_failure(pid, stage, problem, p.fingerprint)
+        if self.track_failures:
+            self._record_failure(pid, stage, problem, p.fingerprint)
         self.on_post(pid, stage, "failed", problem)
 
     def _post_row(self, p: Prepared, summary_key: str | None) -> tuple[Any, ...]:
@@ -621,7 +697,8 @@ class Indexer:
             sql.SQL("DELETE FROM {}.posts WHERE post_id = ANY(%s)").format(sql.Identifier(gen.schema)),
             (removed,),
         )
-        self.conn.execute("DELETE FROM public.index_failures WHERE post_id = ANY(%s)", (removed,))
+        if self.track_failures:
+            self.conn.execute("DELETE FROM public.index_failures WHERE post_id = ANY(%s)", (removed,))
         report.removed = removed
         for pid in removed:
             self.on_post(pid, "index", "removed", None)
@@ -790,6 +867,7 @@ def utc_age(iso: str | None) -> str:
 
 __all__ = [
     "MAX_ATTEMPTS",
+    "PERMANENT_STAGES",
     "IndexError_",
     "IndexOptions",
     "IndexReport",
@@ -797,6 +875,7 @@ __all__ = [
     "ModelChangedError",
     "SpendingCeilingError",
     "VerifyError",
+    "blocking_failures",
     "load_posts",
 ]
 
@@ -816,7 +895,7 @@ def index_archive(config: Config, options: IndexOptions, on_post: PostCallback =
     if not options.dry_run and not config.gemini_api_key:
         raise MissingGeminiKeyError()
 
-    def embedder() -> GeminiEmbedder:
+    def embedder(model: str, dim: int) -> GeminiEmbedder:
         client = GeminiClient(
             config.gemini_api_key,
             rpm=s.embed_rpm,
@@ -824,7 +903,7 @@ def index_archive(config: Config, options: IndexOptions, on_post: PostCallback =
             breaker_failures=s.circuit_breaker_failures,
             timeout_seconds=s.gemini_timeout_seconds,
         )
-        return GeminiEmbedder(client, s.embedding_model, s.embedding_dimension, s.embed_batch_size)
+        return GeminiEmbedder(client, model, dim, s.embed_batch_size)
 
     def summarizer() -> GeminiSummarizer:
         client = GeminiClient(
@@ -837,4 +916,20 @@ def index_archive(config: Config, options: IndexOptions, on_post: PostCallback =
         return GeminiSummarizer(client, s.summaries.model, s.summaries.thinking_level)
 
     with db.connect(config, "writer") as conn:
-        return Indexer(config, conn, embedder, summarizer, on_post).run(options)
+        if not (options.refresh or options.swap or options.rollback):
+            return Indexer(config, conn, embedder, summarizer, on_post).run(options)
+        from .generations import Generations
+
+        gens = Generations(config, conn, lambda: Indexer(config, conn, embedder, summarizer, on_post))
+        if options.rollback:
+            result = gens.rollback(options)
+        elif options.swap:
+            result = gens.swap(options, force=options.force)
+        else:
+            result = gens.refresh(options, swap=not options.no_swap, force=options.force)
+        if result.gate:
+            result.report.notes.append(
+                f"Quality gate: candidate recall@10 {result.gate[0]:.1f} vs live {result.gate[1]:.1f}"
+            )
+        result.report.notes.append(result.summary())
+        return result.report

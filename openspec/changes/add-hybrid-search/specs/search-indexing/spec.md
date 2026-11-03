@@ -108,6 +108,10 @@ For each post the indexer SHALL compute a fingerprint covering every input that 
 - **WHEN** `search.embedding_model` differs from the live store's model
 - **THEN** `archive index` stops and says a new store is needed, unless `--refresh` is given
 
+#### Scenario: Weekly run while a new store waits
+- **WHEN** a store built with the new model waits for `--swap`
+- **THEN** weekly runs keep updating the live store with its own model and say the new store is waiting
+
 ### Requirement: Deletion guard
 In one run the indexer SHALL NOT remove more than 10% of indexed posts or more than 5 posts, whichever is larger, unless `--allow-mass-delete` is given. When the guard trips, no posts SHALL be removed, the would-be removals SHALL be listed, and the rest of the run SHALL continue.
 

@@ -262,6 +262,16 @@ def active_generation(conn: psycopg.Connection) -> Generation | None:
     return _gen(row) if row else None
 
 
+def latest_retired(conn: psycopg.Connection) -> Generation | None:
+    """The retired generation that was live most recently: the one ``--rollback`` restores.
+    (Not the highest number: after a rollback the newer generation is the retired one.)"""
+    row = conn.execute(
+        f"SELECT {_GEN_COLUMNS} FROM public.generations WHERE status = 'retired' "
+        "ORDER BY activated_at DESC NULLS LAST, generation DESC LIMIT 1"
+    ).fetchone()
+    return _gen(row) if row else None
+
+
 def create_generation(conn: psycopg.Connection, model: str, dim: int) -> Generation:
     """Create the next generation (status ``building``) with its schema, tables and indexes."""
     with conn.transaction():
