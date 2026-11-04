@@ -219,6 +219,30 @@ Changing `search.embedding_model` needs a new index version. `archive index --re
 - `--force`: switch even if the quality check fails.
 - Every one of these honours `--dry-run`.
 
+### Check search quality
+
+Write your own test questions in `../newsletter-archive-data/eval-queries.yaml`, which is never committed. Each question has the posts it should find:
+
+```yaml
+questions:
+  - id: trust-equation
+    type: local        # local (a fact in one post), intent (paraphrased), global (broad), multi-hop
+    question: What is the trust equation?
+    expected: [trust-equation-how-to-be-a-decent-human]    # post ids = file names in posts/
+```
+
+Then run `python scripts/eval_search.py`. For each stage, with and without summaries, overall and per question type, it prints:
+- recall@10: the share of expected posts in the first 10
+- MRR: how high the first expected post ranks
+- which questions missed posts
+
+The stages are keyword only, semantic only, combined, and re-ranked. Options:
+- `--rerank-top N` and `--no-rerank` compare re-ranking settings.
+- `--generation N` scores an index version that isn't live yet.
+- `--json FILE` saves the full report.
+
+A run costs a fraction of a cent (query embeddings only). While the file exists, `archive index --refresh` and `--swap` compare a new index version with the live one, and won't switch if it scores more than 2 points worse unless you pass `--force`.
+
 ### Search settings (`search:` in `config.yaml`)
 
 | Setting | Default | |
@@ -232,6 +256,7 @@ Changing `search.embedding_model` needs a new index version. `archive index --re
 | `rerank_top` / `rerank_timeout_seconds` | `20` / `10` | re-ranking takes ~0.2 s per passage on Apple Silicon |
 | `query_timeout_seconds` | `8` | after this, search uses keywords only |
 | `bm25_boosts` | heading `2`, title `1.5`, body `1` | |
+| `fusion_weights` | keyword `1`, semantic `2` | how much each list counts when combining (semantic 2 scored best) |
 | `max_per_post` | `3` | passages per post in one result list (plus one summary) |
 | `db_host` / `db_port` / `db_name` | `127.0.0.1` / `5433` / `archive` | |
 

@@ -918,9 +918,14 @@ def index_archive(config: Config, options: IndexOptions, on_post: PostCallback =
     with db.connect(config, "writer") as conn:
         if not (options.refresh or options.swap or options.rollback):
             return Indexer(config, conn, embedder, summarizer, on_post).run(options)
-        from .generations import Generations
+        from .evaluate import gate_for
+        from .generations import Generations, no_gate
 
-        gens = Generations(config, conn, lambda: Indexer(config, conn, embedder, summarizer, on_post))
+        will_swap = not options.dry_run and (options.swap or (options.refresh and not options.no_swap))
+        gate = gate_for(config) if will_swap else None  # only swaps are gated
+        gens = Generations(
+            config, conn, lambda: Indexer(config, conn, embedder, summarizer, on_post), gate=gate or no_gate
+        )
         if options.rollback:
             result = gens.rollback(options)
         elif options.swap:

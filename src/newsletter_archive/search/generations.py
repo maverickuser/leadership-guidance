@@ -182,10 +182,16 @@ class Generations:
         active = db.active_generation(self.conn)
         gate = None
         if active is not None and active.generation != candidate.generation:
-            gate = self.gate(candidate, active)
-            if gate is None:
-                log.warning("no evaluation file: swapping without a quality check")
-            elif gate[1] - gate[0] > s.quality_gate_max_recall_drop and not force:
+            try:
+                gate = self.gate(candidate, active)
+            except (ArchiveError, psycopg.Error) as e:  # the check itself couldn't run
+                if not force:
+                    raise GenerationError(f"{e}; not swapped (use --force to swap anyway)") from None
+                log.warning("quality check failed (%s); swapping anyway (--force)", e)
+            else:
+                if gate is None:
+                    log.warning("no quality comparison available: swapping without a quality check")
+            if gate is not None and gate[1] - gate[0] > s.quality_gate_max_recall_drop and not force:
                 raise GenerationError(
                     f"generation {candidate.generation} scores recall@10 {gate[0]:.1f} vs {gate[1]:.1f} "
                     f"for the live one (more than {s.quality_gate_max_recall_drop:g} points worse); "

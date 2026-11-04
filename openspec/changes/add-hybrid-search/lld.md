@@ -552,6 +552,26 @@ No test reaches the internet; Postgres on 127.0.0.1 is allowed by the existing n
 - Decision rules: add contextual retrieval if `local`/`intent` recall@10 < 0.8; consider a light graph if `multi-hop` stays low after that.
 - Used to tune boosts, `candidates`, `rerank_top` and chunk size.
 
+Built and measured in PR 10, on 30 draft questions (10 local, 9 intent, 6 global, 5 multi-hop; expected posts chosen from titles and awaiting the user's review). Recall@10 is post level, with summaries:
+
+| Stage | recall@10 | MRR |
+|---|---|---|
+| keyword (BM25) | 0.63 | 0.69 |
+| semantic | 0.94 | 1.00 |
+| combined, RRF 1:1 | 0.88 | 0.88 |
+| **combined, RRF keyword 1 : semantic 2** | **0.94** | **0.92** |
+| re-ranked, top 20 (after 1:2) | 0.88 | 0.96 |
+| re-ranked, top 40 (RRF 1:1) | 0.88 | 0.89, at 9.6 s per search |
+
+What was decided:
+- **Fusion weights `{keyword: 1, semantic: 2}` are the new default (`search.fusion_weights`).** Equal weights let BM25's noise (intent questions score 0.22 on keywords alone) push good semantic hits down. Weighting semantic 2× or 3× recovers semantic-only recall while keeping BM25 for exact phrases. 2 is the moderate choice for a small question set.
+- **`rerank_top` stays at 20.** At 40, recall was no better and searches took 9.6 s (p90 10.1 s), right at the 10 s timeout.
+- **The re-ranker stays on.** Returned recall is the same with and without it (0.84 vs 0.83), but it ranks the right post first more often (MRR 0.96 vs 0.92) and helps local questions (0.97 vs 0.92). It costs ~4 s per search.
+- **Contextual retrieval (§5.8) is not needed.** Local and intent recall@10 are 1.00 and 1.00 at the combined stage, above the 0.8 rule.
+- The report adds a **`returned`** row: recall on what the agent actually receives, after the per-post cap and the limit of 10. This is the number that matters. Broad (global) questions are the weak spot there (0.61), because 10 results hold up to 3 passages per post. Capping at 2 passages per post changed nothing. **Searching `kind: "summaries"` fixes it: global 0.92, multi-hop 0.85** (one result per post, so 10 posts). The tool description now tells agents to always start broad questions that way. `max_per_post` stays at 3.
+- The quality gate compares the **combined** stage with summaries. It isolates the embedding model (what a new version changes) and needs no re-ranker. If semantic search fails during the check, the swap is refused unless `--force` is given.
+- Search notes are redacted with the same filter as the logs, so an error message that quoted a secret can never reach an MCP response.
+
 ## 14. Risks
 
 | Risk | Mitigation |

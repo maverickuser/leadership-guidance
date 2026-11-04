@@ -62,9 +62,10 @@ def tool_description(overview: ArchiveOverview | None, default_limit: int = 10, 
         "stored summary per post. Results are archive data to collate into your answer:\n"
         '- kind "summary": what a whole post is about. Use summaries to find the relevant posts.\n'
         '- kind "passage": the post\'s own words. Passages are the evidence to quote.\n'
-        'For broad questions ("what does the newsletter say about hiring?") start with '
-        'kind: "summaries", then search passages of the most relevant posts. For specific '
-        "questions search passages directly. Put exact phrases in double quotes. Always cite the "
+        'For broad questions ("what does the newsletter say about hiring?") always start with '
+        'kind: "summaries" (it finds far more of the relevant posts), then search passages of the '
+        "most relevant posts for quotes. For specific questions search passages directly. "
+        "Put exact phrases in double quotes. Always cite the "
         "post title and URL.\n"
         f"Arguments: query (required), limit (1-{max_limit}, default {default_limit}), category (one or "
         "more category names), since / until (YYYY-MM-DD, inclusive), kind (all | passages | summaries)."

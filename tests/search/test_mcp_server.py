@@ -330,3 +330,33 @@ def test_pooled_connections_explain_why_none_came(cfg):
         pool.open(wait=False)
         with pytest.raises(DatabaseAuthError), mcp_server.pooled_connect(pool, wrong, timeout=0.3)():
             pass
+
+
+@db_only
+def test_secrets_never_reach_responses_or_logs(cfg):
+    """Even if an upstream error quoted a secret, the MCP response and the log stay clean."""
+    import io
+    import logging
+    from dataclasses import replace
+
+    from newsletter_archive.config import Secret
+    from newsletter_archive.runlog import RedactFilter
+
+    from ..conftest import TEST_GEMINI_KEY
+
+    keyed = replace(cfg, gemini_api_key=Secret(TEST_GEMINI_KEY))
+    stream = io.StringIO()  # a handler set up like the real ones (runlog.setup_logging)
+    handler = logging.StreamHandler(stream)
+    handler.addFilter(RedactFilter(*keyed.secrets))
+    root = logging.getLogger("newsletter_archive")
+    root.addHandler(handler)
+    root.setLevel(logging.DEBUG)
+    leaky = RuntimeError(f"401 for key {TEST_GEMINI_KEY} and password {cfg.db_reader_password.reveal()}")
+    svc = make_service(keyed, embedder=leaky)
+    try:
+        result = call(mcp_server.build_server(svc)[0], {"query": "bar raiser"})
+    finally:
+        root.removeHandler(handler)
+    everything = json.dumps(result.structured_content) + text(result) + stream.getvalue()
+    assert "semantic search skipped" in everything and "[REDACTED]" in everything
+    assert TEST_GEMINI_KEY not in everything and cfg.db_reader_password.reveal() not in everything

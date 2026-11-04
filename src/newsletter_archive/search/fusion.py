@@ -16,10 +16,12 @@ class Fused:
     best_rank: int  # 1-based, best position in any list
 
 
-def rrf(lists: Mapping[str, Sequence[str]], k: int = RRF_K) -> list[Fused]:
-    """score = Σ 1 / (k + rank). Passages found by both lists rise above those found by one at
-    similar positions. Repeats within one list count once. Deterministic: ties go to the better
-    single rank, then the passage id."""
+def rrf(
+    lists: Mapping[str, Sequence[str]], k: int = RRF_K, weights: Mapping[str, float] | None = None
+) -> list[Fused]:
+    """score = Σ weight / (k + rank) (weight 1 unless given). Passages found by both lists rise
+    above those found by one at similar positions. Repeats within one list count once.
+    Deterministic: ties go to the better single rank, then the passage id."""
     scores: dict[str, float] = {}
     best: dict[str, int] = {}
     found: dict[str, list[str]] = {}
@@ -29,7 +31,7 @@ def rrf(lists: Mapping[str, Sequence[str]], k: int = RRF_K) -> list[Fused]:
             if pid in seen:  # a repeated id counts once, at its first (best) rank
                 continue
             seen.add(pid)
-            scores[pid] = scores.get(pid, 0.0) + 1.0 / (k + rank)
+            scores[pid] = scores.get(pid, 0.0) + (weights or {}).get(name, 1.0) / (k + rank)
             best[pid] = min(best.get(pid, rank), rank)
             found.setdefault(pid, []).append(name)
     order = sorted(scores, key=lambda p: (-scores[p], best[p], p))

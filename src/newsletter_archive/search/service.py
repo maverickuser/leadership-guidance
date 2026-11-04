@@ -27,6 +27,7 @@ from psycopg import sql
 
 from ..config import Config
 from ..errors import ArchiveError
+from ..runlog import RedactFilter
 from . import db
 from .embeddings import query_input
 from .filters import KIND_VALUES, Filters
@@ -217,12 +218,29 @@ class SearchService:
         self.clock = clock
         self._generation: tuple[float, db.Generation] | None = None
         self._semantic_paused_until = 0.0
+        # Notes quote error text from Gemini or the re-ranker; never let a secret through.
+        self._redact = RedactFilter(*config.secrets).redact
 
-    def search(self, request: SearchRequest) -> SearchResponse:
+    def search(
+        self,
+        request: SearchRequest,
+        *,
+        generation: db.Generation | None = None,
+        trace: dict[str, Any] | None = None,
+    ) -> SearchResponse:
+        """``generation`` searches that index version instead of the live one (the quality
+        gate scores a candidate before a swap). ``trace``, if given, receives each stage's
+        ranking for the evaluation: ``keyword``, ``semantic``, ``combined`` (fused, before
+        re-ranking), ``reranked`` (passage ids, best first) and ``post_of`` (passage → post)."""
+
         def run() -> SearchResponse:
-            return self._search(request)
+            return self._search(request, generation, trace)
 
         return self._with_db(run)
+
+    def resume_semantic(self) -> None:
+        """Lift the pause after a failed query embedding, so the next search tries again."""
+        self._semantic_paused_until = 0.0
 
     def categories(self) -> tuple[db.Generation, list[str]]:
         def run() -> tuple[db.Generation, list[str]]:
@@ -268,12 +286,14 @@ class SearchService:
 
     # -- pipeline -------------------------------------------------------------------------------
 
-    def _search(self, req: SearchRequest) -> SearchResponse:
+    def _search(
+        self, req: SearchRequest, generation: db.Generation | None = None, trace: dict[str, Any] | None = None
+    ) -> SearchResponse:
         """A connection is held only while querying, never while waiting for Gemini or the
         re-ranker, so a few connections serve many concurrent searches."""
         notes: list[str] = []
         with self.connect() as conn:
-            gen = self._active(conn)
+            gen = generation or self._active(conn)
             cats: tuple[str, ...] = ()
             if req.categories:
                 cats, unknown = resolve_categories(conn, gen.schema, req.categories)
@@ -301,7 +321,7 @@ class SearchService:
         with self.connect() as conn:
             if vector is not None:  # database errors here are real errors, not "semantic skipped"
                 lists["semantic"] = vector_search(conn, gen.schema, vector, filters, self.s.candidates)
-            fused = rrf(lists)
+            fused = rrf(lists, weights=self.s.fusion_weights)
             rows = self._hydrate(conn, gen.schema, [f.passage_id for f in fused])
         fused = [f for f in fused if f.passage_id in rows]
         order = [f.passage_id for f in fused]
@@ -323,9 +343,17 @@ class SearchService:
                 notes.append(f"results not re-ranked: {e}")
             except Exception as e:
                 notes.append(f"results not re-ranked: re-ranker failed: {_reason(e)}")
-                log.warning("re-ranker failed: %s", _reason(e))
+                log.warning("re-ranker failed: %s", _reason(e))  # log handlers redact
         elif order:
             notes.append("results not re-ranked: no re-ranker configured")
+        if trace is not None:
+            trace.update(
+                keyword=list(lists["keyword"]),
+                semantic=list(lists.get("semantic", [])),
+                combined=[f.passage_id for f in fused],
+                reranked=list(order) if reranked else [],
+                post_of={pid: row.post_id for pid, row in rows.items()},
+            )
         kept = diversify(
             order,
             lambda p: rows[p].post_id,
@@ -352,6 +380,7 @@ class SearchService:
             "until": req.until.isoformat() if req.until else None,
             "kind": req.kind,
         }
+        notes = [self._redact(n) for n in notes]  # the one place notes are made safe
         return SearchResponse(req.query, filt, semantic, reranked, results, notes, gen.generation)
 
     def _active(self, conn: psycopg.Connection) -> db.Generation:
