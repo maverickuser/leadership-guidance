@@ -102,9 +102,10 @@ class SearchConfig:
     quality_gate_max_recall_drop: float = 2.0
     bm25_boosts: dict[str, float] = field(default_factory=lambda: {"heading": 2.0, "title": 1.5, "body": 1.0})
     candidates: int = 50
-    rerank_top: int = 40
+    rerank_top: int = 20  # ~0.22 s per pair on Apple MPS (measured in PR 8)
     reranker_model: str = "Qwen/Qwen3-Reranker-0.6B"
     rerank_timeout_seconds: float = 10.0
+    query_timeout_seconds: float = 8.0  # embedding a search query (search falls back to keywords)
     max_per_post: int = 3
     default_limit: int = 10
     max_limit: int = 30
@@ -275,7 +276,8 @@ def _validate_search(s: SearchConfig) -> None:
         "embedding_dimension", "embed_batch_size", "embed_rpm", "embed_tpm", "summary_rpm",
         "summary_tpm", "max_embed_tokens_per_run", "circuit_breaker_failures", "cache_retention_days",
         "boilerplate_min_posts", "chunk_words", "mass_delete_min", "candidates", "rerank_top",
-        "rerank_timeout_seconds", "max_per_post", "default_limit", "max_limit", "db_port",
+        "rerank_timeout_seconds", "query_timeout_seconds", "max_per_post", "default_limit", "max_limit",
+        "db_port",
     )  # fmt: skip
     for name in positive:
         if getattr(s, name) <= 0:

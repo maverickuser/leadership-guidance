@@ -68,10 +68,10 @@
 
 ## 8. Re-ranker and search service (PR 8)
 
-- [ ] 8.1 `rerank.py`: Qwen3-Reranker-0.6B on MPS, model-card prompt, timeout, `FakeReranker`
-- [ ] 8.2 Diversification: at most 3 passages and 1 summary per post
-- [ ] 8.3 `service.py`: request validation, concurrent BM25 + query embedding, degraded modes (`semantic: false`, `reranked: false`), hydration
-- [ ] 8.4 Service tests with fakes and real Postgres
+- [x] 8.1 `rerank.py`: Qwen3-Reranker-0.6B on MPS, model-card prompt, timeout, `FakeReranker`
+- [x] 8.2 Diversification: at most 3 passages and 1 summary per post
+- [x] 8.3 `service.py`: request validation, concurrent BM25 + query embedding, degraded modes (`semantic: false`, `reranked: false`), hydration
+- [x] 8.4 Service tests with fakes and real Postgres
 
 ## 9. MCP server (PR 9)
 
