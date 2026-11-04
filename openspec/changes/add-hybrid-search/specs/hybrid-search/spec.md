@@ -16,7 +16,7 @@ Any query text SHALL be accepted for keyword search without causing a query-synt
 
 #### Scenario: Punctuation and operators
 - **WHEN** the query is `what's "bar raiser" AND (hiring)?`
-- **THEN** the search runs without error, matching the phrase "bar raiser" and the words "what's" and "hiring"
+- **THEN** the search runs without error, matching the phrase "bar raiser" and the word "hiring" ("what's" splits into stop-word fragments, as the index splits it)
 
 ### Requirement: Re-ranking
 The combined candidates SHALL be re-scored by a re-ranking model that reads the query together with each candidate's text, and results SHALL be ordered by the re-ranker's score. If the re-ranker is unavailable, the system SHALL return the combined order and mark the response as not re-ranked.
