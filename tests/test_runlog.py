@@ -79,3 +79,45 @@ def test_redacts_api_key_and_db_passwords():
     # any Google-style key is scrubbed, even one the filter wasn't given
     other = "AIza" + "B" * 35
     assert RedactFilter(Secret(None)).redact(f"x {other} y") == "x [REDACTED] y"
+
+
+def test_server_log_is_daily_and_old_ones_are_removed(tmp_path):
+    from datetime import UTC, datetime
+
+    from newsletter_archive.runlog import server_log_file
+
+    for day in ("20260901", "20261001", "20261102"):
+        (tmp_path / f"mcp-{day}.log").write_text("x")
+    (tmp_path / "mcp-notes.log").write_text("kept: not a dated log")
+    (tmp_path / "run-20200101-000000Z.log").write_text("other logs are untouched")
+    path = server_log_file(tmp_path, "mcp", datetime(2026, 11, 3, 9, 0, tzinfo=UTC))
+    assert path.name == "mcp-20261103.log"
+    assert sorted(p.name for p in tmp_path.iterdir()) == [
+        "mcp-20261102.log",
+        "mcp-notes.log",
+        "run-20200101-000000Z.log",
+    ]
+
+
+def test_mcp_logging_goes_to_stderr_a_daily_file_and_captures_pool_warnings(cfg, capsys):
+    import io
+    import logging
+
+    from newsletter_archive.runlog import close_logging, setup_logging
+
+    err = io.StringIO()
+    path = setup_logging(cfg, stream=err, prefix="mcp")
+    try:
+        assert path.name.startswith("mcp-") and len(path.stem) == len("mcp-YYYYMMDD")
+        logging.getLogger("newsletter_archive.mcp").info("server line")
+        logging.getLogger("psycopg.pool").warning(
+            "error connecting in 'pool-1': password authentication failed"
+        )
+        logging.getLogger("psycopg.pool").info("routine pool chatter")
+    finally:
+        close_logging()
+    assert capsys.readouterr().out == ""  # stdout untouched
+    logged = path.read_text()
+    assert "server line" in logged and "password authentication failed" in logged
+    assert "routine pool chatter" not in logged and "server line" in err.getvalue()
+    assert logging.getLogger("psycopg.pool").handlers == []

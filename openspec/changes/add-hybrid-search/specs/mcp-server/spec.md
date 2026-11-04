@@ -26,7 +26,7 @@ The server SHALL return archive data only. It SHALL NOT generate answers or summ
 - **THEN** every text field in the response comes from the store (archive passages or stored post summaries) or describes the search itself
 
 ### Requirement: Tool errors
-Invalid arguments (empty query, unknown category, bad date, limit out of range), a missing store, a missing or rejected Gemini API key, and a Gemini API outage SHALL be returned as MCP tool errors with a message an agent can act on, and SHALL NOT crash the server. When semantic search is unavailable because of the API, the server SHALL return keyword-only results marked as such instead of failing.
+Invalid arguments (empty query, unknown category, bad date, limit out of range), a missing store and a stopped database SHALL be returned as MCP tool errors with a message an agent can act on, and SHALL NOT crash the server. When semantic search is unavailable because of the API (a missing or rejected Gemini API key, a timeout or an outage), the server SHALL return keyword-only results marked `semantic: false`, with a note naming the problem, instead of failing.
 
 #### Scenario: API outage
 - **WHEN** the Gemini API is unreachable during a search

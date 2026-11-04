@@ -93,7 +93,7 @@ class SearchRequest:
         if limit is None:
             n = default_limit
         elif isinstance(limit, bool) or not isinstance(limit, int) or not 1 <= limit <= max_limit:
-            raise SearchError(f"limit must be a whole number from 1 to {max_limit}")
+            raise SearchError(f"limit must be a whole number between 1 and {max_limit}")
         else:
             n = limit
         if category is None:
@@ -171,6 +171,15 @@ class SearchResponse:
 
 
 @dataclass(frozen=True)
+class ArchiveOverview:
+    generation: db.Generation
+    posts: int
+    first: str | None
+    last: str | None
+    categories: list[str]
+
+
+@dataclass(frozen=True)
 class _Row:
     passage_id: str
     post_id: str
@@ -211,8 +220,7 @@ class SearchService:
 
     def search(self, request: SearchRequest) -> SearchResponse:
         def run() -> SearchResponse:
-            with self.connect() as conn:
-                return self._search(conn, request)
+            return self._search(request)
 
         return self._with_db(run)
 
@@ -221,6 +229,23 @@ class SearchService:
             with self.connect() as conn:
                 gen = self._active(conn)
                 return gen, all_categories(conn, gen.schema)
+
+        return self._with_db(run)
+
+    def overview(self) -> ArchiveOverview:
+        """What the live index holds (for the MCP tool description)."""
+
+        def run() -> ArchiveOverview:
+            with self.connect() as conn:
+                gen = self._active(conn)
+                row = conn.execute(
+                    sql.SQL("SELECT count(*), min(published_date), max(published_date) FROM {}.posts").format(
+                        sql.Identifier(gen.schema)
+                    )
+                ).fetchone()
+                assert row is not None
+                first, last = (d.isoformat() if isinstance(d, date) else d for d in row[1:])
+                return ArchiveOverview(gen, int(row[0]), first, last, all_categories(conn, gen.schema))
 
         return self._with_db(run)
 
@@ -243,32 +268,41 @@ class SearchService:
 
     # -- pipeline -------------------------------------------------------------------------------
 
-    def _search(self, conn: psycopg.Connection, req: SearchRequest) -> SearchResponse:
-        gen = self._active(conn)
+    def _search(self, req: SearchRequest) -> SearchResponse:
+        """A connection is held only while querying, never while waiting for Gemini or the
+        re-ranker, so a few connections serve many concurrent searches."""
         notes: list[str] = []
-        cats: tuple[str, ...] = ()
-        if req.categories:
-            cats, unknown = resolve_categories(conn, gen.schema, req.categories)
-            if unknown:
-                valid = ", ".join(all_categories(conn, gen.schema)) or "(none)"
-                raise SearchError(f"unknown category {', '.join(unknown)}; valid categories: {valid}")
-        filters = Filters(cats, req.since, req.until, req.kind)
-        paused = self._semantic_paused_until - self.clock()
-        embedding = None if paused > 0 else _pool.submit(self._embed_query, req.query, gen)
-        keyword = keyword_search(
-            conn, gen.schema, build_keyword_query(req.query), filters, self.s.bm25_boosts, self.s.candidates
-        )
+        with self.connect() as conn:
+            gen = self._active(conn)
+            cats: tuple[str, ...] = ()
+            if req.categories:
+                cats, unknown = resolve_categories(conn, gen.schema, req.categories)
+                if unknown:
+                    valid = ", ".join(all_categories(conn, gen.schema)) or "(none)"
+                    raise SearchError(f"unknown category {', '.join(unknown)}; valid categories: {valid}")
+            filters = Filters(cats, req.since, req.until, req.kind)
+            paused = self._semantic_paused_until - self.clock()
+            embedding = None if paused > 0 else _pool.submit(self._embed_query, req.query, gen)
+            keyword = keyword_search(
+                conn,
+                gen.schema,
+                build_keyword_query(req.query),
+                filters,
+                self.s.bm25_boosts,
+                self.s.candidates,
+            )
         lists: dict[str, list[str]] = {"keyword": keyword}
         vector, problem = self._query_vector(embedding)
-        if vector is not None:  # database errors here are real errors, not "semantic skipped"
-            lists["semantic"] = vector_search(conn, gen.schema, vector, filters, self.s.candidates)
-        elif embedding is None:
+        if vector is None and embedding is None:
             notes.append(f"semantic search paused for {paused:.0f}s after a failed query embedding")
-        else:
+        elif vector is None:
             notes.append(f"semantic search skipped: {problem}")
         semantic = vector is not None
-        fused = rrf(lists)
-        rows = self._hydrate(conn, gen.schema, [f.passage_id for f in fused])
+        with self.connect() as conn:
+            if vector is not None:  # database errors here are real errors, not "semantic skipped"
+                lists["semantic"] = vector_search(conn, gen.schema, vector, filters, self.s.candidates)
+            fused = rrf(lists)
+            rows = self._hydrate(conn, gen.schema, [f.passage_id for f in fused])
         fused = [f for f in fused if f.passage_id in rows]
         order = [f.passage_id for f in fused]
         scores = {f.passage_id: f.score for f in fused}

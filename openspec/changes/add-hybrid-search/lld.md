@@ -438,6 +438,16 @@ Built in PR 8:
 - Logs: `{output_dir}/logs/mcp-YYYYMMDD.log` + stderr, never stdout; no keys or passage text.
 - Registration: `claude mcp add newsletter-archive -- /path/to/leadership-guidance/.venv/bin/archive mcp --config /path/to/leadership-guidance/config.yaml` (Claude Desktop: same command in `claude_desktop_config.json`).
 
+Built in PR 9:
+- `mcp` 2.3 renamed `FastMCP` to `MCPServer` (`mcp.server.mcpserver`). The tool returns a `CallToolResult` with readable text plus `structured_content`. Anticipated failures raise `ToolError`, so the agent sees the message and no traceback. Tests use the SDK's in-process `Client(server)`. One test launches `archive mcp` over stdio as a subprocess, which proves stdout carries only the protocol.
+- Reads go through a `psycopg_pool` pool (1–4 connections, health-checked). It opens without blocking start-up; if the database is stopped, each search fails with "start the database" instead of the server failing to start.
+- The tool description (post count, date range, categories) is filled in by a background thread, so start-up never waits for the database. It is refreshed after a search when the index version changed or 10 minutes passed. Clients that cache the tool list see the change the next time they list tools.
+- A search holds a pooled connection only while querying, never while waiting for Gemini or the re-ranker. The pool holds 8 connections. If none comes within 5 s, the server connects directly to report the real cause (database stopped, wrong password, refusal), or "busy" if that connection works. Pool warnings go to the MCP log.
+- One log per day (`mcp-YYYYMMDD.log`), appended by each start that day; logs older than 30 days are removed.
+- A missing or rejected Gemini key gives keyword-only results with a note, not a tool error (spec updated). Keyword search alone is more useful than an error.
+- Logs record argument names, result counts and timings, never the query text.
+- New transitive pins (all released at least two weeks ago): starlette 1.9.0, sse-starlette 3.5.0, httpx2 2.15.1, opentelemetry-api 1.45.1, python-multipart 0.0.32.
+
 ## 9. Configuration (`config.yaml` → `search:`)
 
 | Setting | Default |

@@ -235,3 +235,31 @@ def test_index_rejects_meaningless_flag_combinations(env, bad, message):
     calls = len(env.index_calls)
     r = env.run("index", *bad)
     assert r.exit_code == 1 and message in r.output and len(env.index_calls) == calls
+
+
+def test_mcp_command_starts_the_server(env, monkeypatch):
+    from newsletter_archive import mcp_server
+
+    seen = []
+    monkeypatch.setattr(mcp_server, "serve", lambda cfg, verbose: seen.append((cfg.base_url, verbose)))
+    r = env.run("mcp", "--verbose")
+    assert r.exit_code == 0, r.output
+    assert seen == [(BASE, True)]
+
+
+def test_mcp_command_with_a_broken_config(env):
+    env.config.write_text(f"base_url: {BASE}\ndelay_seconds: 0.5\n", encoding="utf-8")
+    r = env.run("mcp")
+    assert r.exit_code == 1 and "Error:" in r.output
+
+
+def test_mcp_command_reports_start_up_errors(env, monkeypatch):
+    from newsletter_archive import mcp_server
+    from newsletter_archive.errors import MissingDbPasswordError
+
+    def fail(cfg, verbose):
+        raise MissingDbPasswordError("ARCHIVE_DB_READER_PASSWORD")
+
+    monkeypatch.setattr(mcp_server, "serve", fail)
+    r = env.run("mcp")
+    assert r.exit_code == 1 and "ARCHIVE_DB_READER_PASSWORD" in r.output

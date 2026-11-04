@@ -122,3 +122,16 @@ def test_concurrent_calls_never_queue_behind_each_other():
         errors.append(str(e))
     t.join()
     assert errors == ["re-ranker still busy with an earlier search"]
+
+
+def test_install_hint_only_for_the_missing_extra():
+    def missing(name):
+        def load():
+            raise ModuleNotFoundError(f"No module named '{name}'", name=name)
+
+        return load
+
+    r = Reranking(missing("torch"), 5)
+    assert r.wait_loaded(5) and "pip install -e '.[rerank]'" in r.status
+    r = Reranking(missing("some_native_lib"), 5)
+    assert r.wait_loaded(5) and "pip install" not in r.status and "some_native_lib" in r.status

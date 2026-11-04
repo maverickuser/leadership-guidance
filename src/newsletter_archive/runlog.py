@@ -6,12 +6,15 @@ import logging
 import re
 import sys
 from dataclasses import dataclass
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
+from typing import TextIO
 
 from .config import Config, Secret
 
 LOGGER = "newsletter_archive"
+SERVER_LOG_DAYS = 30  # daily server logs (mcp-YYYYMMDD.log) older than this are removed
+LIBRARY_LOGGERS = ("psycopg.pool",)  # their warnings (e.g. why a pooled connection failed) go to our log
 REDACTED = "[REDACTED]"
 COOKIE_LINE_RE = re.compile(r"(?i)\b(set-)?cookie\s*[:=]\s*[^\n]+")
 GHOST_COOKIE_RE = re.compile(r"ghost-members-ssr(\.sig)?=[^;\s]+")
@@ -58,12 +61,12 @@ class RedactFilter(logging.Filter):
         return True
 
 
-def _log_file(logs_dir: Path) -> Path:
+def _log_file(logs_dir: Path, prefix: str = "run") -> Path:
     stamp = datetime.now(UTC).strftime("%Y%m%d-%H%M%S")
-    path = logs_dir / f"run-{stamp}Z.log"
+    path = logs_dir / f"{prefix}-{stamp}Z.log"
     n = 2
     while path.exists():
-        path = logs_dir / f"run-{stamp}Z-{n}.log"
+        path = logs_dir / f"{prefix}-{stamp}Z-{n}.log"
         n += 1
     return path
 
@@ -74,27 +77,50 @@ def _remove_handlers(logger: logging.Logger) -> None:
         h.close()
 
 
-def setup_logging(config: Config, verbose: bool = False) -> Path:
-    """Console (INFO, or DEBUG with --verbose) + DEBUG log file. Returns the log file path."""
+def server_log_file(logs_dir: Path, prefix: str, now: datetime | None = None) -> Path:
+    """One log per day for a long-lived server (appended to by every start that day), after
+    removing that server's logs older than SERVER_LOG_DAYS."""
+    now = now or datetime.now(UTC)
+    cutoff = (now - timedelta(days=SERVER_LOG_DAYS)).strftime("%Y%m%d")
+    for old in logs_dir.glob(f"{prefix}-*.log"):
+        day = old.stem.removeprefix(f"{prefix}-")
+        if day.isdigit() and len(day) == 8 and day < cutoff:
+            old.unlink(missing_ok=True)
+    return logs_dir / f"{prefix}-{now:%Y%m%d}.log"
+
+
+def setup_logging(
+    config: Config, verbose: bool = False, *, stream: TextIO | None = None, prefix: str = "run"
+) -> Path:
+    """Console (INFO, or DEBUG with --verbose) + DEBUG log file. Returns the log file path.
+    ``stream`` defaults to stdout; the MCP server passes stderr (stdout carries the protocol)
+    and ``prefix="mcp"`` for a daily log instead of one per run."""
     logger = logging.getLogger(LOGGER)
     _remove_handlers(logger)
     logger.setLevel(logging.DEBUG)
     logger.propagate = False
     redact = RedactFilter(*config.secrets)
 
-    console = logging.StreamHandler(sys.stdout)
+    console = logging.StreamHandler(stream or sys.stdout)
     console.setLevel(logging.DEBUG if verbose else logging.INFO)
     console.setFormatter(logging.Formatter("%(message)s"))
     console.addFilter(redact)
     logger.addHandler(console)
 
     config.logs_dir.mkdir(parents=True, exist_ok=True)
-    path = _log_file(config.logs_dir)
+    path = _log_file(config.logs_dir) if prefix == "run" else server_log_file(config.logs_dir, prefix)
     file_handler = logging.FileHandler(path, encoding="utf-8")
     file_handler.setLevel(logging.DEBUG)
     file_handler.setFormatter(logging.Formatter("%(asctime)s %(levelname)s %(message)s"))
     file_handler.addFilter(redact)
     logger.addHandler(file_handler)
+    for name in LIBRARY_LOGGERS:
+        library = logging.getLogger(name)
+        _remove_handlers(library)
+        library.setLevel(logging.WARNING)
+        library.propagate = False
+        library.addHandler(console)
+        library.addHandler(file_handler)
     return path
 
 
@@ -102,6 +128,11 @@ def close_logging() -> None:
     logger = logging.getLogger(LOGGER)
     _remove_handlers(logger)
     logger.propagate = True
+    for name in LIBRARY_LOGGERS:
+        library = logging.getLogger(name)
+        for h in list(library.handlers):
+            library.removeHandler(h)  # closed above with our logger's handlers
+        library.propagate = True
 
 
 def log_post(slug: str, stage: str, status: str, detail: str | None = None) -> None:

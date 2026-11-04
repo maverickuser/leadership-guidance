@@ -77,6 +77,15 @@ def _index_stage(config: Config, options: IndexOptions, stages: list[str]) -> in
     return 0
 
 
+def _load_config(config_path: Path) -> Config:
+    """The config and .env beside it, or exit 1 with the problem."""
+    try:
+        return load_config(config_path, config_path.parent / ".env")
+    except ConfigError as e:
+        typer.echo(f"Error: {e}", err=True)
+        raise typer.Exit(1) from None
+
+
 def _execute(
     stages: list[str],
     limit: int | None,
@@ -86,12 +95,7 @@ def _execute(
     config_path: Path,
     index_options: IndexOptions | None = None,
 ) -> None:
-    try:
-        config = load_config(config_path, config_path.parent / ".env")
-    except ConfigError as e:
-        typer.echo(f"Error: {e}", err=True)
-        raise typer.Exit(1) from None
-
+    config = _load_config(config_path)
     log_path = setup_logging(config, verbose)
     summary = RunSummary()
     manifest = None
@@ -269,3 +273,19 @@ def run(
     """All stages in order: discover, fetch, extract, index. Exit 3 if indexing failed."""
     options = IndexOptions(limit=limit, dry_run=dry_run)
     _execute(["discover", "fetch", "extract", "index"], limit, refresh, dry_run, verbose, config, options)
+
+
+@app.command()
+def mcp(
+    verbose: Verbose = False,
+    config: ConfigPath = Path("config.yaml"),
+) -> None:
+    """Start the local MCP search server on stdin/stdout (for Claude Code, Claude Desktop…)."""
+    cfg = _load_config(config)
+    from . import mcp_server
+
+    try:
+        mcp_server.serve(cfg, verbose)
+    except ArchiveError as e:  # e.g. a database password missing from .env
+        typer.echo(f"Error: {e}", err=True)
+        raise typer.Exit(1) from None
