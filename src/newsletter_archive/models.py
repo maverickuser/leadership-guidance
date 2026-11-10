@@ -97,6 +97,7 @@ class Extracted:
     links: list[dict[str, str]]
     word_count: int
     paywalled: bool = False  # the paywall box was inside the article body
+    categories: list[str] | None = None  # from the page itself; None keeps the manifest's
 
 
 # Called once per post per stage: (slug, stage, status, error or detail)

@@ -15,6 +15,7 @@ from .errors import ArchiveError, FetchError
 from .http import Client, origin, to_base_host
 from .models import Manifest, ManifestEntry
 from .parsing import attr, parse_xml, xml_local_name
+from .platforms import Platform, get_platform
 from .store import save_manifest
 
 log = logging.getLogger("newsletter_archive.discover")
@@ -299,12 +300,17 @@ def run_discover(
     manifest: Manifest,
     limit: int | None = None,
     dry_run: bool = False,
+    platform: Platform | None = None,
 ) -> DiscoverResult:
+    """Stage 1: merge sitemap posts and their categories into the manifest (saved unless dry run).
+
+    The platform (default Ghost) picks the posts among the sitemap's URLs and finds categories;
+    a platform whose categories come from post pages leaves them empty here."""
+    platform = platform or get_platform("ghost")
     base = config.base_url
-    """Stage 1: merge sitemap posts and their categories into the manifest (saved unless dry run)."""
-    post_urls = post_urls_from_sitemap(collect_sitemap_urls(client, f"{base}/sitemap.xml", base), base)
+    post_urls = platform.post_urls(collect_sitemap_urls(client, f"{base}/sitemap.xml", base), base)
     log.info("sitemap: %d posts", len(post_urls))
-    crawl = crawl_categories(client, base)
+    crawl = platform.discover_categories(client, base) or CategoryCrawl()
     extra = set(crawl.post_categories) - set(post_urls)
     if extra:
         log.debug("%d posts in category listings but not in the sitemap (ignored)", len(extra))
