@@ -16,8 +16,8 @@
 
 ## Every PR (definition of done)
 
-- [ ] CI green: `test` (3.11, 3.12), `integration`, `coverage` (≥ 95%), `lint`, `safety`
-- [ ] Tests ship with the code
-- [ ] `/code-review high` run and findings fixed in a "Fix review findings" commit
-- [ ] PR template filled in
-- [ ] User merges
+- [x] CI green: `test` (3.11, 3.12), `integration`, `coverage` (≥ 95%), `lint`, `safety`
+- [x] Tests ship with the code
+- [x] `/code-review high` run and findings fixed in a "Fix review findings" commit
+- [x] PR template filled in
+- [x] User merges (#28)
