@@ -13,7 +13,7 @@ from newsletter_archive.extract import extract_post
 from newsletter_archive.fetch import fetch_url, run_fetch
 from newsletter_archive.http import Client
 from newsletter_archive.models import Extracted, Manifest, ManifestEntry, Section
-from newsletter_archive.platforms import get_platform
+from newsletter_archive.platforms import PLATFORM_NAMES, get_platform
 from newsletter_archive.store import load_manifest, run_extract, write_text_atomic
 
 from .conftest import fixture_text
@@ -35,8 +35,10 @@ def client(cfg, t, clock):
 # -- registry -----------------------------------------------------------------
 
 
-def test_ghost_is_registered():
+def test_ghost_is_registered_once():
+    assert "ghost" in PLATFORM_NAMES
     assert get_platform("ghost").name == "ghost"
+    assert get_platform("ghost") is get_platform("ghost")
 
 
 def test_unknown_platform_lists_the_valid_ones():
@@ -83,9 +85,10 @@ class FakePlatform:
 
     name = "fake"
 
-    def __init__(self, signed_in: bool = True, categories: list[str] | None = None):
+    def __init__(self, signed_in: bool = True, categories: list[str] | None = None, paywalled: bool = False):
         self._signed_in = signed_in
         self._categories = categories
+        self._paywalled = paywalled
 
     def post_urls(self, sitemap_urls, base_url):
         return [u.rstrip("/") for u in sitemap_urls]
@@ -112,6 +115,7 @@ class FakePlatform:
             links=[],
             word_count=400,
             categories=self._categories,
+            paywalled=self._paywalled,
         )
 
 
@@ -171,3 +175,24 @@ def test_no_page_categories_keeps_the_manifests(cfg):
     run_extract(cfg, m, platform=FakePlatform(categories=None))
     assert m.entries["a"].categories == ["Career Growth"]
     assert json.loads(cfg.post_path("a").read_text(encoding="utf-8"))["categories"] == ["Career Growth"]
+
+
+def test_rediscovery_keeps_categories_read_from_pages(cfg, clock):
+    t = FakeTransport(clock=clock).add(f"{BASE}/sitemap.xml", (200, sitemap_urlset(BASE, ["a", "b"])))
+    m = Manifest()
+    run_discover(client(cfg, t, clock), cfg, m, platform=FakePlatform())
+    m.entries["a"].categories = ["The Pulse"]  # as extraction sets it
+    t.routes[f"{BASE}/sitemap.xml"] = [(200, sitemap_urlset(BASE, ["a", "b", "c"]))]  # the next sitemap
+    run_discover(client(cfg, t, clock), cfg, m, platform=FakePlatform())
+    assert [(e.slug, e.categories) for e in m.ordered()] == [("a", ["The Pulse"]), ("b", []), ("c", [])]
+    assert load_manifest(cfg.manifest_path).entries["a"].categories == ["The Pulse"]
+
+
+def test_status_change_alone_rewrites_the_post(cfg):
+    m = seed(cfg, "a", [])
+    run_extract(cfg, m, platform=FakePlatform())
+    assert json.loads(cfg.post_path("a").read_text(encoding="utf-8"))["status"] == "ok"
+    result = run_extract(cfg, m, platform=FakePlatform(paywalled=True))
+    assert result.written == 1
+    assert json.loads(cfg.post_path("a").read_text(encoding="utf-8"))["status"] == "partial"
+    assert m.entries["a"].status == "partial"

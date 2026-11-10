@@ -249,16 +249,22 @@ class MergeStats:
 def merge_manifest(
     manifest: Manifest,
     post_urls: list[str],
-    post_categories: dict[str, list[str]],
+    post_categories: dict[str, list[str]] | None,
     limit: int | None = None,
 ) -> MergeStats:
-    """Add new posts, refresh categories, keep progress. Order follows the sitemap."""
+    """Add new posts, refresh categories, keep progress. Order follows the sitemap.
+
+    post_categories None means categories come from post pages (set at extraction): known
+    posts keep theirs and new posts start with none."""
     stats = MergeStats()
     by_url = {e.url: e for e in manifest.ordered()}
     merged: dict[str, ManifestEntry] = {}
     for url in post_urls:
-        cats = list(post_categories.get(url, []))
         existing = by_url.get(url)
+        if post_categories is None:
+            cats = list(existing.categories) if existing is not None else []
+        else:
+            cats = list(post_categories.get(url, []))
         if existing is not None:
             existing.categories = cats
             merged[existing.slug] = existing
@@ -310,13 +316,16 @@ def run_discover(
     base = config.base_url
     post_urls = platform.post_urls(collect_sitemap_urls(client, f"{base}/sitemap.xml", base), base)
     log.info("sitemap: %d posts", len(post_urls))
-    crawl = platform.discover_categories(client, base) or CategoryCrawl()
+    found = platform.discover_categories(client, base)
+    crawl = found or CategoryCrawl()
     extra = set(crawl.post_categories) - set(post_urls)
     if extra:
         log.debug("%d posts in category listings but not in the sitemap (ignored)", len(extra))
 
     # In a dry run the merge happens in memory only, so `run --dry-run` can list new posts.
-    stats = merge_manifest(manifest, post_urls, crawl.post_categories, limit=limit)
+    # None: categories are read from each post at extraction, so known posts keep theirs.
+    categories = None if found is None else crawl.post_categories
+    stats = merge_manifest(manifest, post_urls, categories, limit=limit)
     if dry_run:
         log.info("dry run: would add %d, update %d; manifest not written", stats.added, stats.updated)
     else:

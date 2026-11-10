@@ -7,6 +7,7 @@ Everything else (the sitemap walker, the HTTP client, storage) is shared.
 
 from __future__ import annotations
 
+from functools import cache
 from typing import TYPE_CHECKING, Protocol
 
 from ..errors import ConfigError
@@ -49,19 +50,23 @@ class Platform(Protocol):
         ...
 
 
+# Every platform name, so config validation can check a name without loading the platforms.
+PLATFORM_NAMES: tuple[str, ...] = ("ghost",)
+
+
+@cache
 def get_platform(name: str) -> Platform:
-    """The platform registered under `name`.
+    """The platform registered under `name` (one shared instance per name).
 
     Raises:
         ConfigError: no such platform; the message lists the valid names.
     """
+    if name not in PLATFORM_NAMES:
+        raise ConfigError(f"unknown platform {name!r}; use one of: {', '.join(PLATFORM_NAMES)}")
     from .ghost import GhostPlatform  # here, not at the top: ghost.py imports the stage modules
 
     platforms: dict[str, Platform] = {"ghost": GhostPlatform()}
-    try:
-        return platforms[name]
-    except KeyError:
-        raise ConfigError(f"unknown platform {name!r}; use one of: {', '.join(sorted(platforms))}") from None
+    return platforms[name]
 
 
-__all__ = ["Platform", "get_platform"]
+__all__ = ["PLATFORM_NAMES", "Platform", "get_platform"]

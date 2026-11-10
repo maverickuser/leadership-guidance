@@ -163,12 +163,15 @@ class ExtractResult:
     would_write: list[str] = field(default_factory=list)
 
 
-def _stored_categories(path: Path) -> list[str] | None:
+def _stored_fields(path: Path) -> tuple[object, object]:
+    """(categories, status) of a saved post file, or (None, None) if it can't be read."""
     try:
-        cats = json.loads(path.read_text(encoding="utf-8")).get("categories")
-    except (OSError, json.JSONDecodeError, AttributeError):
-        return None
-    return cats if isinstance(cats, list) else None
+        stored = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return None, None
+    if not isinstance(stored, dict):
+        return None, None
+    return stored.get("categories"), stored.get("status")
 
 
 def run_extract(
@@ -211,7 +214,7 @@ def run_extract(
             not refresh
             and post_path.exists()
             and entry.content_hash == record["content_hash"]
-            and _stored_categories(post_path) == record["categories"]
+            and _stored_fields(post_path) == (record["categories"], record["status"])
         )
         status = record["status"]
         if status == "partial":
