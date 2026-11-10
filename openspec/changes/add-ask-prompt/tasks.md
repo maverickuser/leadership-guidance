@@ -18,9 +18,9 @@
 
 ## 2. Review fixes, rename and Claude Code command (same PR, after review)
 
-- [x] 2.0 Plan updated with the user's decisions: rename to `leadership-coach`, `/ask-archive` command (2026-11-10)
+- [x] 2.0 Plan updated with the user's decisions: rename to `leadership-coach`, `/ask-coach` command (2026-11-10)
 - [x] 2.1 Rename the server to `leadership-coach` (`SERVER_NAME`, README registration and Desktop config, migration commands)
-- [x] 2.2 `install_command()` writing `ask-archive.md` (marker, update, refuse someone else's file unless `--force`, `CLAUDE_CONFIG_DIR`)
+- [x] 2.2 `install_command()` writing `ask-coach.md` (marker, update, refuse someone else's file unless `--force`, `CLAUDE_CONFIG_DIR`)
 - [x] 2.3 `archive mcp --install-command [--force]`, without loading the config
 - [x] 2.4 Instructions: wording matches the tool (broad → summaries; prefer passages from those posts); asks for the question if it's missing
 - [x] 2.5 Own question limit (4,000); log stripped length, and log rejections with a reason

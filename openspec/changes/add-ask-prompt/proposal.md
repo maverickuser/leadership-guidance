@@ -11,7 +11,7 @@ Answers built from the archive come back as bulleted summaries unless the questi
   - link the post title inline after each claim, quote the author's words where they help, and end with a short sources list
   - say where posts disagree or the archive doesn't cover something, rather than filling gaps from general knowledge
 - **Where it shows up:** Claude Desktop and other MCP clients list it in their prompts menu, with a text box for the question.
-- **Claude Code shortcut `/ask-archive <question>`:** Claude Code splits the text after an MCP prompt command on spaces and sends only the first word to a one-argument prompt (verified in Claude Code 2.1.322), so `/mcp__…__ask how do I…` would send just "how". A Claude Code command file receives the whole question. `archive mcp --install-command` writes it to `~/.claude/commands/ask-archive.md`, with the same instructions as the prompt. Rerun it to update.
+- **Claude Code shortcut `/ask-coach <question>`:** Claude Code splits the text after an MCP prompt command on spaces and sends only the first word to a one-argument prompt (verified in Claude Code 2.1.322), so `/mcp__…__ask how do I…` would send just "how". A Claude Code command file receives the whole question. `archive mcp --install-command` writes it to `~/.claude/commands/ask-coach.md`, with the same instructions as the prompt. Rerun it to update.
 - **Rename the server to `leadership-coach`:** it describes what the server is for. Only the server's name changes: the `archive` command, the package, the database and the data folder keep theirs. Claude Code needs re-registering under the new name.
 - **Server instructions:** they describe the same answer style briefly, so plain questions that don't use the prompt also lean that way.
 - **No change to search.** The `search` tool, its results and the read-only, data-only rules stay as they are. The prompt only returns text and never calls a model or the database.
@@ -23,13 +23,13 @@ Answers built from the archive come back as bulleted summaries unless the questi
 <!-- none -->
 
 ### Modified Capabilities
-- `mcp-server`: adds the `ask` prompt and the Claude Code `/ask-archive` command (guided answers in prose with source links); renames the server to `leadership-coach` and updates its instructions; allows the prompt's fixed instruction text under "Data only".
+- `mcp-server`: adds the `ask` prompt and the Claude Code `/ask-coach` command (guided answers in prose with source links); renames the server to `leadership-coach` and updates its instructions; allows the prompt's fixed instruction text under "Data only".
 
 ## Impact
 
 - **Code:** `src/newsletter_archive/mcp_server.py` (the prompt, the command file writer, the instructions and the server name) and the `archive mcp --install-command` option in `cli.py`.
 - **Tests:** unit tests for the prompt's listing and text, and the existing stdio subprocess test extended to fetch the prompt.
-- **Docs:** README "Search (MCP server)" section: register as `leadership-coach`, install and use `/ask-archive`, and the prompt in Claude Desktop.
+- **Docs:** README "Search (MCP server)" section: register as `leadership-coach`, install and use `/ask-coach`, and the prompt in Claude Desktop.
 - **Your setup:** after merging, remove `newsletter-archive` from Claude Code and add `leadership-coach` (README commands), then run `archive mcp --install-command`.
 - **Specs:** `add-hybrid-search` is archived and its delta specs synced into `openspec/specs/`.
 - **Unchanged:** dependencies, cost and secrets. The prompt is static text, so it adds no Gemini calls.

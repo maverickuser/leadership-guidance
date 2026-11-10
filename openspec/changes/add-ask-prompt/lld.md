@@ -1,4 +1,4 @@
-# Low-level design: `ask` prompt, `/ask-archive` command, `leadership-coach` name
+# Low-level design: `ask` prompt, `/ask-coach` command, `leadership-coach` name
 
 ## 1. Architecture
 
@@ -7,7 +7,7 @@ No new module. `mcp_server.py` gains the prompt, the command-file writer and the
 ```
 Claude Desktop ── pick "ask", type question ──▶ prompts/get "ask" {question}
                                                ◀── one user message (static text)
-Claude Code ── /ask-archive <question> ──▶ ~/.claude/commands/ask-archive.md ($ARGUMENTS = whole question)
+Claude Code ── /ask-coach <question> ──▶ ~/.claude/commands/ask-coach.md ($ARGUMENTS = whole question)
 Claude ── search(kind="summaries") ──▶ search tool (unchanged)
 Claude ── search(kind="passages")  ──▶ …
 Claude writes the answer
@@ -60,7 +60,7 @@ The registered `ask` handler calls `ask_message`, then logs `prompt ask (N chars
 ## 5. Command file (`archive mcp --install-command [--force]`)
 
 ```python
-COMMAND_NAME = "ask-archive"
+COMMAND_NAME = "ask-coach"
 COMMAND_MARKER = "<!-- written by `archive mcp --install-command`; run it again to update -->"
 
 def commands_dir() -> Path:          # $CLAUDE_CONFIG_DIR/commands, else ~/.claude/commands
@@ -91,11 +91,11 @@ If no question is given above, ask the user for it first.
 - **Someone else's file:** raises `ArchiveError` ("… wasn't written by archive; use --force to replace it") unless `force`.
 - **Writing:** atomic, via `store.write_text_atomic`.
 
-**CLI.** In `archive mcp --install-command [--force]`, the install happens before the config is loaded, so it needs no config, database or secrets. It prints `Installed /ask-archive: <path>` (or "Updated" / "Already up to date") and exits. `--force` without `--install-command` is an error.
+**CLI.** In `archive mcp --install-command [--force]`, the install happens before the config is loaded, so it needs no config, database or secrets. It prints `Installed /ask-coach: <path>` (or "Updated" / "Already up to date") and exits. `--force` without `--install-command` is an error.
 
 ## 6. Server instructions
 
-> Search a personal newsletter archive with the `search` tool. Answer in paragraphs, link each post you draw on by title and URL, and end with the sources used. For a full researched answer, use the `ask` prompt (in Claude Code: `/ask-archive <question>`).
+> Search a personal newsletter archive with the `search` tool. Answer in paragraphs, link each post you draw on by title and URL, and end with the sources used. For a full researched answer, use the `ask` prompt (in Claude Code: `/ask-coach <question>`).
 
 ## 7. Housekeeping
 
@@ -129,7 +129,7 @@ If no question is given above, ask the user for it first.
 **README, "Search (MCP server)":**
 - registration as `leadership-coach`, and moving from `newsletter-archive` (`claude mcp remove newsletter-archive`, then add)
 - Claude Desktop config key
-- "Ask for a full answer": `archive mcp --install-command`, then `/ask-archive <question>`; the prompt in Claude Desktop; rerun after updates
+- "Ask for a full answer": `archive mcp --install-command`, then `/ask-coach <question>`; the prompt in Claude Desktop; rerun after updates
 
 ## 10. Safety
 

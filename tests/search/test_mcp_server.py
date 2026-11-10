@@ -195,7 +195,7 @@ def test_server_name_and_instructions(ask_server):
     text = ask_server.instructions
     assert ask_server.name == "leadership-coach"
     assert (
-        "paragraphs" in text and "title and URL" in text and "`ask` prompt" in text and "/ask-archive" in text
+        "paragraphs" in text and "title and URL" in text and "`ask` prompt" in text and "/ask-coach" in text
     )
 
 
@@ -218,7 +218,7 @@ def test_command_text_passes_the_whole_question():
 
 def test_install_update_and_unchanged(claude_dir):
     path, outcome = mcp_server.install_command()
-    assert (path, outcome) == (claude_dir / "ask-archive.md", "installed")
+    assert (path, outcome) == (claude_dir / "ask-coach.md", "installed")
     assert path.read_text(encoding="utf-8") == mcp_server.command_text()
     assert mcp_server.install_command() == (path, "unchanged")
     path.write_text(mcp_server.COMMAND_MARKER + "\nolder instructions\n", encoding="utf-8")
@@ -230,7 +230,7 @@ def test_someone_elses_file_needs_force(claude_dir):
     from newsletter_archive.errors import ArchiveError
 
     claude_dir.mkdir(parents=True)
-    mine = claude_dir / "ask-archive.md"
+    mine = claude_dir / "ask-coach.md"
     mine.write_text("my own command\n", encoding="utf-8")
     with pytest.raises(ArchiveError, match="wasn't written by `archive`; use --force"):
         mcp_server.install_command()

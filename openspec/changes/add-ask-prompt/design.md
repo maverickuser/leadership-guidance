@@ -19,7 +19,7 @@ MCP has a built-in feature for this: **prompts**, which are named message templa
 
 1. **An MCP prompt, not a server-side answer generator** (2026-11-10). The agent already writes well. A server-side generator would add API cost, a second model to tune, and code, with no better answers.
 2. **Answer format** (approved in the proposal): 3–6 paragraphs, direct answer first, one point per paragraph, inline title links, quotes where they help, sources list at the end, disagreements and gaps stated plainly.
-9. **Claude Code shortcut `/ask-archive`** (2026-11-10, after review). Claude Code 2.1.322 splits an MCP prompt command's text on whitespace and maps words to argument names by position (`D.trim().split(/\s+/)`), so a one-argument prompt gets only the first word. Options shown to the user: a Claude Code command file (chosen), two steps (`/…__ask` alone, then the question), or no command. A command file gets the whole text as `$ARGUMENTS`.
+9. **Claude Code shortcut `/ask-coach`** (2026-11-10, after review). Claude Code 2.1.322 splits an MCP prompt command's text on whitespace and maps words to argument names by position (`D.trim().split(/\s+/)`), so a one-argument prompt gets only the first word. Options shown to the user: a Claude Code command file (chosen), two steps (`/…__ask` alone, then the question), or no command. A command file gets the whole text as `$ARGUMENTS`. Named `/ask-coach` to match the server name (user's choice).
 10. **Rename the server to `leadership-coach`** (2026-11-10). The name describes what it's for. Only `SERVER_NAME` and the docs change; the package, CLI, database and data folder keep "newsletter-archive". A hyphen, not an underscore, by the user's choice.
 
 ## Decisions (technical)
@@ -37,7 +37,7 @@ MCP has a built-in feature for this: **prompts**, which are named message templa
 ## Risks / Trade-offs
 
 - **Clients without prompt support:** they won't show `ask`. Mitigation: the server instructions still steer plain questions.
-- **The command file can go stale:** if `ASK_INSTRUCTIONS` changes, an installed `/ask-archive` keeps the old text until `--install-command` is run again. The README says so.
+- **The command file can go stale:** if `ASK_INSTRUCTIONS` changes, an installed `/ask-coach` keeps the old text until `--install-command` is run again. The README says so.
 - **Renaming breaks the old registration:** Claude Code keeps `newsletter-archive` until it's removed and re-added. The README gives the two commands.
 - **More searches per answer:** a multi-part question may run 3–5 searches at ~5 s each, so a slower answer. That's the trade for depth, and the prompt says "a few", not unlimited.
 - **The agent may still drift from the format:** prompts guide, they don't enforce. If that happens, tune the prompt text; no code shape changes.

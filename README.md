@@ -204,15 +204,15 @@ Then ask, for example: *"Using the newsletter archive, how should I give feedbac
 
 This has Claude research the question (post summaries first, then passages from the best posts) and answer in 3–6 paragraphs, linking each post it draws on and ending with a sources list. It also says where posts disagree or where the archive is silent.
 
-- **Claude Code:** install the `/ask-archive` command once:
+- **Claude Code:** install the `/ask-coach` command once:
 
   ```bash
   archive mcp --install-command
   ```
 
-  Then, in a new session: `/ask-archive how do I give implicit feedback?`
+  Then, in a new session: `/ask-coach how do I give implicit feedback?`
 
-  It writes `~/.claude/commands/ask-archive.md` (or under `$CLAUDE_CONFIG_DIR`). Run it again after updating this project to pick up new instructions. It never replaces a file of that name that it didn't write, unless you add `--force`.
+  It writes `~/.claude/commands/ask-coach.md` (or under `$CLAUDE_CONFIG_DIR`). Run it again after updating this project to pick up new instructions. It never replaces a file of that name that it didn't write, unless you add `--force`.
 - **Claude Desktop:** pick **ask** from the leadership-coach prompts in the chat box menu, then type your question.
 
 Why a separate command for Claude Code? Its built-in command for a server prompt (`/mcp__leadership-coach__ask`) passes only the first word of your question. The instructions only shape the answer: they don't search by themselves and cost nothing extra.

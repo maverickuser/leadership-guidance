@@ -1,7 +1,7 @@
 """Local MCP server ``leadership-coach`` (``archive mcp``): the archive's search as one tool,
 over stdio only, plus an ``ask`` prompt that tells the agent how to research and write a full
 answer. Claude Code passes only the first word of a prompt command's text, so the same
-instructions also ship as a Claude Code command, ``/ask-archive`` (``archive mcp
+instructions also ship as a Claude Code command, ``/ask-coach`` (``archive mcp
 --install-command``).
 
 The server returns archive data and nothing else: passages and the post summaries stored at
@@ -58,7 +58,7 @@ SERVER_NAME = "leadership-coach"
 SERVER_INSTRUCTIONS = (
     "Search a personal newsletter archive with the `search` tool. Answer in paragraphs, link each "
     "post you draw on by title and URL, and end with the sources used. For a full researched answer, "
-    "use the `ask` prompt (in Claude Code: `/ask-archive <question>`)."
+    "use the `ask` prompt (in Claude Code: `/ask-coach <question>`)."
 )
 ASK_PROMPT_NAME = "ask"
 ASK_MAX_CHARS = 4000  # the agent writes its own search queries, so this isn't the query limit
@@ -83,7 +83,7 @@ Write the answer:
   general knowledge.
 - End with a "Sources" list: each post used, as [Title](URL), with its date."""
 
-COMMAND_NAME = "ask-archive"
+COMMAND_NAME = "ask-coach"
 COMMAND_MARKER = "<!-- written by `archive mcp --install-command`; run it again to update -->"
 
 POOL_MAX = 8  # searches hold a connection only while querying
@@ -296,7 +296,7 @@ def commands_dir() -> Path:
 
 
 def command_text() -> str:
-    """``/ask-archive``: the whole question ($ARGUMENTS) plus the ``ask`` prompt's instructions."""
+    """``/ask-coach``: the whole question ($ARGUMENTS) plus the ``ask`` prompt's instructions."""
     return (
         "---\n"
         f"description: Answer from the {SERVER_NAME} archive, in paragraphs with sources\n"
@@ -310,7 +310,7 @@ def command_text() -> str:
 
 
 def install_command(force: bool = False) -> tuple[Path, str]:
-    """Write ``ask-archive.md`` into Claude Code's commands folder. Returns (path, outcome):
+    """Write ``ask-coach.md`` into Claude Code's commands folder. Returns (path, outcome):
     "installed", "updated" (our older text) or "unchanged". A file of that name that ``archive``
     didn't write is left alone (ArchiveError) unless ``force``."""
     from .store import write_text_atomic

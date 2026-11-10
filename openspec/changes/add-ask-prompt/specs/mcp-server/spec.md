@@ -22,14 +22,14 @@ Getting the prompt SHALL NOT search, call a language model or read the database;
 - **THEN** it receives an error saying a question is needed, and the server keeps running
 
 ### Requirement: Claude Code ask command
-Because Claude Code passes only the first word of the text after an MCP prompt command to a one-argument prompt, the system SHALL provide `archive mcp --install-command`, which writes a Claude Code command file `ask-archive.md` into the user's Claude Code commands folder (`~/.claude/commands`, or `$CLAUDE_CONFIG_DIR/commands` when that is set). The file SHALL pass the user's whole question (`$ARGUMENTS`) with the same answering instructions as the `ask` prompt. Running the option again SHALL update a file it wrote before. It SHALL NOT overwrite a different file of the same name unless `--force` is given. It SHALL NOT need the database, the config file or any secret.
+Because Claude Code passes only the first word of the text after an MCP prompt command to a one-argument prompt, the system SHALL provide `archive mcp --install-command`, which writes a Claude Code command file `ask-coach.md` into the user's Claude Code commands folder (`~/.claude/commands`, or `$CLAUDE_CONFIG_DIR/commands` when that is set). The file SHALL pass the user's whole question (`$ARGUMENTS`) with the same answering instructions as the `ask` prompt. Running the option again SHALL update a file it wrote before. It SHALL NOT overwrite a different file of the same name unless `--force` is given. It SHALL NOT need the database, the config file or any secret.
 
 #### Scenario: Install and ask
-- **WHEN** the user runs `archive mcp --install-command`, then `/ask-archive how do I give implicit feedback?` in Claude Code
+- **WHEN** the user runs `archive mcp --install-command`, then `/ask-coach how do I give implicit feedback?` in Claude Code
 - **THEN** Claude receives the whole question with the answering instructions and answers from the archive in paragraphs with sources
 
 #### Scenario: Someone else's file
-- **WHEN** `~/.claude/commands/ask-archive.md` exists and was not written by `archive`
+- **WHEN** `~/.claude/commands/ask-coach.md` exists and was not written by `archive`
 - **THEN** the command leaves it unchanged, says so, and suggests `--force`
 
 ## MODIFIED Requirements

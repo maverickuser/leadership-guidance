@@ -283,7 +283,7 @@ def mcp(
         bool,
         typer.Option(
             "--install-command",
-            help="Install the Claude Code command /ask-archive (in ~/.claude/commands) and exit.",
+            help="Install the Claude Code command /ask-coach (in ~/.claude/commands) and exit.",
         ),
     ] = False,
     force: Annotated[
