@@ -1,7 +1,7 @@
 ## MODIFIED Requirements
 
 ### Requirement: Local MCP server
-The system SHALL provide a local MCP (Model Context Protocol) server named `leadership-coach`, started by `archive mcp`, that serves the archive's search to MCP clients on the same machine over standard input/output. It SHALL NOT listen on a network port. It SHALL work with any MCP-capable agent, including Claude Code and Claude Desktop. The server's instructions SHALL tell agents to answer archive questions as short teaching posts written to the reader, with inline links to the posts used, and mention the `ask` prompt.
+The system SHALL provide a local MCP (Model Context Protocol) server named `leadership-coach`, started by `archive mcp`, that serves the archive's search to MCP clients on the same machine over standard input/output. It SHALL NOT listen on a network port. It SHALL work with any MCP-capable agent, including Claude Code and Claude Desktop. The server's instructions SHALL tell agents to answer advice questions from the archive as short teaching posts written to the reader, and quick lookups briefly, with inline links to the posts used, and mention the `ask` prompt.
 
 #### Scenario: Connect from Claude Code
 - **WHEN** the user registers the server in Claude Code as `leadership-coach`, as described in the README
@@ -10,10 +10,10 @@ The system SHALL provide a local MCP (Model Context Protocol) server named `lead
 ### Requirement: Ask prompt
 The server SHALL expose an MCP prompt named `ask` with one required argument, `question` (string). Getting the prompt SHALL return a single user message that contains the question and instructions for answering it from the archive with the `search` tool. The instructions SHALL tell the agent to:
 - start a broad question with a summaries search to find the relevant posts, then search passages for evidence, preferring passages from those posts; a narrow factual question may go straight to passages; run more than one search when the question has several parts;
-- write the answer as a short teaching blog post: a title naming the topic, an opening paragraph with the direct answer, then short sections with `###` headings, one main point per section, mostly prose with no long bullet lists;
-- address the reader as "you" with practical guidance, rather than reporting what the author or post says, and never write as the author in the first person;
-- quote the posts' own words briefly, in quotation marks, attributed in plain words, and link the post title to its URL inline after each claim drawn from a post;
-- say where posts disagree, and say plainly when the archive does not cover part of the question, instead of filling the gap from general knowledge;
+- write the answer as a short teaching blog post: a title naming the topic, an opening paragraph with the direct answer, then short sections with `###` headings, one main point per section, mostly prose with no long bullet lists; a narrow factual question needs only the title, the direct answer and the sources list;
+- address the reader as "you" with practical guidance, rather than summarizing the posts one by one, and never write as the author in the first person;
+- quote the posts' own words briefly, in quotation marks, attributed to the post they come from without inventing who the speaker is, and link the post title to its URL inline after each claim drawn from a post;
+- say where posts disagree, stating what each post says, and say plainly when the archive does not cover part of the question, instead of filling the gap from general knowledge;
 - end with a "Sources" list of the posts used, each with its date.
 
 Getting the prompt SHALL NOT search, call a language model or read the database; it SHALL only return text. A question that is empty or longer than 4,000 characters SHALL be rejected with an error the user can act on, and the rejection SHALL be logged without the question text.
