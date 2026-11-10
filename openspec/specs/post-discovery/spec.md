@@ -1,7 +1,7 @@
 # post-discovery Specification
 
 ## Purpose
-TBD - created by archiving change add-newsletter-archive. Update Purpose after archive.
+Finding every post in the newsletter, through the site's sitemap and archive pages, without fetching more than needed.
 ## Requirements
 ### Requirement: Read post URLs from the sitemap
 The system SHALL read `{base_url}/sitemap.xml` and SHALL follow every nested sitemap file listed in a sitemap index until all URL entries are collected.

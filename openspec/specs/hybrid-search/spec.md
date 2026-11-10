@@ -1,7 +1,7 @@
 # hybrid-search Specification
 
 ## Purpose
-TBD - created by archiving change add-hybrid-search. Update Purpose after archive.
+Searching the archive by keywords and by meaning together, combining the results, re-ranking them and returning passages and post summaries with their sources.
 ## Requirements
 ### Requirement: Hybrid retrieval
 For each query the system SHALL run BM25 keyword search and semantic search over all passages and post summaries, take the top `search.candidates` (default 50) from each, and combine them into one candidate list in which passages found by both methods rank above passages found by only one at similar positions. Combining SHALL be deterministic: the same query against the same store always gives the same order.

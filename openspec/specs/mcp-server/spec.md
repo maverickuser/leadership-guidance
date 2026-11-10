@@ -1,7 +1,7 @@
 # mcp-server Specification
 
 ## Purpose
-TBD - created by archiving change add-hybrid-search. Update Purpose after archive.
+The local `leadership-coach` MCP server that gives agents such as Claude Code and Claude Desktop the archive's search, and guidance for answering from it.
 ## Requirements
 ### Requirement: Local MCP server
 The system SHALL provide a local MCP (Model Context Protocol) server, started by an `archive` command, that serves the archive's search to MCP clients on the same machine over standard input/output. It SHALL NOT listen on a network port. It SHALL work with any MCP-capable agent, including Claude Code and Claude Desktop.

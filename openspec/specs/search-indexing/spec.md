@@ -1,7 +1,7 @@
 # search-indexing Specification
 
 ## Purpose
-TBD - created by archiving change add-hybrid-search. Update Purpose after archive.
+Building and updating the search index: cleaning and chunking posts, embedding passages, writing post summaries, and managing index versions safely.
 ## Requirements
 ### Requirement: Index input
 The indexer SHALL use the archived post records in `{output_dir}/posts/*.json` as its only data source, indexing posts whose manifest status is `ok` or `partial`. It SHALL NOT read raw HTML or fetch posts from the newsletter site. A post file that fails schema validation SHALL be skipped with a logged error, and indexing SHALL continue.

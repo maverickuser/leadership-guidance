@@ -16,6 +16,18 @@
 - [x] 1.6 Extend the stdio subprocess test to list and fetch `ask`
 - [x] 1.7 README: "Ask for a full answer"
 
+## 2. Review fixes, rename and Claude Code command (same PR, after review)
+
+- [x] 2.0 Plan updated with the user's decisions: rename to `leadership-coach`, `/ask-archive` command (2026-11-10)
+- [x] 2.1 Rename the server to `leadership-coach` (`SERVER_NAME`, README registration and Desktop config, migration commands)
+- [x] 2.2 `install_command()` writing `ask-archive.md` (marker, update, refuse someone else's file unless `--force`, `CLAUDE_CONFIG_DIR`)
+- [x] 2.3 `archive mcp --install-command [--force]`, without loading the config
+- [x] 2.4 Instructions: wording matches the tool (broad → summaries; prefer passages from those posts); asks for the question if it's missing
+- [x] 2.5 Own question limit (4,000); log stripped length, and log rejections with a reason
+- [x] 2.6 Test guard records touches instead of raising
+- [x] 2.7 Replace the placeholder Purpose lines in the 8 main specs
+- [x] 2.8 Tests for 2.1–2.6; README "Ask for a full answer" rewritten
+
 ## Every PR (definition of done)
 
 - CI green: `test` (3.11, 3.12), `integration`, `coverage` (≥ 95%), `lint`, `safety`

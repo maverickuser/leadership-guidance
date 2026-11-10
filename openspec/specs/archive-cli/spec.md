@@ -1,7 +1,7 @@
 # archive-cli Specification
 
 ## Purpose
-TBD - created by archiving change add-newsletter-archive. Update Purpose after archive.
+The `archive` command line: running the archive's stages (discover, fetch, extract, index) together or one at a time, with limits, dry runs and a clear end-of-run report.
 ## Requirements
 ### Requirement: CLI commands
 The system SHALL provide a console command `archive` with subcommands `discover` (stage 1), `fetch` (stage 2), `extract` (stages 3 and 4), `index` (build or update the search store), `mcp` (start the local MCP search server) and `run` (discover, fetch, extract and index, in that order). Search itself SHALL be available only through the MCP server. If the index step of `run` fails, the posts already saved SHALL be kept and `run` SHALL exit with code 3 and a message that search was not updated.
