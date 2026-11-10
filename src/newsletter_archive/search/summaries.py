@@ -178,11 +178,6 @@ class GeminiSummarizer:
     def _request(self, sdk: Any, text: str, instruction: str, temperature: float) -> Any:
         from google.genai import types
 
-        thinking = (
-            types.ThinkingConfig(thinking_level=types.ThinkingLevel(self.thinking_level.upper()))
-            if self.thinking_level
-            else None
-        )
         return sdk.models.generate_content(
             model=self.model,
             contents=text,
@@ -190,9 +185,16 @@ class GeminiSummarizer:
                 system_instruction=instruction,
                 temperature=temperature,
                 max_output_tokens=MAX_OUTPUT_TOKENS,
-                thinking_config=thinking,
+                thinking_config=thinking_config(self.thinking_level),
             ),
         )
+
+
+def thinking_config(level: str) -> Any:
+    """The SDK thinking setting for ``level`` ("low", "high"…), or None for "" (send none)."""
+    from google.genai import types
+
+    return types.ThinkingConfig(thinking_level=types.ThinkingLevel(level.upper())) if level else None
 
 
 class SummaryCache:
