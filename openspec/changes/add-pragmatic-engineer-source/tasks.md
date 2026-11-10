@@ -27,9 +27,9 @@
 
 ## 2. Shared rate limiter and per-source HTTP client (PR 2)
 
-- [ ] 2.1 `RateLimiter` (delay, clock, sleep) shared by clients; retries and redirect hops count against it
-- [ ] 2.2 `Client` takes a base URL and cookie per instance; the cookie is sent only to that origin
-- [ ] 2.3 Tests: two clients keep ≥ delay between all requests (fake clock); one client's cookie never reaches the other's host
+- [x] 2.1 `RateLimiter` (delay, clock, sleep) shared by clients; retries and redirect hops count against it
+- [x] 2.2 `Client` takes a base URL and cookie per instance; the cookie is sent only to that origin
+- [x] 2.3 Tests: two clients keep ≥ delay between all requests (fake clock); one client's cookie never reaches the other's host
 
 ## 3. Sources config, per-newsletter folders and the move (PR 3)
 
