@@ -175,18 +175,22 @@ Claude Code, Claude Desktop or any MCP client can search your archive through a 
 
 ### Connect your agent
 
-Claude Code:
+The server is called `leadership-coach`.
+
+Claude Code (`--scope user` makes it work in every folder):
 
 ```bash
-claude mcp add newsletter-archive -- /path/to/leadership-guidance/.venv/bin/archive mcp --config /path/to/leadership-guidance/config.yaml
+claude mcp add --scope user leadership-coach -- /path/to/leadership-guidance/.venv/bin/archive mcp --config /path/to/leadership-guidance/config.yaml
 ```
+
+If you registered it earlier as `newsletter-archive`, remove that first: `claude mcp remove --scope user newsletter-archive`.
 
 Claude Desktop: add this to `~/Library/Application Support/Claude/claude_desktop_config.json`, then restart the app:
 
 ```json
 {
   "mcpServers": {
-    "newsletter-archive": {
+    "leadership-coach": {
       "command": "/path/to/leadership-guidance/.venv/bin/archive",
       "args": ["mcp", "--config", "/path/to/leadership-guidance/config.yaml"]
     }
@@ -195,6 +199,23 @@ Claude Desktop: add this to `~/Library/Application Support/Claude/claude_desktop
 ```
 
 Then ask, for example: *"Using the newsletter archive, how should I give feedback to a senior engineer?"*
+
+### Ask for a full answer
+
+This has Claude research the question (post summaries first, then passages from the best posts) and answer in 3–6 paragraphs, linking each post it draws on and ending with a sources list. It also says where posts disagree or where the archive is silent.
+
+- **Claude Code:** install the `/ask-coach` command once:
+
+  ```bash
+  archive mcp --install-command
+  ```
+
+  Then, in a new session: `/ask-coach how do I give implicit feedback?`
+
+  It writes `~/.claude/commands/ask-coach.md` (or under `$CLAUDE_CONFIG_DIR`). Run it again after updating this project to pick up new instructions. It never replaces a file of that name that it didn't write, unless you add `--force`.
+- **Claude Desktop:** pick **ask** from the leadership-coach prompts in the chat box menu, then type your question.
+
+Why a separate command for Claude Code? Its built-in command for a server prompt (`/mcp__leadership-coach__ask`) passes only the first word of your question. The instructions only shape the answer: they don't search by themselves and cost nothing extra.
 
 The `search` tool takes:
 - `query`

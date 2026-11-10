@@ -279,10 +279,36 @@ def run(
 def mcp(
     verbose: Verbose = False,
     config: ConfigPath = Path("config.yaml"),
+    install_command: Annotated[
+        bool,
+        typer.Option(
+            "--install-command",
+            help="Install the Claude Code command /ask-coach (in ~/.claude/commands) and exit.",
+        ),
+    ] = False,
+    force: Annotated[
+        bool, typer.Option("--force", help="With --install-command: replace a file archive didn't write.")
+    ] = False,
 ) -> None:
-    """Start the local MCP search server on stdin/stdout (for Claude Code, Claude Desktop…)."""
-    cfg = _load_config(config)
+    """Start the local MCP search server (leadership-coach) on stdin/stdout, for Claude Code,
+    Claude Desktop and other MCP clients."""
     from . import mcp_server
+
+    if force and not install_command:
+        typer.echo("Error: --force only goes with --install-command", err=True)
+        raise typer.Exit(2)
+    if install_command:  # needs no config, database or secrets
+        try:
+            path, outcome = mcp_server.install_command(force)
+        except (ArchiveError, OSError) as e:
+            typer.echo(f"Error: {e}", err=True)
+            raise typer.Exit(1) from None
+        said = {"installed": "Installed", "updated": "Updated", "unchanged": "Already up to date:"}[outcome]
+        typer.echo(f"{said} /{mcp_server.COMMAND_NAME} ({path})")
+        if outcome != "unchanged":
+            typer.echo(f"Use it in a new Claude Code session: /{mcp_server.COMMAND_NAME} <your question>")
+        return
+    cfg = _load_config(config)
 
     try:
         mcp_server.serve(cfg, verbose)

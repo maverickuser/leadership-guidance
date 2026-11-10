@@ -247,6 +247,32 @@ def test_mcp_command_starts_the_server(env, monkeypatch):
     assert seen == [(BASE, True)]
 
 
+def test_mcp_install_command_needs_no_config(env, tmp_path, monkeypatch):
+    monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(tmp_path / "claude"))
+    env.config.unlink()
+    r = env.run("mcp", "--install-command")
+    assert r.exit_code == 0, r.output
+    assert "Installed /ask-coach" in r.output and "/ask-coach <your question>" in r.output
+    assert (tmp_path / "claude" / "commands" / "ask-coach.md").exists()
+    again = env.run("mcp", "--install-command")
+    assert again.exit_code == 0 and "Already up to date" in again.output
+
+
+def test_mcp_install_command_refuses_someone_elses_file(env, tmp_path, monkeypatch):
+    monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(tmp_path / "claude"))
+    (tmp_path / "claude" / "commands").mkdir(parents=True)
+    (tmp_path / "claude" / "commands" / "ask-coach.md").write_text("mine\n", encoding="utf-8")
+    r = env.run("mcp", "--install-command")
+    assert r.exit_code == 1 and "use --force" in r.output
+    forced = env.run("mcp", "--install-command", "--force")
+    assert forced.exit_code == 0 and "Updated /ask-coach" in forced.output
+
+
+def test_mcp_force_alone_is_an_error(env):
+    r = env.run("mcp", "--force")
+    assert r.exit_code == 2 and "--force only goes with --install-command" in r.output
+
+
 def test_mcp_command_with_a_broken_config(env):
     env.config.write_text(f"base_url: {BASE}\ndelay_seconds: 0.5\n", encoding="utf-8")
     r = env.run("mcp")

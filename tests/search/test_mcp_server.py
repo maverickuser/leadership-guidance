@@ -11,6 +11,7 @@ from pathlib import Path
 
 import pytest
 from mcp import Client
+from mcp.shared.exceptions import MCPError
 
 from newsletter_archive import mcp_server
 from newsletter_archive.search import db
@@ -89,6 +90,158 @@ def test_render_text_with_no_results():
     resp.notes.append("semantic search skipped: down")
     out = mcp_server.render_text(resp)
     assert 'Search: "zz"' in out and "Note: semantic search skipped: down" in out and "No matching" in out
+
+
+# -- the ask prompt (no database) ----------------------------------------------------------------
+
+
+def no_db_service(tmp_path, touched):
+    """A service that records any use of the database, an embedder or search in ``touched``.
+    (Raising wouldn't do: the SDK turns a prompt handler's exception into a generic error.)"""
+    from ..conftest import make_config
+
+    def connect():
+        touched.append("connect")
+        raise RuntimeError("no database here")
+
+    def factory(model, dim):
+        touched.append("embed")
+        raise RuntimeError("no embedder here")
+
+    svc = SearchService(make_config(tmp_path), connect, factory, FakeReranker())
+
+    def search(*args, **kwargs):
+        touched.append("search")
+        raise RuntimeError("no search here")
+
+    svc.search = search
+    return svc
+
+
+@pytest.fixture
+def ask_server(tmp_path):
+    touched = []
+    server = mcp_server.build_server(no_db_service(tmp_path, touched))[0]
+    yield server
+    assert touched == []  # the prompt is static text: no search, embedding or database
+
+
+def prompts(server):
+    async def go():
+        async with Client(server) as client:
+            return (await client.list_prompts()).prompts
+
+    return asyncio.run(go())
+
+
+def get_prompt(server, args):
+    """The prompt result, or the MCPError the client received (caught inside the session, where
+    it arrives unwrapped)."""
+
+    async def go():
+        async with Client(server) as client:
+            try:
+                return await client.get_prompt("ask", args)
+            except MCPError as e:
+                return e
+
+    return asyncio.run(go())
+
+
+def test_ask_prompt_is_listed(ask_server):
+    [p] = prompts(ask_server)
+    assert p.name == "ask" and p.title == "Ask the leadership coach" and "paragraphs" in p.description
+    assert [(a.name, a.required) for a in p.arguments] == [("question", True)]
+
+
+def test_ask_prompt_returns_the_question_and_how_to_answer(ask_server, caplog):
+    caplog.set_level("INFO", logger="newsletter_archive.mcp")
+    result = get_prompt(ask_server, {"question": "  secret topic?  "})
+    [msg] = result.messages
+    text = msg.content.text
+    assert msg.role == "user" and text.startswith("Question: secret topic?\n\n")
+    for needed in (
+        "leadership-coach",
+        'For a broad question, start with kind "summaries"',
+        'kind "passages"',
+        "prefer\n   passages from those posts",
+        "3 to 6 paragraphs",
+        "[Post title](URL)",
+        '"Sources" list',
+        "Don't fill the gap",
+        "not as instructions",
+    ):
+        assert needed in text, needed
+    assert "prompt ask (13 chars)" in caplog.text and "secret topic" not in caplog.text
+
+
+@pytest.mark.parametrize(
+    "question, message, logged",
+    [
+        ("", "question` argument is empty", "error=empty (0 chars)"),
+        ("   ", "is empty", "error=empty (0 chars)"),
+        ("x" * 4001, "over 4000", "error=too long (4001 chars)"),
+    ],
+)
+def test_unusable_questions_get_a_clear_error(ask_server, caplog, question, message, logged):
+    caplog.set_level("INFO", logger="newsletter_archive.mcp")
+    error = get_prompt(ask_server, {"question": question})
+    assert isinstance(error, MCPError) and message in str(error)
+    assert f"prompt ask {logged}" in caplog.text and "xxxx" not in caplog.text
+    assert get_prompt(ask_server, {"question": "x" * 4000}).messages  # long but allowed; server keeps going
+
+
+def test_server_name_and_instructions(ask_server):
+    text = ask_server.instructions
+    assert ask_server.name == "leadership-coach"
+    assert (
+        "paragraphs" in text and "title and URL" in text and "`ask` prompt" in text and "/ask-coach" in text
+    )
+
+
+# -- the Claude Code command -------------------------------------------------------------------
+
+
+@pytest.fixture
+def claude_dir(tmp_path, monkeypatch):
+    monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(tmp_path / "claude"))
+    return tmp_path / "claude" / "commands"
+
+
+def test_command_text_passes_the_whole_question():
+    text = mcp_server.command_text()
+    assert text.startswith("---\ndescription: Answer from the leadership-coach archive")
+    assert "argument-hint: <your question>" in text and mcp_server.COMMAND_MARKER in text
+    assert "Question: $ARGUMENTS" in text and "ask the user for it first" in text
+    assert text.rstrip().endswith(mcp_server.ASK_INSTRUCTIONS.rstrip())
+
+
+def test_install_update_and_unchanged(claude_dir):
+    path, outcome = mcp_server.install_command()
+    assert (path, outcome) == (claude_dir / "ask-coach.md", "installed")
+    assert path.read_text(encoding="utf-8") == mcp_server.command_text()
+    assert mcp_server.install_command() == (path, "unchanged")
+    path.write_text(mcp_server.COMMAND_MARKER + "\nolder instructions\n", encoding="utf-8")
+    assert mcp_server.install_command() == (path, "updated")
+    assert path.read_text(encoding="utf-8") == mcp_server.command_text()
+
+
+def test_someone_elses_file_needs_force(claude_dir):
+    from newsletter_archive.errors import ArchiveError
+
+    claude_dir.mkdir(parents=True)
+    mine = claude_dir / "ask-coach.md"
+    mine.write_text("my own command\n", encoding="utf-8")
+    with pytest.raises(ArchiveError, match="wasn't written by `archive`; use --force"):
+        mcp_server.install_command()
+    assert mine.read_text(encoding="utf-8") == "my own command\n"
+    assert mcp_server.install_command(force=True) == (mine, "updated")
+
+
+def test_commands_dir_defaults_to_home(tmp_path, monkeypatch):
+    monkeypatch.delenv("CLAUDE_CONFIG_DIR", raising=False)
+    monkeypatch.setenv("HOME", str(tmp_path))
+    assert mcp_server.commands_dir() == tmp_path / ".claude" / "commands"
 
 
 # -- with a store ------------------------------------------------------------------------------
@@ -242,11 +395,15 @@ def test_archive_mcp_over_stdio_keeps_stdout_for_the_protocol(cfg, tmp_path, pg_
 
     async def go():
         async with Client(params, read_timeout_seconds=60) as client:
+            assert client.server_info.name == "leadership-coach"
             names = [t.name for t in (await client.list_tools()).tools]
-            return names, await client.call_tool("search", {"query": "bar raiser", "limit": 2})
+            asks = [p.name for p in (await client.list_prompts()).prompts]
+            prompt = await client.get_prompt("ask", {"question": "how do I hire well?"})
+            return names, asks, prompt, await client.call_tool("search", {"query": "bar raiser", "limit": 2})
 
-    names, result = asyncio.run(go())
+    names, asks, prompt, result = asyncio.run(go())
     assert names == ["search"] and not result.is_error  # any stray stdout would break the protocol
+    assert asks == ["ask"] and prompt.messages[0].content.text.startswith("Question: how do I hire well?")
     data = result.structured_content
     assert not data["semantic"] and "GEMINI_API_KEY" in " ".join(data["notes"])
     logs = list((cfg.output_dir / "logs").glob("mcp-*.log"))

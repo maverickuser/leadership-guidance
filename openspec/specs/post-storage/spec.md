@@ -1,7 +1,7 @@
 # post-storage Specification
 
 ## Purpose
-TBD - created by archiving change add-newsletter-archive. Update Purpose after archive.
+Where and how posts are kept on disk: the raw pages, the extracted Markdown, the manifest and the run logs, all in the private data folder.
 ## Requirements
 ### Requirement: Folder layout
 The system SHALL store data under `output_dir` (default `data`) as `manifest.json`, `raw/{slug}.html`, `posts/{slug}.json` and `logs/run-{timestamp}.log`.

@@ -1,7 +1,7 @@
 # post-fetching Specification
 
 ## Purpose
-TBD - created by archiving change add-newsletter-archive. Update Purpose after archive.
+Downloading post pages politely with the subscriber's own cookie: one request at a time, at least 2 seconds apart, never bypassing the paywall.
 ## Requirements
 ### Requirement: Authenticate with the user's cookie
 The system SHALL send the value of `NEWSLETTER_COOKIE` from `.env` as the `Cookie` header and the configured `user_agent` as `User-Agent` on every request to the site. The system MUST NOT attempt to bypass the paywall by any other means.
