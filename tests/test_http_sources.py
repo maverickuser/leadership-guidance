@@ -55,13 +55,16 @@ def test_shared_limiter_spaces_requests_across_sites(tmp_path, clock, delay):
     assert gaps == [pytest.approx(delay)] * 3
 
 
-def test_retries_on_one_site_count_against_the_shared_limiter(cfg, clock):
-    t = FakeTransport(clock=clock).add(f"{A}/1/", 503, 200).add(f"{B}/p/1", 200)
+def test_retries_on_one_site_count_against_the_shared_limiter(tmp_path, clock):
+    # delay 5 is longer than the 2 s backoff, so only the shared limiter can explain b's wait
+    cfg = make_config(tmp_path, delay_seconds=5.0)
+    t = FakeTransport(clock=clock, request_seconds=0.5).add(f"{A}/1/", 503, 200).add(f"{B}/p/1", 200)
     limiter = RateLimiter(cfg.delay_seconds, clock.sleep, clock.clock)
     a, b = two_clients(cfg, t, clock, limiter)
-    a.get(f"{A}/1/")  # a 503, then a retry after backoff
+    a.get(f"{A}/1/")  # a 503, then a retry
     b.get(f"{B}/p/1")
-    assert t.calls[2].at - t.calls[1].at >= cfg.delay_seconds
+    retry_end = t.calls[1].at + 0.5
+    assert t.calls[2].at - retry_end == pytest.approx(5.0)
 
 
 def test_separate_limiters_dont_wait_for_each_other(cfg, clock):
@@ -100,10 +103,36 @@ def test_a_client_without_a_cookie_sends_none(cfg, clock):
     assert "Cookie" not in t.calls[0].headers
 
 
-def test_limiter_first_request_does_not_wait(clock):
+def test_limiter_waits_only_for_the_rest_of_the_gap(clock):
     limiter = RateLimiter(2.0, clock.sleep, clock.clock)
     limiter.wait()
     limiter.done()
     clock.now += 0.5
     limiter.wait()
     assert clock.sleeps == [1.5]
+
+
+def test_another_sites_client_never_gets_the_configs_cookie(cfg, clock):
+    # cfg carries the main site's cookie; a client for site B built without one must send none
+    t = FakeTransport(clock=clock).add(f"{B}/p/1", 200)
+    c = Client(cfg, transport=t, sleep=clock.sleep, clock=clock.clock, base_url=B)
+    c.get(f"{B}/p/1")
+    assert "Cookie" not in t.calls[0].headers and not c.has_cookie
+
+
+def test_fetch_and_discover_use_the_clients_site(cfg, clock):
+    from newsletter_archive.discover import run_discover
+    from newsletter_archive.fetch import run_fetch
+    from newsletter_archive.models import Manifest
+
+    from .sitebuilder import ghost_site
+
+    t = FakeTransport(clock=clock)
+    ghost_site(t, B, ["a"])
+    c = Client(cfg, transport=t, sleep=clock.sleep, clock=clock.clock, base_url=B, cookie=Secret(B_COOKIE))
+    m = Manifest()
+    run_discover(c, cfg, m)
+    run_fetch(c, cfg, m)
+    assert t.urls()[0] == f"{B}/sitemap.xml" and f"{B}/a/" in t.urls()
+    assert all(u.startswith(B) for u in t.urls())
+    assert all(call.headers["Cookie"] == B_COOKIE for call in t.calls)

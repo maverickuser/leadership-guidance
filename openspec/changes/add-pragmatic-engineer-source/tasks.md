@@ -27,7 +27,7 @@
 
 ## 2. Shared rate limiter and per-source HTTP client (PR 2)
 
-- [x] 2.1 `RateLimiter` (delay, clock, sleep) shared by clients; retries and redirect hops count against it
+- [x] 2.1 `RateLimiter` (delay, clock, sleep) shared by clients; retries count against it, and a request's redirect hops stay within its one slot (post-fetching / Fetch canonical URLs)
 - [x] 2.2 `Client` takes a base URL and cookie per instance; the cookie is sent only to that origin
 - [x] 2.3 Tests: two clients keep ≥ delay between all requests (fake clock); one client's cookie never reaches the other's host
 

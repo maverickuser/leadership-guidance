@@ -1,8 +1,8 @@
 """The only way the archive talks to the network.
 
-One Client per run. It owns politeness (one request at a time, a minimum gap
-between requests), retries, redirects and the Cookie header. It never logs
-request or response headers.
+One Client per site. Clients share a RateLimiter, which owns politeness (a minimum gap
+between requests, which the archive makes one after another); each Client owns its
+retries, redirects and Cookie header. It never logs request or response headers.
 """
 
 from __future__ import annotations
@@ -116,7 +116,8 @@ class RateLimiter:
     """Keeps requests at least `delay` seconds apart, measured from the end of the previous one.
 
     Every client that shares one limiter shares that spacing, so a run over several sites
-    still makes one request at a time.
+    keeps the gap between all of its requests. It spaces requests made one after another,
+    as the archive makes them; it is not a lock for concurrent callers.
     """
 
     def __init__(
@@ -161,16 +162,26 @@ class Client:
         base_url: str | None = None,
         cookie: Secret | None = None,
     ) -> None:
-        """base_url and cookie default to the config's; limiter defaults to a new one of its own."""
+        """Without base_url the client is for the config's site and uses its cookie. With
+        base_url it sends only the cookie passed here (none if omitted), so one site's cookie
+        never reaches another. The limiter defaults to a new one of its own."""
         self.config = config
         self._transport = transport or RequestsTransport()
         self._sleep = sleep
         self._clock = clock
         self.limiter = limiter or RateLimiter(config.delay_seconds, sleep, clock)
         self.base_url = base_url or config.base_url
-        self._cookie = cookie if cookie is not None else config.cookie
+        if cookie is not None:
+            self._cookie = cookie
+        else:
+            self._cookie = config.cookie if base_url is None else Secret(None)
         self._base_origin = origin(self.base_url)
         self.request_count = 0  # HTTP exchanges, including redirect hops and retries
+
+    @property
+    def has_cookie(self) -> bool:
+        """Whether this client has a cookie to send to its site."""
+        return bool(self._cookie)
 
     # -- public -------------------------------------------------------------
 
@@ -191,8 +202,10 @@ class Client:
                 self.limiter.done()
                 raise
             except TransportTimeout:
+                self.limiter.done()
                 reason, status = "timeout", None
             except TransportConnectionError as e:
+                self.limiter.done()
                 reason, status = f"connection error ({e})", None
             else:
                 self.limiter.done()
@@ -202,7 +215,6 @@ class Client:
                 if resp.status < 500:
                     raise FetchError(url, f"HTTP {resp.status}", status=resp.status, attempts=attempt + 1)
                 reason, status = f"HTTP {resp.status}", resp.status
-            self.limiter.done()
             if attempt == attempts - 1:
                 break
             wait = BACKOFF_SECONDS[attempt]
