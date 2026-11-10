@@ -128,6 +128,8 @@ class Outcome:
     reranked: bool
     scores: dict[str, tuple[float, float]]  # stage -> (recall@10, reciprocal rank); missing stages left out
     missing: tuple[str, ...]  # expected posts not in the final top 10
+    rankings: dict[str, tuple[str, ...]] = field(default_factory=dict)  # stage -> posts, best first
+    hits: tuple[str, ...] = ()  # passage and summary ids search found, best first
 
 
 @dataclass
@@ -277,15 +279,23 @@ def evaluate(
                 "combined": resp.semantic,
                 "reranked": resp.reranked,
             }
-            scores = {}
+            scores, rankings = {}, {}
             for stage in STAGES:
                 if ran[stage]:
                     ranking = post_ranking(trace[stage], post_of)
+                    rankings[stage] = tuple(ranking)
                     scores[stage] = (recall_at(ranking, q.expected), reciprocal_rank(ranking, q.expected))
             final = post_ranking([r.id for r in resp.results], post_of)
+            rankings[RETURNED] = tuple(final)
             scores[RETURNED] = (recall_at(final, q.expected), reciprocal_rank(final, q.expected))
             missing = tuple(e for e in q.expected if e not in final[:K])
-            outcome = Outcome(q, summaries, seconds, resp.semantic, resp.reranked, scores, missing)
+            order = [r.id for r in resp.results] + [
+                h for st in reversed(STAGES) if ran[st] for h in trace[st]
+            ]
+            hits = tuple(dict.fromkeys(order))
+            outcome = Outcome(
+                q, summaries, seconds, resp.semantic, resp.reranked, scores, missing, rankings, hits
+            )
             report.outcomes.append(outcome)
             if on_question:
                 on_question(outcome)
@@ -426,6 +436,11 @@ def main(argv: Sequence[str] | None = None) -> int:  # pragma: no cover - real G
     parser.add_argument("--no-rerank", action="store_true", help="skip the re-ranker")
     parser.add_argument("--passages-only", action="store_true", help="skip the with-summaries variant")
     parser.add_argument("--json", type=Path, help="also write the full report as JSON")
+    parser.add_argument(
+        "--judge",
+        action="store_true",
+        help="also grade the results with Gemini and suggest changes to the expected lists",
+    )
     args = parser.parse_args(argv)
 
     try:
@@ -462,6 +477,19 @@ def main(argv: Sequence[str] | None = None) -> int:  # pragma: no cover - real G
         print(f"Error: {e}", file=sys.stderr)
         return 1
     print("\n".join(report.lines()))
+    out = report.to_dict()
+    status = 0
+    if args.judge:  # advisory: a judge failure never hides the report above
+        from . import judge
+
+        try:
+            verdict = judge.run(config, report, questions, generation)
+        except ArchiveError as e:
+            print(f"\nLLM judge failed (grades so far are saved): {e}", file=sys.stderr)
+            status = 1
+        else:
+            print("\n".join(verdict.lines()))
+            out["judge"] = verdict.to_dict()
     if args.json:
-        args.json.write_text(json.dumps(report.to_dict(), indent=2), encoding="utf-8")
-    return 0
+        args.json.write_text(json.dumps(out, indent=2), encoding="utf-8")
+    return status

@@ -240,6 +240,14 @@ The stages are keyword only, semantic only, combined, and re-ranked. Options:
 - `--rerank-top N` and `--no-rerank` compare re-ranking settings.
 - `--generation N` scores an index version that isn't live yet.
 - `--json FILE` saves the full report.
+- `--judge` also asks Gemini (`summaries.model`) to grade the results, so you can check your `expected` lists (below).
+
+**LLM judge (`--judge`).** For each question, Gemini grades the posts that any stage put in its top 10, plus your expected ones, from 0 (not relevant) to 3 (essential). It sees each post's title, summary and the passages search found. Grades are saved in `../newsletter-archive-data/eval-judgments.yaml` (never committed) and reused, so later runs grade only new posts or reworded questions. The report adds:
+- posts to consider adding to `expected` (graded 2–3 but not listed)
+- expected posts the judge rates weak (0–1), worth a second look
+- nDCG@10 per stage, a graded score that rewards the best posts ranking first
+
+The judge only advises: you decide what goes in the file, and the swap check below keeps using your lists. The first run makes about one request per question per 12 posts (a few cents); delete the grades file to grade everything again.
 
 A run costs a fraction of a cent (query embeddings only). While the file exists, `archive index --refresh` and `--swap` compare a new index version with the live one, and won't switch if it scores more than 2 points worse unless you pass `--force`.
 

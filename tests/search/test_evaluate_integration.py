@@ -241,3 +241,28 @@ def test_trace_records_each_stage(cfg):
     assert set(trace) == {"keyword", "semantic", "combined", "reranked", "post_of"}
     assert trace["reranked"] and trace["post_of"][trace["keyword"][0]] == "hiring"
     assert resp.results[0].id in trace["reranked"]
+
+
+def test_outcomes_keep_rankings_and_hits_for_the_judge(cfg):
+    report = evaluate(make_service(cfg), QUESTIONS[:1], variants=(True,))
+    [o] = report.outcomes
+    assert set(o.rankings) == {"keyword", "semantic", "combined", "reranked", "returned"}
+    assert o.rankings["keyword"][0] == "hiring" and o.hits and len(set(o.hits)) == len(o.hits)
+
+
+def test_load_candidates_shows_found_passages_first(cfg):
+    from newsletter_archive.search.judge import load_candidates
+
+    with db.connect(cfg, "reader") as conn:
+        gen = db.active_generation(conn)
+        ids = [
+            r[0]
+            for r in conn.execute(f"SELECT passage_id FROM {gen.schema}.passages ORDER BY n DESC").fetchall()
+        ]
+        found = load_candidates(
+            conn, gen.schema, ["hiring", "career", "nope"], [i for i in ids if i.startswith("career")]
+        )
+    assert set(found) == {"hiring", "career"}
+    hiring = found["hiring"]
+    assert hiring.title and hiring.summary and 1 <= len(hiring.passages) <= 2
+    assert "bar raiser" in " ".join(hiring.passages)

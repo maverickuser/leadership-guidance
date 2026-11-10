@@ -1,8 +1,9 @@
 """Evaluate search quality on your own questions: recall@10 and MRR per stage.
 
-Run: python scripts/eval_search.py [--config config.yaml] [--generation N] [--rerank-top N]
+Run: python scripts/eval_search.py [--config config.yaml] [--generation N] [--rerank-top N] [--judge]
 Questions: <output_dir>/eval-queries.yaml (personal, never committed). See lld.md §13.
 Calls the Gemini API once per question and variant (query embeddings only; a fraction of a cent).
+--judge also has Gemini grade the results (search/judge.py; grades saved in eval-judgments.yaml).
 """
 
 import sys
