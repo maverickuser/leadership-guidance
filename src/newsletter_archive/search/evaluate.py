@@ -64,7 +64,8 @@ class Question:
 def load_questions(path: Path) -> list[Question]:
     if not path.exists():
         raise EvalFileError(
-            f"no evaluation file at {path}; see openspec/changes/add-hybrid-search/lld.md §13"
+            f"no evaluation file at {path}; "
+            "see openspec/changes/archive/2026-11-10-add-hybrid-search/lld.md §13"
         )
     try:
         data = yaml.safe_load(path.read_text(encoding="utf-8")) or {}

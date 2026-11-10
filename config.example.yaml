@@ -12,7 +12,7 @@ user_agent: "newsletter-archive/0.1 (personal archive; one request every 2s)"
 # boilerplate_prefixes:
 #   - "Welcome to the Example newsletter"
 
-# Search (optional; these are the defaults). See openspec/changes/add-hybrid-search/lld.md.
+# Search (optional; these are the defaults). See openspec/changes/archive/2026-11-10-add-hybrid-search/lld.md.
 # search:
 #   embedding_model: gemini-embedding-2
 #   embedding_dimension: 3072
