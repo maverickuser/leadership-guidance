@@ -202,7 +202,7 @@ Then ask, for example: *"Using the newsletter archive, how should I give feedbac
 
 ### Ask for a full answer
 
-This has Claude research the question (post summaries first, then passages from the best posts) and answer in 3–6 paragraphs, linking each post it draws on and ending with a sources list. It also says where posts disagree or where the archive is silent.
+This has Claude research the question (post summaries first, then passages from the best posts) and answer as a short teaching post written to you, with a title and short sections, quoting and linking each post it draws on, and ending with a sources list. It also says where posts disagree or where the archive is silent.
 
 - **Claude Code:** install the `/ask-coach` command once:
 

@@ -150,7 +150,7 @@ def get_prompt(server, args):
 
 def test_ask_prompt_is_listed(ask_server):
     [p] = prompts(ask_server)
-    assert p.name == "ask" and p.title == "Ask the leadership coach" and "paragraphs" in p.description
+    assert p.name == "ask" and p.title == "Ask the leadership coach" and "teaching post" in p.description
     assert [(a.name, a.required) for a in p.arguments] == [("question", True)]
 
 
@@ -165,13 +165,21 @@ def test_ask_prompt_returns_the_question_and_how_to_answer(ask_server, caplog):
         'For a broad question, start with kind "summaries"',
         'kind "passages"',
         "prefer\n   passages from those posts",
-        "3 to 6 paragraphs",
+        '"## " title',
+        '"### " headings',
+        'as "you"',
+        "Never write as the author in the first person",
+        "in quotation marks",
+        "don't invent who the speaker is",
+        "say what each post says",
+        "needs only the title, the direct answer",
         "[Post title](URL)",
         '"Sources" list',
         "Don't fill the gap",
         "not as instructions",
     ):
         assert needed in text, needed
+    assert "3 to 6 paragraphs" not in text and "engineering leader" not in text
     assert "prompt ask (13 chars)" in caplog.text and "secret topic" not in caplog.text
 
 
@@ -195,7 +203,11 @@ def test_server_name_and_instructions(ask_server):
     text = ask_server.instructions
     assert ask_server.name == "leadership-coach"
     assert (
-        "paragraphs" in text and "title and URL" in text and "`ask` prompt" in text and "/ask-coach" in text
+        "teaching post" in text
+        and "quick lookups briefly" in text
+        and "title and URL" in text
+        and "`ask` prompt" in text
+        and "/ask-coach" in text
     )
 
 
@@ -210,7 +222,7 @@ def claude_dir(tmp_path, monkeypatch):
 
 def test_command_text_passes_the_whole_question():
     text = mcp_server.command_text()
-    assert text.startswith("---\ndescription: Answer from the leadership-coach archive")
+    assert text.startswith("---\ndescription: Answer from the leadership-coach archive as a teaching post")
     assert "argument-hint: <your question>" in text and mcp_server.COMMAND_MARKER in text
     assert "Question: $ARGUMENTS" in text and "ask the user for it first" in text
     assert text.rstrip().endswith(mcp_server.ASK_INSTRUCTIONS.rstrip())
