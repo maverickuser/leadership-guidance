@@ -196,6 +196,12 @@ Claude Desktop: add this to `~/Library/Application Support/Claude/claude_desktop
 
 Then ask, for example: *"Using the newsletter archive, how should I give feedback to a senior engineer?"*
 
+**Ask for a full answer.** The server also offers an `ask` prompt. It has Claude research the question (post summaries first, then passages from the best posts) and answer in 3–6 paragraphs, linking each post it draws on and ending with a sources list. It also says where posts disagree or where the archive is silent.
+- Claude Code: `/mcp__newsletter-archive__ask how do I give implicit feedback?`
+- Claude Desktop: pick **ask** from the newsletter-archive prompts in the chat box menu, then type your question.
+
+The prompt only adds instructions: it doesn't search by itself and costs nothing extra.
+
 The `search` tool takes:
 - `query`
 - `limit` (1–30, default 10)
