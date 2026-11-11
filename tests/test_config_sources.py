@@ -117,3 +117,36 @@ def test_old_single_site_config_shows_the_entry_to_paste(tmp_path):
 def test_bad_cookie_names_its_variable(tmp_path):
     with pytest.raises(ConfigError, match="PRAGMATIC_ENGINEER_COOKIE contains a line break"):
         load(tmp_path, TWO, 'PRAGMATIC_ENGINEER_COOKIE="a=1\\nX: 2"\n')
+
+
+# spec: archive-cli / Secret handling (Cookie stays with its source)
+@pytest.mark.parametrize(
+    "text, message",
+    [
+        (TWO.replace("PRAGMATIC_ENGINEER_COOKIE", "NEWSLETTER_COOKIE"), "share cookie_env NEWSLETTER_COOKIE"),
+        (one(cookie_env="GEMINI_API_KEY"), "cookie_env GEMINI_API_KEY holds another secret"),
+        (one(cookie_env="ARCHIVE_DB_WRITER_PASSWORD"), "holds another secret, not a cookie"),
+    ],
+)
+def test_a_cookie_variable_belongs_to_one_newsletter_and_is_a_cookie(tmp_path, text, message):
+    with pytest.raises(ConfigError, match=message):
+        load(tmp_path, text)
+
+
+@pytest.mark.parametrize(
+    "text, message",
+    [
+        (one(id='"main\\n"'), "id must be lowercase"),  # a trailing newline is not part of a folder name
+        (one(cookie_env='"NEWSLETTER_COOKIE\\n"'), "cookie_env must be an environment variable name"),
+        (one(base_url='"https://"'), "name a site"),
+        (one(base_url='"https:///path"'), "name a site"),
+    ],
+)
+def test_whole_values_are_checked(tmp_path, text, message):
+    with pytest.raises(ConfigError, match=message):
+        load(tmp_path, text)
+
+
+def test_same_host_over_http_and_https_is_one_site(tmp_path):
+    with pytest.raises(ConfigError, match="same base_url site"):
+        load(tmp_path, TWO.replace("https://newsletter.example.org", "http://WWW.example.com"))

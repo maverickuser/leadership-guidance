@@ -116,47 +116,59 @@ def _execute(
     try:
         _refuse_old_layout(config)
         sources = config.sources
-        if "fetch" in stages and not all(s.cookie for s in sources):
-            raise MissingCookieError()
+        if "fetch" in stages:
+            without_cookie = [s for s in sources if not s.cookie]
+            if without_cookie:
+                raise MissingCookieError(without_cookie[0].cookie_env)
         with run_lock(config.lock_path):
             limiter: RateLimiter | None = None  # one for the whole run, shared by every newsletter
             for source in sources:
                 manifest = load_manifest(source.manifest_path)
                 client: Client | None = None
-                for stage in [s for s in stages if s != "index"]:
-                    log.info("== %s: %s%s", source.display_name, stage, " (dry run)" if dry_run else "")
-                    if stage in ("discover", "fetch") and client is None:
-                        client = make_client(config, source, limiter)
-                        limiter = client.limiter
-                    if stage == "discover":
-                        assert client is not None
-                        # `run` never limits discovery; `discover --limit N` caps new posts added
-                        result = run_discover(
-                            client,
-                            config,
-                            manifest,
-                            limit=limit if stages == ["discover"] else None,
-                            dry_run=dry_run,
-                            source=source,
-                        )
-                        summary.categories_incomplete |= bool(result.failed_categories)
-                    elif stage == "fetch":
-                        assert client is not None
-                        fr = run_fetch(
-                            client, config, manifest, limit, refresh, dry_run, on_post=log_post, source=source
-                        )
-                        summary.fetched += fr.fetched
-                        summary.failed += fr.failed
-                        summary.skipped += fr.skipped
-                    elif stage == "extract":
-                        er = run_extract(
-                            config, manifest, limit, refresh, dry_run, on_post=log_post, source=source
-                        )
-                        summary.ok += er.ok
-                        summary.partial += er.partial
-                        summary.failed += er.failed
-                        summary.unchanged += er.unchanged
-                summary.discovered += len(manifest)
+                try:
+                    for stage in [s for s in stages if s != "index"]:
+                        log.info("== %s: %s%s", source.display_name, stage, " (dry run)" if dry_run else "")
+                        if stage in ("discover", "fetch") and client is None:
+                            client = make_client(config, source, limiter)
+                            limiter = client.limiter
+                        if stage == "discover":
+                            assert client is not None
+                            # `run` never limits discovery; `discover --limit N` caps new posts added
+                            result = run_discover(
+                                client,
+                                config,
+                                manifest,
+                                limit=limit if stages == ["discover"] else None,
+                                dry_run=dry_run,
+                                source=source,
+                            )
+                            summary.categories_incomplete |= bool(result.failed_categories)
+                        elif stage == "fetch":
+                            assert client is not None
+                            fr = run_fetch(
+                                client,
+                                config,
+                                manifest,
+                                limit,
+                                refresh,
+                                dry_run,
+                                on_post=log_post,
+                                source=source,
+                            )
+                            summary.fetched += fr.fetched
+                            summary.failed += fr.failed
+                            summary.skipped += fr.skipped
+                        elif stage == "extract":
+                            er = run_extract(
+                                config, manifest, limit, refresh, dry_run, on_post=log_post, source=source
+                            )
+                            summary.ok += er.ok
+                            summary.partial += er.partial
+                            summary.failed += er.failed
+                            summary.unchanged += er.unchanged
+                finally:
+                    # Counted even when a newsletter fails part-way, so the summary stays honest.
+                    summary.discovered += len(manifest)
             if "index" in stages:
                 log.info("== index%s", " (dry run)" if dry_run else "")
                 code = max(code, _index_stage(config, index_options or IndexOptions(), stages))
@@ -318,7 +330,7 @@ def migrate(
     logging.basicConfig(level=logging.DEBUG if verbose else logging.WARNING)
     try:
         result = run_migrate(cfg, source, dry_run=dry_run)
-    except ArchiveError as e:
+    except (ArchiveError, OSError) as e:
         typer.echo(f"Error: {e}", err=True)
         raise typer.Exit(1) from None
     for line in result.lines(cfg.source(source), dry_run):

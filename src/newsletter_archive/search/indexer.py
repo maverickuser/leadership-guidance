@@ -227,6 +227,8 @@ def load_posts(config: Config) -> tuple[dict[str, Post], dict[str, str], set[str
             path = source.post_path(entry.slug)
             try:
                 record = json.loads(Path(path).read_text(encoding="utf-8"))
+                if not isinstance(record, dict):
+                    raise ArchiveError("not a post record")
                 if record.get("schema_version") == 1:
                     raise ArchiveError("an old-layout post file; run `archive migrate`")
                 validate_post(record)

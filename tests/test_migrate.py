@@ -324,3 +324,30 @@ def test_other_commands_refuse_the_old_layout(env):
     r = env.run("extract")
     assert r.exit_code == 1 and "archive migrate" in r.output
     assert (env.data / "posts" / "alpha.json").exists()
+
+
+@pytest.mark.parametrize(
+    "content, message",
+    [("not json {", "is not valid JSON"), ("[1, 2]", "is not a post record")],
+)
+def test_corrupt_post_file_stops_before_deleting(cfg, content, message):
+    out = cfg.output_dir
+    old_archive(out)
+    (out / "posts" / "beta.json").write_text(content)
+    with pytest.raises(ArchiveError, match=f"posts/beta.json {message}"):
+        migrate(cfg, "main")
+    assert (out / "manifest.json").exists() and (out / "posts" / "alpha.json").exists()
+
+
+def test_cli_reports_file_errors_without_a_traceback(env, monkeypatch):
+    import newsletter_archive.migrate as migrate_module
+
+    old_archive(env.data)
+
+    def disk_full(*a, **k):
+        raise OSError(28, "No space left on device")
+
+    monkeypatch.setattr(migrate_module, "migrate", disk_full)
+    r = env.run("migrate", "--source", "main")
+    assert r.exit_code == 1 and "Error:" in r.output and "No space left" in r.output
+    assert "Traceback" not in r.output

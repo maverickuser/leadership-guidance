@@ -5,6 +5,7 @@ import pytest
 from newsletter_archive.errors import MISSING_COOKIE_MESSAGE, NOT_SIGNED_IN_MESSAGE
 
 from .cli_helpers import BASE, SINGLE_SOURCE_CONFIG, CliEnv
+from .conftest import TEST_COOKIE
 from .sitebuilder import ghost_site
 
 SLUGS = ["p1", "p2", "p3", "p4", "p5", "p6", "p7"]
@@ -87,7 +88,7 @@ def test_missing_cookie_exit_1(tmp_path, monkeypatch):
     e = CliEnv(tmp_path, monkeypatch, cookie="")
     ghost_site(e.transport, BASE, SLUGS)
     r = e.run("run", "--limit", "1")
-    assert r.exit_code == 1 and MISSING_COOKIE_MESSAGE in r.output
+    assert r.exit_code == 1 and MISSING_COOKIE_MESSAGE.format(env="NEWSLETTER_COOKIE") in r.output
     assert e.transport.calls == []
 
 
@@ -291,3 +292,36 @@ def test_mcp_command_reports_start_up_errors(env, monkeypatch):
     monkeypatch.setattr(mcp_server, "serve", fail)
     r = env.run("mcp")
     assert r.exit_code == 1 and "ARCHIVE_DB_READER_PASSWORD" in r.output
+
+
+TWO_SOURCE_CONFIG = SINGLE_SOURCE_CONFIG + (
+    "  - id: pe\n    name: The Pragmatic Engineer\n    platform: ghost\n"
+    "    base_url: https://newsletter.example.org\n    cookie_env: PE_COOKIE\n"
+)
+
+
+def two_sources(tmp_path, monkeypatch, pe_cookie=TEST_COOKIE, **site):
+    e = CliEnv(tmp_path, monkeypatch)
+    e.config.write_text(TWO_SOURCE_CONFIG, encoding="utf-8")
+    (tmp_path / ".env").write_text(
+        f"NEWSLETTER_COOKIE={TEST_COOKIE}\nPE_COOKIE={pe_cookie}\n", encoding="utf-8"
+    )
+    ghost_site(e.transport, BASE, SLUGS)
+    ghost_site(e.transport, "https://newsletter.example.org", ["q1", "q2"], **site)
+    return e
+
+
+# spec: newsletter-sources / One source failing (One cookie expired)
+def test_missing_cookie_names_the_newsletters_variable(tmp_path, monkeypatch):
+    e = two_sources(tmp_path, monkeypatch, pe_cookie="")
+    r = e.run("run", "--limit", "1")
+    assert r.exit_code == 1 and "PE_COOKIE is not set" in r.output and "NEWSLETTER_COOKIE" not in r.output
+    assert e.transport.calls == []
+
+
+def test_summary_counts_every_newsletter_even_when_one_fails(tmp_path, monkeypatch):
+    e = two_sources(tmp_path, monkeypatch, signed_out={"q1"})
+    r = e.run("run", "--limit", "3")
+    assert r.exit_code == 2 and NOT_SIGNED_IN_MESSAGE in r.output
+    assert "== The Pragmatic Engineer: fetch" in r.output
+    assert "Summary: discovered=9 fetched=3" in r.output  # 7 from the first site, 2 from the second

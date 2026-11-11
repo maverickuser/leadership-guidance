@@ -148,7 +148,7 @@ Archives made before newsletters had their own folders keep `manifest.json`, `ra
 4. Update `output_dir` in `config.yaml`, `ARCHIVE_DB_DATA` in `.env` (if set) and the launchd log path (if set).
 5. Convert `config.yaml` to the `sources:` list. Any command prints the entry to paste in.
 6. Run `archive migrate --source <id> --dry-run` to see what will move, then `archive migrate --source <id>`.
-7. Start the database with `docker compose up -d --wait db`, then run `archive index --dry-run` (it should cost about $0) and `archive index`.
+7. Start the database with `docker compose up -d --wait db`, then run `archive index --dry-run --allow-mass-delete` and `archive index --allow-mass-delete`. Every post has a new id, so the index drops every old row and adds the new ones (that is why the deletion guard has to be switched off for this one run). The embeddings come from the cache, so it should cost about $0.
 
 Post ids become `<id>/<slug>`, and the ids in your eval files are updated automatically. If the move stops partway, run it again; nothing old is deleted until every new file is in place.
 

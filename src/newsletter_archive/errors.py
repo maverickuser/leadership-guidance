@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-MISSING_COOKIE_MESSAGE = "NEWSLETTER_COOKIE is not set. Copy your Cookie header into .env (see README)."
+MISSING_COOKIE_MESSAGE = "{env} is not set. Copy your Cookie header into .env (see README)."
 NOT_SIGNED_IN_MESSAGE = "Your cookie looks expired. Copy a fresh Cookie header into .env."
 
 
@@ -19,8 +19,9 @@ class ConfigError(ArchiveError):
 class MissingCookieError(ArchiveError):
     exit_code = 1
 
-    def __init__(self) -> None:
-        super().__init__(MISSING_COOKIE_MESSAGE)
+    def __init__(self, env: str = "NEWSLETTER_COOKIE") -> None:
+        """`env` is the .env variable the newsletter's cookie is read from (its `cookie_env`)."""
+        super().__init__(MISSING_COOKIE_MESSAGE.format(env=env))
 
 
 class NotSignedInError(ArchiveError):

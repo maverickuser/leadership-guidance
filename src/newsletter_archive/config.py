@@ -35,8 +35,10 @@ DEFAULTS: dict[str, Any] = {
     "search": None,  # optional mapping; see SearchConfig
 }
 
-SOURCE_ID_RE = re.compile(r"^[a-z0-9][a-z0-9-]*$")
-COOKIE_ENV_RE = re.compile(r"^[A-Z][A-Z0-9_]*$")
+SOURCE_ID_RE = re.compile(r"[a-z0-9][a-z0-9-]*")
+COOKIE_ENV_RE = re.compile(r"[A-Z][A-Z0-9_]*")
+# Variables that hold other secrets; a source's cookie_env may never point at one of them.
+NON_COOKIE_ENVS = frozenset({GEMINI_KEY_ENV, DB_WRITER_PASSWORD_ENV, DB_READER_PASSWORD_ENV, DB_PORT_ENV})
 # Names a source folder can't take: shared items at the top of output_dir, and the folders of
 # the old single-newsletter layout (so `archive migrate` can never collide with a source).
 RESERVED_SOURCE_IDS = ("logs", "models", "postgres", "posts", "raw")
@@ -441,7 +443,7 @@ def _parse_sources(
             raise ConfigError(f"{where} needs {', '.join(missing)}")
         sid = str(item["id"])
         where = f"source {sid!r}"
-        if not SOURCE_ID_RE.match(sid):
+        if not SOURCE_ID_RE.fullmatch(sid):
             raise ConfigError(f"{where}: id must be lowercase letters, digits and hyphens")
         if sid in RESERVED_SOURCE_IDS:
             raise ConfigError(
@@ -453,11 +455,14 @@ def _parse_sources(
                 f"{where}: unknown platform {platform!r}; use one of: {', '.join(PLATFORM_NAMES)}"
             )
         base_url = str(item["base_url"]).rstrip("/")
-        if not base_url.startswith(("http://", "https://")):
-            raise ConfigError(f"{where}: base_url must start with http:// or https://")
+        if not base_url.startswith(("http://", "https://")) or not _site_host(base_url):
+            raise ConfigError(f"{where}: base_url must start with http:// or https:// and name a site")
         cookie_env = str(item["cookie_env"])
-        if not COOKIE_ENV_RE.match(cookie_env):
+        if not COOKIE_ENV_RE.fullmatch(cookie_env):
             raise ConfigError(f"{where}: cookie_env must be an environment variable name like {COOKIE_ENV}")
+        if cookie_env in NON_COOKIE_ENVS:
+            # Never send the API key or a database password to a website as a cookie.
+            raise ConfigError(f"{where}: cookie_env {cookie_env} holds another secret, not a cookie")
         cookie = Secret(clean_cookie(read_env(cookie_env)))
         if cookie and not _cookie_is_valid(cookie.reveal()):
             raise ConfigError(
@@ -485,18 +490,31 @@ def _parse_sources(
     return tuple(sources)
 
 
+def _site_host(base_url: str) -> str:
+    """The host part of a site URL, lowercased (`https://www.Example.com/x` -> `www.example.com`)."""
+    return base_url.split("://", 1)[-1].split("/", 1)[0].lower()
+
+
 def _check_sources(sources: tuple[SourceConfig, ...]) -> None:
-    """Ids and sites must be unique across sources."""
+    """Ids, sites and cookie variables must be unique across sources: one site gets one cookie,
+    and a cookie goes to one site."""
     seen_ids: set[str] = set()
-    seen_sites: dict[tuple[str, str], str] = {}
+    seen_sites: dict[str, str] = {}
+    seen_cookie_envs: dict[str, str] = {}
     for s in sources:
         if s.id in seen_ids:
             raise ConfigError(f"duplicate source id {s.id!r}")
         seen_ids.add(s.id)
-        site = (s.base_url.split("://", 1)[0], s.base_url.split("://", 1)[1].split("/", 1)[0].lower())
-        if site in seen_sites:
-            raise ConfigError(f"sources {seen_sites[site]!r} and {s.id!r} have the same base_url site")
-        seen_sites[site] = s.id
+        host = _site_host(s.base_url)  # http and https count as the same site
+        if host in seen_sites:
+            raise ConfigError(f"sources {seen_sites[host]!r} and {s.id!r} have the same base_url site")
+        seen_sites[host] = s.id
+        if s.cookie_env in seen_cookie_envs:
+            raise ConfigError(
+                f"sources {seen_cookie_envs[s.cookie_env]!r} and {s.id!r} share cookie_env "
+                f"{s.cookie_env}; each newsletter needs its own cookie variable"
+            )
+        seen_cookie_envs[s.cookie_env] = s.id
 
 
 def _cookie_is_valid(value: str) -> bool:

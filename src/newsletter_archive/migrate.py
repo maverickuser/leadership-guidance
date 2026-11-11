@@ -58,7 +58,12 @@ class MigrateResult:
         for kind, paths in self.examples.items():
             out += [f"  {kind}: {p}" for p in paths]
         if not dry_run:
-            out.append("Next: start the database, then `archive index --dry-run` and `archive index`.")
+            out.append(
+                "Next: start the database, then `archive index --dry-run --allow-mass-delete` and "
+                "`archive index --allow-mass-delete`. Every post gets a new id, so the index drops "
+                "the old rows and adds the new ones; the embeddings come from the cache, so it costs "
+                "about $0."
+            )
         return out
 
 
@@ -187,8 +192,15 @@ def migrate(config: Config, source_id: str, dry_run: bool = False) -> MigrateRes
                 shutil.copy2(path, tmp)
                 tmp.replace(target)
         for path in posts:
-            record = _v2_record(json.loads(path.read_text(encoding="utf-8")), source, path.stem)
-            write_json_atomic(source.post_path(path.stem), record)
+            try:
+                old = json.loads(path.read_text(encoding="utf-8"))
+            except ValueError as e:
+                raise ArchiveError(
+                    f"posts/{path.name} is not valid JSON ({e}); nothing was deleted"
+                ) from None
+            if not isinstance(old, dict):
+                raise ArchiveError(f"posts/{path.name} is not a post record; nothing was deleted")
+            write_json_atomic(source.post_path(path.stem), _v2_record(old, source, path.stem))
         if new_evals is not None:
             write_text_atomic(evals, new_evals)
         if graded:

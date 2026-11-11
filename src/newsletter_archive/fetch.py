@@ -80,7 +80,7 @@ def run_fetch(
     # The client knows its own site and cookie; a dry run may have no client.
     base_url = client.base_url if client is not None else source.base_url
     if not (client.has_cookie if client is not None else source.cookie):
-        raise MissingCookieError()
+        raise MissingCookieError(source.cookie_env)
     platform = platform or get_platform(source.platform)
     result = FetchResult()
     todo, skipped = select_for_fetch(manifest, source, limit, refresh)
