@@ -182,7 +182,7 @@ def test_source_coverage_and_suggested_threshold():
         [
             cross("both-shown", ["main/a", "pe/b"], ["main/a", "pe/b"], [0.91, 0.42]),
             cross("pe-missing", ["main/a", "pe/c"], ["main/a", "main/x"], [0.88]),
-            cross("one-newsletter", ["main/a"], ["main/a"], [0.97]),  # not a cross-newsletter question
+            cross("one-newsletter", ["main/a"], ["main/a"], [0.07]),  # not cross-newsletter: not used
             cross("passages-only", ["main/a", "pe/b"], [], summaries=False),  # summaries variant only
         ]
     )
@@ -191,6 +191,12 @@ def test_source_coverage_and_suggested_threshold():
     text = "\n".join(report.lines())
     assert "source coverage: 0.50 of 2 cross-newsletter questions" in text
     assert "source_min_score suggested by this run: 0.40" in text
+
+
+def test_ids_from_before_the_move_are_left_out():
+    report = Report([cross("mixed", ["old-slug", "main/a"], ["main/a"], [0.2])])
+    assert report.source_coverage() is None  # one newsletter once the old id is left out
+    assert report.suggested_source_min_score() is None
 
 
 def test_no_cross_newsletter_questions_or_reranking_reports_nothing():

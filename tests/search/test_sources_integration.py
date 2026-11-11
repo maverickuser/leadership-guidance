@@ -253,10 +253,28 @@ def test_a_source_filter_turns_the_rule_off(cfg):
     assert sources_of(resp) == ["main"] * 5
 
 
-def test_without_the_reranker_a_strong_fused_match_qualifies(cfg):
+def test_without_the_reranker_the_rule_is_off(cfg, monkeypatch):
+    import newsletter_archive.search.service as service_module
+
+    def never(*a, **k):
+        raise AssertionError("no re-ranker scores: nothing may be forced in")
+
+    monkeypatch.setattr(service_module, "represent_sources", never)
     build(cfg, lopsided())
     resp = ask(service(cfg), "delegate outcomes", limit=3, kind="passages")
-    assert not resp.reranked and PE in sources_of(resp) and len(resp.results) == 3
+    assert not resp.reranked and len(resp.results) == 3
+
+
+def test_a_newsletter_below_the_rerank_cut_still_gets_its_chance(cfg):
+    cfg = replace(cfg, search=replace(cfg.search, rerank_top=2))
+    build(cfg, lopsided())
+    for pe_score, shown in ((0.6, True), (0.1, False)):
+        trace: dict = {}
+        svc = service(cfg, reranker=ScriptedReranker(pe_score))
+        resp = svc.search(SearchRequest.create("delegate outcomes", limit=2, kind="passages"), trace=trace)
+        combined = trace["combined"]
+        assert not any(p.startswith(f"{PE}/") for p in combined[:2])  # below the re-rank cut
+        assert (PE in sources_of(resp)) is shown and len(resp.results) == 2
 
 
 def test_one_newsletter_only_is_unchanged(cfg):

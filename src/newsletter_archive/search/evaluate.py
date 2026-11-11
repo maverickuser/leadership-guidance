@@ -139,6 +139,11 @@ def source_of(post_id: str) -> str:
     return post_id.split("/", 1)[0] if "/" in post_id else ""
 
 
+def _sources(post_ids: Iterable[str]) -> set[str]:
+    """The newsletters among post ids, leaving out ids from before the move."""
+    return {s for s in map(source_of, post_ids) if s}
+
+
 @dataclass
 class Report:
     outcomes: list[Outcome] = field(default_factory=list)
@@ -165,19 +170,21 @@ class Report:
         """(share, questions) over questions whose expected posts span several newsletters: the
         share where every one of those newsletters appears in the returned top 10 (with
         summaries). None when there are no such questions."""
-        cross = [o for o in self.outcomes_for(True) if len({source_of(e) for e in o.question.expected}) > 1]
+        cross = self._cross_newsletter()
         if not cross:
             return None
-        covered = [
-            {source_of(e) for e in o.question.expected} <= {source_of(p) for p in o.rankings[RETURNED][:K]}
-            for o in cross
-        ]
+        covered = [_sources(o.question.expected) <= _sources(o.rankings.get(RETURNED, ())[:K]) for o in cross]
         return sum(covered) / len(cross), len(cross)
 
+    def _cross_newsletter(self) -> list[Outcome]:
+        return [o for o in self.outcomes_for(True) if len(_sources(o.question.expected)) > 1]
+
     def suggested_source_min_score(self) -> float | None:
-        """lld §9.3: the lowest re-ranker score among returned results from expected posts,
-        rounded down to 0.05; None when nothing was re-ranked."""
-        scores = [s for o in self.outcomes for s in o.expected_scores]
+        """lld §9.3: the lowest re-ranker score among returned results from expected posts in
+        the cross-newsletter questions, rounded down to 0.05; None when nothing was re-ranked.
+        Measure with `search.source_min_score: 0`, so no expected result is held back by the
+        current value."""
+        scores = [s for o in self._cross_newsletter() for s in o.expected_scores]
         return math.floor(min(scores) * 20) / 20 if scores else None
 
     def best_stage(self) -> str:

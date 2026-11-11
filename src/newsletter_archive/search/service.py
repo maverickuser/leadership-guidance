@@ -404,12 +404,26 @@ class SearchService:
             # Re-rank at least as many as were asked for; when re-ranked, only re-ranked
             # candidates are returned, so every score is on the same scale.
             top = order[: max(self.s.rerank_top, req.limit)]
+            # Every newsletter represented: also score each missing newsletter's best candidate,
+            # so one just below the re-rank cut still gets its chance (kept only if it qualifies).
+            shown = {rows[p].post.source for p in top}
+            extra = [
+                p
+                for src in (represented if len(represented) > 1 else [])
+                if src not in shown
+                for p in [next((q for q in order if rows[q].post.source == src), None)]
+                if p is not None
+            ]
+            batch = top + extra
             try:
-                new = [float(x) for x in self.reranker.score(req.query, [rows[p].rerank_text() for p in top])]
-                if len(new) != len(top):
+                new = [
+                    float(x) for x in self.reranker.score(req.query, [rows[p].rerank_text() for p in batch])
+                ]
+                if len(new) != len(batch):
                     raise RerankerUnavailableError("re-ranker returned the wrong number of scores")
-                scores.update(zip(top, new, strict=True))
-                order = sorted(top, key=lambda p: -scores[p])  # stable: ties keep combined order
+                scores.update(zip(batch, new, strict=True))
+                kept_extra = [p for p in extra if scores[p] >= self.s.source_min_score]
+                order = sorted(top + kept_extra, key=lambda p: -scores[p])  # stable: ties keep combined order
                 reranked = True
             except RerankerUnavailableError as e:
                 notes.append(f"results not re-ranked: {e}")
@@ -433,16 +447,15 @@ class SearchService:
             self.s.max_per_post,
             1,
         )
-        if len(represented) > 1:
-            fused_rank = {pid: i for i, pid in enumerate(f.passage_id for f in fused)}
-
-            def qualifies(p: str) -> bool:
-                if reranked:
-                    return scores[p] >= self.s.source_min_score
-                return fused_rank[p] < self.s.candidates  # not re-ranked: a strong fused match
-
+        if reranked and len(represented) > 1:
+            # Only re-ranked scores say "relevant"; without them the rule is off, so a weak
+            # keyword match is never forced in.
             kept = represent_sources(
-                diverse, req.limit, lambda p: rows[p].post.source, qualifies, represented
+                diverse,
+                req.limit,
+                lambda p: rows[p].post.source,
+                lambda p: scores[p] >= self.s.source_min_score,
+                represented,
             )
         else:
             kept = diverse[: req.limit]

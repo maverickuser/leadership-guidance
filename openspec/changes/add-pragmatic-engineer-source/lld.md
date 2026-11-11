@@ -172,9 +172,11 @@ for src in sources_in_generation - {r.source for r in top}:
         victim = last r in top whose source has > 1 result in top
         if victim: replace victim with best
 top.sort(by original rank)
-qualifies(r) = r.rerank_score >= source_min_score          when re-ranked
-             = r was among the first `candidates` fused    when not re-ranked
+qualifies(r) = r.rerank_score >= source_min_score          (re-ranked searches only)
 ```
+
+- **Changed in the PR (review):** without re-ranker scores the rule is off. A fused rank says nothing about relevance, so "among the first `candidates`" let weak keyword matches in. When re-ranking, each missing newsletter's best fused candidate is scored too, even below the `rerank_top` cut, and is kept only if it qualifies.
+- **Measuring `source_min_score`:** run the eval with `search.source_min_score: 0`, so no expected result is held back by the current value. Only the cross-newsletter questions count.
 
 - **Result content:** each result keeps its own score and rank. A swapped-in result shows its true (lower) score, so nothing is disguised.
 - **`source_min_score` default:** measured in the search PR. It's the lowest re-ranker score among expected results across the eval questions (including the new cross-newsletter ones), rounded down to 0.05, and recorded with the measurement in `config.py` and the PR.
