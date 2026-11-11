@@ -20,10 +20,10 @@
 
 ## 1. Platform interface (PR 1)
 
-- [ ] 1.1 `platforms/__init__.py`: `Platform` protocol and `PLATFORMS` registry (lld §4)
-- [ ] 1.2 `platforms/ghost.py`: move the Ghost-specific discovery, request URL, sign-in check, body cleaning, metadata and paywall code behind the protocol, with no behaviour change
-- [ ] 1.3 `Extracted` gains `categories` (None = keep the manifest's) and `paywalled`; `store.build_record` sets `status` from them
-- [ ] 1.4 Discovery, fetch and extract call the platform; every existing test passes unchanged
+- [x] 1.1 `platforms/__init__.py`: `Platform` protocol, `PLATFORM_NAMES` and a cached `get_platform(name)` registry (lld §4)
+- [x] 1.2 `platforms/ghost.py`: wrap today's Ghost discovery, request URL, sign-in check and extraction behind the protocol, unchanged (lld §4: "wraps today's code as is")
+- [x] 1.3 `Extracted` gains `categories` (None = keep the manifest's; `paywalled` already existed); `store.build_record` uses them
+- [x] 1.4 Discovery, fetch and extract call the platform; every existing test passes unchanged
 
 ## 2. Shared rate limiter and per-source HTTP client (PR 2)
 

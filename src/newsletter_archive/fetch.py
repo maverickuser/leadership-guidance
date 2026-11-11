@@ -10,6 +10,7 @@ from .config import Config
 from .errors import FetchError, MissingCookieError, NotSignedInError
 from .http import Client, to_base_host
 from .models import Manifest, ManifestEntry, PostCallback, no_callback, utc_now_iso
+from .platforms import Platform, get_platform
 from .store import save_manifest, write_text_atomic
 
 log = logging.getLogger("newsletter_archive.fetch")
@@ -31,7 +32,12 @@ def fetch_url(entry: ManifestEntry, base_url: str | None = None) -> str:
 
     With base_url, the request goes to base_url's scheme and host (e.g. a non-www sitemap
     link is fetched from www), which is the only origin the cookie is sent to."""
-    url = to_base_host(entry.url, base_url) if base_url else entry.url
+    return fetch_url_for(entry.url, base_url)
+
+
+def fetch_url_for(url: str, base_url: str | None = None) -> str:
+    """`fetch_url` for a bare URL: the Ghost platform's request URL."""
+    url = to_base_host(url, base_url) if base_url else url
     parts = urlsplit(url)
     path = parts.path if parts.path.endswith("/") else parts.path + "/"
     return urlunsplit((parts.scheme, parts.netloc, path, parts.query, ""))
@@ -58,8 +64,11 @@ def run_fetch(
     refresh: bool = False,
     dry_run: bool = False,
     on_post: PostCallback = no_callback,
+    platform: Platform | None = None,
 ) -> FetchResult:
     """Download each selected post's page into raw/, saving progress after every post.
+
+    The platform (default Ghost) decides the URL to request and how a signed-in page looks.
 
     Raises:
         MissingCookieError: no cookie is configured.
@@ -67,6 +76,7 @@ def run_fetch(
     """
     if not config.cookie:
         raise MissingCookieError()
+    platform = platform or get_platform("ghost")
     result = FetchResult()
     todo, skipped = select_for_fetch(manifest, config, limit, refresh)
     result.skipped = len(skipped)
@@ -76,12 +86,12 @@ def run_fetch(
     if dry_run:
         for entry in todo:
             result.would_fetch.append(entry.slug)
-            on_post(entry.slug, "fetch", "would-fetch", fetch_url(entry, config.base_url))
+            on_post(entry.slug, "fetch", "would-fetch", platform.request_url(entry.url, config.base_url))
         return result
 
     for entry in todo:
         try:
-            resp = client.get(fetch_url(entry, config.base_url))
+            resp = client.get(platform.request_url(entry.url, config.base_url))
             if resp.status != 200:
                 raise FetchError(resp.url, f"HTTP {resp.status}", status=resp.status)
         except FetchError as e:
@@ -91,7 +101,7 @@ def run_fetch(
             on_post(entry.slug, "fetch", "failed", e.reason)
             continue
 
-        if SIGNED_IN_MARKER not in resp.text:
+        if not platform.signed_in(resp.text):
             # Don't cache a signed-out page and don't touch the entry: stop right here.
             save_manifest(manifest, config.manifest_path)
             on_post(entry.slug, "fetch", "not-signed-in", None)

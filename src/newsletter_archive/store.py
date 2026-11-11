@@ -16,8 +16,8 @@ from typing import Any
 
 from .config import Config
 from .errors import ArchiveError, ExtractError
-from .extract import extract_post
 from .models import Extracted, Manifest, ManifestEntry, PostCallback, iso_utc, no_callback, utc_now_iso
+from .platforms import Platform, get_platform
 from .schema import SCHEMA_VERSION, validate_post
 
 log = logging.getLogger("newsletter_archive.store")
@@ -128,8 +128,11 @@ def mtime_iso(path: Path) -> str:
 
 
 def build_record(entry: ManifestEntry, ex: Extracted, fetched_at: str, min_word_count: int) -> dict[str, Any]:
-    """The JSON record for one post. It is `partial` if short or cut off by the paywall."""
+    """The JSON record for one post. It is `partial` if short or cut off by the paywall.
+
+    Categories come from the page when the platform reads them there, else from the manifest."""
     partial = ex.word_count < min_word_count or ex.paywalled
+    categories = ex.categories if ex.categories is not None else entry.categories
     return {
         "schema_version": SCHEMA_VERSION,
         "id": entry.slug,
@@ -138,7 +141,7 @@ def build_record(entry: ManifestEntry, ex: Extracted, fetched_at: str, min_word_
         "subtitle": ex.subtitle,
         "author": ex.author,
         "published_date": ex.published_date,
-        "categories": list(entry.categories),
+        "categories": list(categories),
         "word_count": ex.word_count,
         "summary": ex.summary,
         "sections": [asdict(s) for s in ex.sections],
@@ -160,12 +163,15 @@ class ExtractResult:
     would_write: list[str] = field(default_factory=list)
 
 
-def _stored_categories(path: Path) -> list[str] | None:
+def _stored_fields(path: Path) -> tuple[object, object]:
+    """(categories, status) of a saved post file, or (None, None) if it can't be read."""
     try:
-        cats = json.loads(path.read_text(encoding="utf-8")).get("categories")
-    except (OSError, json.JSONDecodeError, AttributeError):
-        return None
-    return cats if isinstance(cats, list) else None
+        stored = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return None, None
+    if not isinstance(stored, dict):
+        return None, None
+    return stored.get("categories"), stored.get("status")
 
 
 def run_extract(
@@ -175,8 +181,12 @@ def run_extract(
     refresh: bool = False,
     dry_run: bool = False,
     on_post: PostCallback = no_callback,
+    platform: Platform | None = None,
 ) -> ExtractResult:
-    """Extract every cached post into posts/{slug}.json. Reads data/raw/ only; no network."""
+    """Extract every cached post into posts/{slug}.json. Reads data/raw/ only; no network.
+
+    The platform (default Ghost) turns each saved page into content."""
+    platform = platform or get_platform("ghost")
     result = ExtractResult()
     candidates = manifest.ordered() if limit is None else manifest.ordered()[:limit]
     for entry in candidates:
@@ -184,7 +194,9 @@ def run_extract(
         if not raw.exists():
             continue
         try:
-            ex = extract_post(raw.read_text(encoding="utf-8"), entry.url, config.boilerplate_prefixes)
+            ex = platform.extract(
+                raw.read_text(encoding="utf-8"), entry.url, config.boilerplate_prefixes, config.min_word_count
+            )
             record = build_record(entry, ex, mtime_iso(raw), config.min_word_count)
             validate_post(record)
         except Exception as e:  # one bad page must not stop the run
@@ -202,7 +214,7 @@ def run_extract(
             not refresh
             and post_path.exists()
             and entry.content_hash == record["content_hash"]
-            and _stored_categories(post_path) == record["categories"]
+            and _stored_fields(post_path) == (record["categories"], record["status"])
         )
         status = record["status"]
         if status == "partial":
@@ -220,6 +232,7 @@ def run_extract(
             write_json_atomic(post_path, record)
             result.written += 1
         entry.status, entry.error, entry.content_hash = status, None, record["content_hash"]
+        entry.categories = list(record["categories"])
         save_manifest(manifest, config.manifest_path)
         on_post(entry.slug, "extract", status, "unchanged" if unchanged else None)
     return result

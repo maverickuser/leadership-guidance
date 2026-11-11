@@ -4,6 +4,7 @@ import os
 
 import pytest
 
+import newsletter_archive.platforms.ghost as ghost_platform
 import newsletter_archive.store as store
 from newsletter_archive.errors import ExtractError
 from newsletter_archive.models import Extracted, Manifest, ManifestEntry, Section
@@ -171,7 +172,7 @@ def test_extract_error_marks_failed_and_continues(cfg):
 def test_unexpected_exception_is_contained(cfg, monkeypatch):
     m = seed(cfg, ["a", "b"])
     calls = {"n": 0}
-    real = store.extract_post
+    real = ghost_platform.extract_post  # extraction goes through the Ghost platform
 
     def flaky(html, url, prefixes=()):
         calls["n"] += 1
@@ -179,7 +180,7 @@ def test_unexpected_exception_is_contained(cfg, monkeypatch):
             raise RuntimeError("parser exploded")
         return real(html, url, prefixes)
 
-    monkeypatch.setattr(store, "extract_post", flaky)
+    monkeypatch.setattr(ghost_platform, "extract_post", flaky)
     result = run_extract(cfg, m)
     assert result.failed == 1 and result.ok == 1
     assert "RuntimeError" in m.entries["a"].error
