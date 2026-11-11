@@ -78,7 +78,7 @@
 
 ## 8. Adding a newsletter and acceptance (PR 8)
 
-- [ ] 8.1 README: adding a newsletter (cookie, `sources` entry, `--limit 5` trial, `index --dry-run` cost, weekly job), publisher signals and the paid-Gemini note; options table with `--source` and `migrate`
+- [x] 8.1 README: adding a newsletter (cookie, `sources` entry, `--limit 5` trial, `index --dry-run` cost, weekly job), publisher signals and the paid-Gemini note; options table with `--source` and `migrate`
 - [ ] 8.2 Acceptance, each step with the user's go-ahead:
   - the user's archive moved (`migrate`);
   - `archive index` at ~$0;
