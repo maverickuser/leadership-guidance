@@ -96,10 +96,10 @@ PLATFORMS = {"ghost": GhostPlatform(), "substack": SubstackPlatform()}
 | `post_urls` | same site as `base_url`, normalized path matching `^/p/[^/]+$`; drops `/archive`, `/about`, `/podcast`, `/p/*/comment/*`, off-site |
 | `discover_categories` | `None`; no extra requests |
 | `request_url` | the manifest URL unchanged (measured: 200, no redirect) |
-| `_preloads` | find the `window._preloads = JSON.parse("…")` script; JSON-decode the string literal, then the JSON. Missing or broken data → `ExtractError("no Substack page data")`: that post fails, the run continues |
-| `signed_in` | `_preloads.user` is an object with an `id` (confirmed on the cookie-authenticated saved page before tests are written; design Open Questions) |
+| `_preloads` | **Measured 2026-11-11:** the data is plain JSON in `<script type="application/json" id="preloads-json">`; `window._preloads = JSON.parse(document.querySelector(…))` only reads it. Read that script first; fall back to the older `window._preloads = JSON.parse("…")` string literal (JSON-decode the literal, then the JSON). Missing or broken data → `ExtractError("no Substack page data")`: that post fails, the run continues |
+| `signed_in` | `_preloads.user` is an object with an `id`. **Confirmed 2026-11-11:** signed in, `user` is an object; signed out, `user` is null. The session cookie on the custom domain is `connect.sid` |
 | body | `div.available-content div.body.markup`; remove subscribe/share widgets, button rows, image and gallery containers incl. captions, embeds (video, tweet, post), the paywall block, footer and comments. The selector list is finalised from the saved page, and each removed class is asserted by a fixture test |
-| `paywalled` | the paywall block is present after the body, or `post.audience == "only_paid"` with a body under `min_word_count` |
+| `paywalled` | `div.paywall` is present (measured: after `div.available-content` when signed out; the signed-in page has only a `div.paywall-jump` anchor, which is not a paywall), or `post.audience == "only_paid"` with a body under `min_word_count` |
 | metadata | title `og:title` → JSON-LD `headline` → `h1.post-title`; subtitle `h3.subtitle` else `null`; author JSON-LD → `meta[name=author]`; date JSON-LD `datePublished` → `post.post_date` |
 | categories | `post.section_id` → the matching section's `name` → `[name]`; none → `[]`; navigation sections ignored |
 

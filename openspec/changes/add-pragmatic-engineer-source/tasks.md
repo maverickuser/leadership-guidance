@@ -53,12 +53,12 @@
 
 ## 5. Substack platform (PR 5)
 
-- [ ] 5.1 Live, with the user's go-ahead: save one Pragmatic Engineer post page with the user's cookie, to confirm the signed-in field and the cookie names, and as fixture material (never committed as is)
-- [ ] 5.2 `scripts/make_fixtures.py` Substack mode: filler text, fake `user`/subscriber objects, no emails or uuids; small sitemap fixture with every URL kind
-- [ ] 5.3 `platforms/substack.py`: post URLs, `_preloads` decoding, sign-in check, body cleaning, paywall, metadata, section categories (lld §5)
-- [ ] 5.4 `check_safety.py`: Substack cookie patterns, generic `*_COOKIE=` rule, Substack fixture checks
-- [ ] 5.5 Tests per lld §13 Substack row, incl. `hypothesis` on the string-literal decoding; fake-Substack end-to-end run beside a fake Ghost site
-- [ ] 5.6 Check whether `news_sitemap.xml` lists posts missing from `sitemap.xml`; record the answer in the PR
+- [x] 5.1 Live, with the user's go-ahead: save one Pragmatic Engineer post page with the user's cookie, to confirm the signed-in field and the cookie names, and as fixture material (never committed as is)
+- [x] 5.2 `scripts/make_fixtures.py` Substack mode: filler text, fake `user`/subscriber objects, no emails or uuids; small sitemap fixture with every URL kind
+- [x] 5.3 `platforms/substack.py`: post URLs, `_preloads` decoding, sign-in check, body cleaning, paywall, metadata, section categories (lld §5)
+- [x] 5.4 `check_safety.py`: Substack cookie patterns, generic `*_COOKIE=` rule, Substack fixture checks
+- [x] 5.5 Tests per lld §13 Substack row, incl. `hypothesis` on the string-literal decoding; fake-Substack end-to-end run beside a fake Ghost site
+- [x] 5.6 Check whether `news_sitemap.xml` lists posts missing from `sitemap.xml`; record the answer in the PR
 
 ## 6. Search by newsletter (PR 6)
 

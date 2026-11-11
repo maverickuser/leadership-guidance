@@ -114,7 +114,7 @@ launchd runs a missed job when the Mac wakes from sleep, but not if the Mac was 
 
 | Setting | Default | |
 |---|---|---|
-| `sources` | none (required) | your newsletters: each has `id`, `platform` (`ghost`), `base_url`, `cookie_env`, and optional `name` and `boilerplate_prefixes` |
+| `sources` | none (required) | your newsletters: each has `id`, `platform` (`ghost` or `substack`), `base_url`, `cookie_env`, and optional `name` and `boilerplate_prefixes` |
 | `delay_seconds` | `2` | minimum gap between requests, across all newsletters; lower values are refused |
 | `max_retries` | `3` | retries on timeouts, connection errors and 5xx (2s, 4s, 8s); never on 4xx |
 | `timeout_seconds` | `30` | |
