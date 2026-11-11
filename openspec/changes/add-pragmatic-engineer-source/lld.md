@@ -151,7 +151,8 @@ Fixtures: one page saved with the user's cookie (with their go-ahead) is reduced
   - `posts` and `passages` gain `source text NOT NULL`;
   - there's an index `ON passages (source)`;
   - `source` is added to the BM25 index's fields, so keyword search can filter by it (syntax verified against the pinned pg_search, as in hybrid-search LLD 6.4).
-- **Existing generations** are left as they are. Rollback to one is allowed, and the service treats a missing `source` column as "unknown source" (keyword and vector queries select `NULL AS source`).
+- **Existing generations** (changed in the search PR): the migration also adds `source` to every existing generation, fills it from the `<source>/` prefix of each post id, and rebuilds its BM25 index with `source`. The live generation keeps taking weekly updates and rollback keeps working, with one write path. Rows from before `archive migrate` (slug-only ids) keep `source` NULL, are searchable with no newsletter name, and are replaced by the first index after the move.
+- **Literal field (measured on paradedb 0.26.2):** `source` is indexed as `(source::pdb.literal)`, so `source = ANY(...)` is an exact match applied inside the BM25 search.
 
 ### 9.2 Indexer
 - **`load_posts`:** iterates `config.sources`, loads `source.manifest_path`, reads `source.post_path(slug)` for eligible entries, and accepts only schema version 2. A v1 file is a load failure with "run `archive migrate`".

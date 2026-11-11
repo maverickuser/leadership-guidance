@@ -145,5 +145,30 @@ def all_categories(
     return list(found)
 
 
+_source_cache: dict[tuple[str, str], tuple[float, list[str]]] = {}
+
+
+def all_sources(
+    conn: psycopg.Connection, schema: str, clock: Callable[[], float] = time.monotonic
+) -> list[str]:
+    """Every newsletter id in the generation, sorted; cached like ``all_categories``. Rows from
+    before the move to per-newsletter folders (no source) are left out."""
+    now = clock()
+    key = (conn.info.dbname, schema)
+    hit = _source_cache.get(key)
+    if hit and now - hit[0] < CATEGORY_CACHE_SECONDS:
+        return list(hit[1])
+    rows = conn.execute(
+        sql.SQL("SELECT DISTINCT source FROM {}.posts WHERE source IS NOT NULL ORDER BY source").format(
+            sql.Identifier(schema)
+        )
+    ).fetchall()
+    found = [r[0] for r in rows]
+    _source_cache[key] = (now, found)
+    return list(found)
+
+
 def clear_category_cache() -> None:
+    """Forget the cached category and newsletter lists."""
     _category_cache.clear()
+    _source_cache.clear()
