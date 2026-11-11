@@ -4,21 +4,34 @@
 Where and how posts are kept on disk: the raw pages, the extracted Markdown, the manifest and the run logs, all in the private data folder.
 ## Requirements
 ### Requirement: Folder layout
-The system SHALL store data under `output_dir` (default `data`) as `manifest.json`, `raw/{slug}.html`, `posts/{slug}.json` and `logs/run-{timestamp}.log`.
+The system SHALL store each source's data in `{output_dir}/{source}/`: `manifest.json`, `raw/{slug}.html` and `posts/{slug}.json`. Run logs (`logs/run-{timestamp}.log`) are shared by all sources at the top of `output_dir`.
 
 #### Scenario: After a run
-- **WHEN** `archive run --limit 5` completes
-- **THEN** `data/manifest.json`, 5 files in `data/raw/`, 5 files in `data/posts/` and one file in `data/logs/` exist
+- **WHEN** `archive run --source main --limit 5` completes
+- **THEN** `main/manifest.json`, 5 files in `main/raw/`, 5 files in `main/posts/` and one file in `logs/` exist
 
 ### Requirement: Post JSON schema
-Each `posts/{slug}.json` SHALL contain exactly these fields: `schema_version` (1), `id` (slug), `url`, `title`, `subtitle` (string or null), `author`, `published_date` (`YYYY-MM-DD`), `categories` (list of strings), `word_count` (int), `summary`, `sections` (list of `{heading: string|null, level: int, text: string}`), `text`, `links` (list of `{text, url}`), `content_hash` (sha256 hex of `text`), `fetched_at` (UTC ISO 8601), `status` (`ok` | `partial`). Every file MUST validate against this schema.
+Each `{source}/posts/{slug}.json` SHALL contain exactly these fields:
+- `schema_version` (2)
+- `id` (`{source}/{slug}`)
+- `source` (the source id)
+- `url`, `title`, `subtitle` (string or null), `author`
+- `published_date` (`YYYY-MM-DD`)
+- `categories` (list of strings), `word_count` (int), `summary`
+- `sections` (list of `{heading: string|null, level: int, text: string}`), `text`
+- `links` (list of `{text, url}`)
+- `content_hash` (sha256 hex of `text`)
+- `fetched_at` (UTC ISO 8601)
+- `status` (`ok` | `partial`)
+
+Every file MUST validate against this schema. Version-1 files (the old layout) SHALL be accepted only by `archive migrate`.
 
 #### Scenario: Valid output
 - **WHEN** a post is stored
-- **THEN** its JSON validates against the schema and `content_hash == sha256(text).hexdigest()`
+- **THEN** its JSON validates against the schema, `content_hash == sha256(text).hexdigest()`, and `id` equals its folder's source id, a `/`, and its file name without `.json`
 
 ### Requirement: Manifest entries
-Each manifest entry SHALL contain `url`, `slug`, `categories`, `status` (`discovered` | `fetched` | `ok` | `partial` | `failed`), `last_attempt` (UTC ISO 8601 or null), `error` (string or null) and `content_hash` (string or null).
+Each entry in a source's `manifest.json` SHALL contain `url`, `slug`, `categories`, `status` (`discovered` | `fetched` | `ok` | `partial` | `failed`), `last_attempt` (UTC ISO 8601 or null), `error` (string or null) and `content_hash` (string or null). For a Substack source, `categories` SHALL be updated at extraction from the post page.
 
 #### Scenario: Failed post
 - **WHEN** a post fetch fails with a 404

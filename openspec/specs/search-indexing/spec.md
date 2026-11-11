@@ -4,14 +4,14 @@
 Building and updating the search index: cleaning and chunking posts, embedding passages, writing post summaries, and managing index versions safely.
 ## Requirements
 ### Requirement: Index input
-The indexer SHALL use the archived post records in `{output_dir}/posts/*.json` as its only data source, indexing posts whose manifest status is `ok` or `partial`. It SHALL NOT read raw HTML or fetch posts from the newsletter site. A post file that fails schema validation SHALL be skipped with a logged error, and indexing SHALL continue.
+The indexer SHALL use archived post records as its only data source: every configured source's `{output_dir}/{source}/posts/*.json`. It SHALL index posts whose manifest status is `ok` or `partial`, all into one index. It SHALL NOT read raw HTML or fetch posts from any newsletter site. A post file that fails schema validation SHALL be skipped with a logged error, and indexing SHALL continue.
 
 #### Scenario: Only archived posts are indexed
-- **WHEN** the manifest has 3 posts with status `ok`, 1 `partial` and 1 `failed`
-- **THEN** the store contains passages from exactly the 4 `ok` and `partial` posts
+- **WHEN** the `main` manifest has 3 posts with status `ok`, 1 `partial` and 1 `failed`, and the `pragmatic-engineer` manifest has 2 `ok`
+- **THEN** the store contains passages from exactly those 6 `ok` and `partial` posts
 
 #### Scenario: Invalid post file
-- **WHEN** one `posts/*.json` file is not valid JSON
+- **WHEN** one post file is not valid JSON
 - **THEN** that post is reported as failed in the index summary and every other post is indexed
 
 ### Requirement: Boilerplate filter
@@ -49,11 +49,11 @@ The indexer SHALL split each cleaned post into passages along its `sections`. Se
 - **THEN** both runs produce identical passage ids and text
 
 ### Requirement: Stored passage data
-For each passage the store SHALL keep the passage text, its section heading, its position in the post, and its post's `id`, `title`, `url`, `author`, `published_date`, `categories` and `word_count`, so a search result can be returned without reading the JSON files.
+For each passage the store SHALL keep the passage text, its section heading, its position in the post, and its post's `id`, `source`, `title`, `url`, `author`, `published_date`, `categories` and `word_count`, so a search result can be returned without reading the JSON files.
 
 #### Scenario: Self-contained result
 - **WHEN** a passage is found by search
-- **THEN** its post title, URL, date, categories and section heading are available from the store alone
+- **THEN** its post's source, title, URL, date, categories and section heading are available from the store alone
 
 ### Requirement: Post summaries
 When `search.summaries.enabled` is true (the default), the indexer SHALL generate one summary per post with a configurable Gemini text model (`search.summaries.model`) through the same `GEMINI_API_KEY`, from the post's title and cleaned text. The summary SHALL be 60–200 words, written only from the post's own content, and SHALL name the post's main ideas, frameworks and advice. Each summary SHALL be stored as a searchable unit of kind `summary` with id `{post_id}#summary`, carrying the same post metadata as passages, and SHALL be indexed for both keyword and semantic search alongside passages. Summaries SHALL be cached by post text, model and prompt version, so an unchanged post is never summarised twice. A response that is empty or outside the word range SHALL be retried once and then recorded as a failure. If a summary cannot be generated, the post's passages SHALL still be indexed, the missing summary SHALL be recorded as a failure (stage `summarize`), and it SHALL be retried on the next run.

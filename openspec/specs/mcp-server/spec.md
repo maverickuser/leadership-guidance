@@ -11,15 +11,34 @@ The system SHALL provide a local MCP (Model Context Protocol) server named `lead
 - **THEN** Claude Code lists the archive's `search` tool and `ask` prompt and can use both
 
 ### Requirement: Search tool
-The server SHALL expose a tool named `search` with arguments `query` (string, required), `limit` (integer, optional, default 10, at most 30), `category` (list of strings, optional), `since` and `until` (ISO dates, optional), and `kind` (`all`, `passages` or `summaries`, optional, default `all`). It SHALL run hybrid search with re-ranking and return the results defined in `hybrid-search`, both as structured content and as readable text, together with the query, the filters applied and whether results were re-ranked. The tool description SHALL tell agents what the archive contains, its date range, the valid category names, that results are passages and post summaries to be collated into an answer, that summaries help find relevant posts while passages are the evidence to quote, and that broad questions can start with `kind: "summaries"`.
+The server SHALL expose a tool named `search` with these arguments:
+- `query`: string, required.
+- `limit`: integer, optional, default 10, at most 30.
+- `source`: list of source ids, optional.
+- `category`: list of strings, optional.
+- `since` and `until`: ISO dates, optional.
+- `kind`: `all`, `passages` or `summaries`, optional, default `all`.
+
+It SHALL run hybrid search with re-ranking and return the results defined in `hybrid-search`, both as structured content and as readable text, together with the query, the filters applied and whether results were re-ranked.
+
+The tool description SHALL tell agents:
+- what the archive contains: each source with its name, post count and date range;
+- the valid category names per source;
+- that results are passages and post summaries to be collated into an answer;
+- that summaries help find relevant posts while passages are the evidence to quote;
+- that broad questions can start with `kind: "summaries"`.
 
 #### Scenario: Agent search
 - **WHEN** an agent calls `search` with `query: "how to give feedback to a senior engineer"`
-- **THEN** it receives up to 10 ranked passages, each with post title, URL, date, categories, section heading and text
+- **THEN** it receives up to 10 ranked passages, each with source, post title, URL, date, categories, section heading and text
 
 #### Scenario: Filtered search
 - **WHEN** an agent calls `search` with `query: "hiring"` and `since: "2025-01-01"`
 - **THEN** every returned passage is from a post published on or after 2025-01-01
+
+#### Scenario: Source search
+- **WHEN** an agent calls `search` with `query: "on-call"` and `source: ["pragmatic-engineer"]`
+- **THEN** every returned result is from The Pragmatic Engineer
 
 ### Requirement: Data only
 The server SHALL return archive data only. It SHALL NOT generate answers or summaries at search time and SHALL NOT call any language model; post summaries are generated at index time, stored, and returned marked as `kind: "summary"`. The calling agent writes the answer from the returned data. The `ask` prompt is the one exception to "archive data only": it returns fixed instruction text plus the user's own question, and still calls no model.

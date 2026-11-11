@@ -4,48 +4,84 @@
 The `archive` command line: running the archive's stages (discover, fetch, extract, index) together or one at a time, with limits, dry runs and a clear end-of-run report.
 ## Requirements
 ### Requirement: CLI commands
-The system SHALL provide a console command `archive` with subcommands `discover` (stage 1), `fetch` (stage 2), `extract` (stages 3 and 4), `index` (build or update the search store), `mcp` (start the local MCP search server) and `run` (discover, fetch, extract and index, in that order). Search itself SHALL be available only through the MCP server. If the index step of `run` fails, the posts already saved SHALL be kept and `run` SHALL exit with code 3 and a message that search was not updated.
+The system SHALL provide a console command `archive` with these subcommands:
+- `discover` (stage 1);
+- `fetch` (stage 2);
+- `extract` (stages 3 and 4);
+- `index` (build or update the search store);
+- `mcp` (start the local MCP search server);
+- `run` (discover, fetch, extract and index, in that order);
+- `migrate` (move a single-newsletter archive into its own folder, see `newsletter-sources`).
+
+Search itself SHALL be available only through the MCP server. If the index step of `run` fails, the posts already saved SHALL be kept and `run` SHALL exit with code 3 and a message that search was not updated.
 
 #### Scenario: Run all stages
 - **WHEN** the user runs `archive run`
-- **THEN** discover, fetch, extract and index run in that order
+- **THEN** discover, fetch and extract run for every configured source, and then index runs once
 
 #### Scenario: Index failure in run
 - **WHEN** `archive run` saves 2 new posts and then the index step fails
 - **THEN** the 2 post files exist, the previous store is intact, and the exit code is 3
 
 ### Requirement: CLI options
-The subcommands `discover`, `fetch`, `extract`, `index` and `run` SHALL accept `--limit N` (process at most N posts), `--refresh` (ignore caches and re-process), `--dry-run` and `--verbose`. `--dry-run` SHALL print what would be fetched or written without making post requests, embedding calls, or writing post or store files. `mcp` SHALL accept `--config` and `--verbose`.
+The subcommands `discover`, `fetch`, `extract`, `index` and `run` SHALL accept:
+- `--limit N`: process at most N posts, per source.
+- `--refresh`: ignore caches and re-process.
+- `--dry-run`: print what would be fetched or written, without making post requests or embedding calls, and without writing post or store files.
+- `--verbose`.
+
+`discover`, `fetch`, `extract` and `run` SHALL also accept `--source <id>` (repeatable; default every source). `mcp` SHALL accept `--config` and `--verbose`. `migrate` SHALL accept `--source <id>` (required), `--dry-run` and `--verbose`.
 
 #### Scenario: Limit
-- **WHEN** the user runs `archive run --limit 5`
+- **WHEN** the user runs `archive run --limit 5` with one source configured
 - **THEN** at most 5 posts are fetched and extracted
 
 #### Scenario: Dry run
 - **WHEN** the user runs `archive fetch --dry-run`
-- **THEN** the list of posts that would be fetched is printed and no post requests are made and no files are written to `data/raw/` or `data/posts/`
+- **THEN** the list of posts that would be fetched is printed for each source, no post requests are made, and no post files are written
+
+#### Scenario: Source option
+- **WHEN** the user runs `archive extract --source pragmatic-engineer`
+- **THEN** only `pragmatic-engineer/raw/` is read and only `pragmatic-engineer/posts/` is written
 
 ### Requirement: Configuration
-The system SHALL read settings from `config.yaml` (`base_url`, `delay_seconds`, `max_retries`, `timeout_seconds`, `min_word_count`, `output_dir`, `user_agent`, and an optional `search` section with `embedding_model` (default `gemini-embedding-2`), `embedding_dimension`, `chunk_words`, `chunk_overlap_words`, `candidates`, re-ranker settings and a `summaries` sub-section with `enabled` (default true), `model` and `max_tokens_per_run`) with the defaults given in the project spec, and SHALL read `NEWSLETTER_COOKIE` and `GEMINI_API_KEY` from `.env`. Invalid search settings (non-positive numbers, overlap not smaller than `chunk_words`) SHALL be rejected with a config error. The repository SHALL include `config.example.yaml`, `.env.example` and a `.gitignore` that lists `.env`, `config.yaml` and `data/`.
+The system SHALL read these settings from `config.yaml`:
+- **`sources`:** the list of newsletters (see `newsletter-sources`).
+- **Global settings:** `delay_seconds`, `max_retries`, `timeout_seconds`, `min_word_count`, `output_dir` (default `../leadership-coach-datasets`), `user_agent`.
+- **`search`:** an optional section with `embedding_model` (default `gemini-embedding-2`), `embedding_dimension`, `chunk_words`, `chunk_overlap_words`, `candidates`, re-ranker settings, `source_min_score` (the relevance a source's best result needs to be guaranteed a place, see `hybrid-search`), and a `summaries` sub-section with `enabled` (default true), `model` and `max_tokens_per_run`.
+
+Defaults SHALL be those given in the project spec. The system SHALL read each source's cookie from the `.env` variable named by its `cookie_env`, and `GEMINI_API_KEY`, all from `.env`.
+
+These invalid settings SHALL be rejected with a config error:
+- non-positive numbers;
+- an overlap not smaller than `chunk_words`;
+- a missing, empty or invalid `sources` list;
+- a top-level `base_url`.
+
+The repository SHALL include `config.example.yaml` (with one example source per platform), `.env.example`, and a `.gitignore` that lists `.env`, `config.yaml` and `data/`.
 
 #### Scenario: Custom delay
 - **WHEN** `config.yaml` sets `delay_seconds: 5`
-- **THEN** requests are at least 5 seconds apart
+- **THEN** requests are at least 5 seconds apart, across all sources
 
 #### Scenario: Invalid chunk overlap
 - **WHEN** `config.yaml` sets `search.chunk_words: 100` and `search.chunk_overlap_words: 100`
 - **THEN** the command exits 1 with a config error naming `chunk_overlap_words`
 
 ### Requirement: Secret handling
-The cookie and every API key (including `GEMINI_API_KEY`) MUST NOT appear in any output file, log, console message, MCP response, error message or git commit, and full request headers MUST NOT be logged. API keys SHALL be held in the same never-printed secret wrapper as the cookie and SHALL be read only from `.env` or the environment.
+Every source's cookie and every API key (including `GEMINI_API_KEY`) MUST NOT appear in any output file, log, console message, MCP response, error message or git commit, and full request headers MUST NOT be logged. Cookies and API keys SHALL be held in the same never-printed secret wrapper and SHALL be read only from `.env` or the environment. A source's cookie SHALL be sent only to that source's own origin.
 
 #### Scenario: Verbose run
-- **WHEN** `archive run --limit 5 --verbose` completes
-- **THEN** searching `data/` and console output for the cookie value finds nothing
+- **WHEN** `archive run --limit 5 --verbose` completes with two sources
+- **THEN** searching the data folder and console output for either cookie value finds nothing
+
+#### Scenario: Cookie stays with its source
+- **WHEN** posts are fetched from both sources
+- **THEN** each request carries only its own source's cookie, and no request to one source carries the other's
 
 #### Scenario: Key never exposed
 - **WHEN** `archive index --verbose` and an MCP search both complete or fail
-- **THEN** searching `data/`, the logs, console output and MCP responses for the Gemini API key finds nothing
+- **THEN** searching the data folder, the logs, console output and MCP responses for the Gemini API key finds nothing
 
 ### Requirement: Per-post logging and summary
 The system SHALL log one line per post with slug, stage, status and error if any, to the console and to `data/logs/run-{timestamp}.log`, and SHALL print an end-of-run summary with discovered, fetched, ok, partial and failed counts.
