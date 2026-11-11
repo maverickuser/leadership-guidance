@@ -24,6 +24,7 @@ def fingerprint_payload(
     summaries = search.summaries
     return {
         "post_id": post.id,
+        "source": post.source,
         "title": post.title,
         "subtitle": post.subtitle,
         "author": post.author,

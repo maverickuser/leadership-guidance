@@ -1,4 +1,4 @@
-"""Search filters shared by keyword and vector search: categories, date range and kind."""
+"""Search filters shared by keyword and vector search: categories, date range, kind and newsletter."""
 
 from __future__ import annotations
 
@@ -16,6 +16,7 @@ class Filters:
     since: date | None = None
     until: date | None = None
     kind: str = "all"  # all | passages | summaries
+    sources: tuple[str, ...] = ()  # newsletter ids (already checked against the store)
 
     def __post_init__(self) -> None:
         if self.kind not in KIND_VALUES:
@@ -35,6 +36,9 @@ def filter_sql(filters: Filters) -> tuple[sql.Composable, list[object]]:
     if filters.until:
         parts.append(sql.SQL("published_date <= %s"))
         params.append(filters.until)
+    if filters.sources:
+        parts.append(sql.SQL("source = ANY(%s)"))
+        params.append(list(filters.sources))
     kind = KIND_VALUES[filters.kind]
     if kind:
         parts.append(sql.SQL("kind = %s"))

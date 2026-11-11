@@ -62,11 +62,11 @@
 
 ## 6. Search by newsletter (PR 6)
 
-- [ ] 6.1 Migration `002_source.sql`: `source` on `posts` and `passages`, index, BM25 field; older generations stay readable (`NULL AS source`)
-- [ ] 6.2 Indexer: `source` on every row; boilerplate detection per source; fingerprint includes the source ids
-- [ ] 6.3 `Filters.sources` and `source = ANY(...)`; `SearchRequest.source` validated against the active generation with an error listing valid ids
-- [ ] 6.4 Results carry `source` and `source_name`; MCP `search` takes `source`; the tool description lists each newsletter with count, dates and categories; readable lines start with the newsletter name
-- [ ] 6.5 `db` tests: filter, unknown source, per-source boilerplate, MCP description, rollback to a generation without `source`
+- [x] 6.1 Migration `002_source.sql`: `source` on `posts` and `passages`, index, BM25 field; older generations stay readable (`NULL AS source`)
+- [x] 6.2 Indexer: `source` on every row; boilerplate detection per source; fingerprint includes the source ids
+- [x] 6.3 `Filters.sources` and `source = ANY(...)`; `SearchRequest.source` validated against the active generation with an error listing valid ids
+- [x] 6.4 Results carry `source` and `source_name`; MCP `search` takes `source`; the tool description lists each newsletter with count, dates and categories; readable lines start with the newsletter name
+- [x] 6.5 `db` tests: filter, unknown source, per-source boilerplate, MCP description, rollback to a generation without `source`
 
 ## 7. Every newsletter represented (PR 7)
 

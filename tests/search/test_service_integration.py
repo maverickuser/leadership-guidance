@@ -84,7 +84,7 @@ def test_hybrid_results_have_every_field(cfg):
     assert top.post.url and top.post.published_date == "2025-02-01" and top.post.categories == ["Hiring"]
     d = resp.to_dict()
     assert set(d) == {"query", "filters", "semantic", "reranked", "results", "notes"}
-    assert d["filters"] == {"category": None, "since": None, "until": None, "kind": "all"}
+    assert d["filters"] == {"category": None, "since": None, "until": None, "kind": "all", "source": None}
     assert {r["found_by"] for r in d["results"]} <= {"keyword", "semantic", "both"}
     assert len(resp.results) == 5
 

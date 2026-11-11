@@ -30,7 +30,7 @@ from ..errors import ArchiveError
 from ..schema import validate_post
 from ..store import load_manifest
 from . import db
-from .boilerplate import LOSS_WARN_FRACTION, Boilerplate, find_boilerplate
+from .boilerplate import LOSS_WARN_FRACTION, Boilerplate, find_boilerplate, merge_boilerplate
 from .chunking import Chunk, chunk_sections
 from .embeddings import (
     CachedEmbedder,
@@ -44,7 +44,7 @@ from .embeddings import (
 )
 from .fingerprint import post_fingerprint
 from .gemini import CircuitOpenError, GeminiAuthError, GeminiError
-from .models import Post
+from .models import Post, Section
 from .planner import (
     MAX_ATTEMPTS,
     SUMMARY_EMBED_TOKENS,
@@ -369,18 +369,25 @@ class Indexer:
             report.failed[slug] = f"load: {problem}"
             if record:
                 self._record_failure(slug, "load", problem, "")  # the live index's counters only
-        boilerplate = find_boilerplate(
-            {pid: list(p.sections) for pid, p in posts.items()},
-            min_posts=self.s.boilerplate_min_posts,
-            similarity=self.s.boilerplate_similarity,
-        )
+        # Per newsletter: a paragraph that repeats across one newsletter's posts is its
+        # boilerplate, and is never stripped from another newsletter's posts.
+        by_source: dict[str, dict[str, list[Section]]] = {}
+        for pid, p in posts.items():
+            by_source.setdefault(p.source, {})[pid] = list(p.sections)
+        per_source = {
+            src: find_boilerplate(
+                group, min_posts=self.s.boilerplate_min_posts, similarity=self.s.boilerplate_similarity
+            )
+            for src, group in sorted(by_source.items())
+        }
+        boilerplate = merge_boilerplate(per_source.values())
         chosen = list(posts)[:limit] if limit else list(posts)
         report.limited = len(chosen) < len(posts)
         left_out = (set(posts) - set(chosen)) | kept
         prepared: dict[str, Prepared] = {}
         for pid in chosen:
             post = posts[pid]
-            cleaned = boilerplate.clean(post.sections, pid, warn=False)  # reported below instead
+            cleaned = per_source[post.source].clean(post.sections, pid, warn=False)  # reported below
             report.boilerplate_paragraphs += cleaned.removed_paragraphs
             if cleaned.loss_fraction > LOSS_WARN_FRACTION:
                 report.heavy_loss.append(pid)
@@ -606,6 +613,7 @@ class Indexer:
         post = p.post
         return (
             post.id,
+            post.source,
             post.title,
             post.subtitle,
             post.url,
@@ -633,6 +641,7 @@ class Indexer:
         return (
             passage_id,
             p.post.id,
+            p.post.source,
             kind,
             n,
             heading,
@@ -846,18 +855,20 @@ class Indexer:
 
 
 _UPSERT_POST = sql.SQL(
-    "INSERT INTO {schema}.posts (post_id, title, subtitle, url, author, published_date, categories, "
+    "INSERT INTO {schema}.posts (post_id, source, title, subtitle, url, author, published_date, categories, "
     "word_count, status, fingerprint, summary_sha256, fetched_at, indexed_at) "
-    "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, now()) ON CONFLICT (post_id) DO UPDATE SET "
-    "title = EXCLUDED.title, subtitle = EXCLUDED.subtitle, url = EXCLUDED.url, author = EXCLUDED.author, "
+    "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, now()) ON CONFLICT (post_id) DO UPDATE SET "
+    "source = EXCLUDED.source, title = EXCLUDED.title, subtitle = EXCLUDED.subtitle, url = EXCLUDED.url, "
+    "author = EXCLUDED.author, "
     "published_date = EXCLUDED.published_date, categories = EXCLUDED.categories, "
     "word_count = EXCLUDED.word_count, status = EXCLUDED.status, fingerprint = EXCLUDED.fingerprint, "
     "summary_sha256 = EXCLUDED.summary_sha256, fetched_at = EXCLUDED.fetched_at, indexed_at = now()"
 )
 _INSERT_PASSAGE = sql.SQL(
-    "INSERT INTO {schema}.passages (passage_id, post_id, kind, n, heading, body, title, search_title, "
-    "search_heading, search_body, published_date, categories, word_count, embed_sha256, embedding) "
-    "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)"
+    "INSERT INTO {schema}.passages (passage_id, post_id, source, kind, n, heading, body, title, "
+    "search_title, search_heading, search_body, published_date, categories, word_count, embed_sha256, "
+    "embedding) "
+    "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)"
 )
 
 

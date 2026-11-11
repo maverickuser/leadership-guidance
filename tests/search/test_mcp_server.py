@@ -281,7 +281,7 @@ def test_tool_is_listed_with_a_description_from_the_index(cfg):
         "summaries to find the relevant posts" in tool.description and "evidence to quote" in tool.description
     )
     props = tool.input_schema["properties"]
-    assert set(props) == {"query", "limit", "category", "since", "until", "kind"}
+    assert set(props) == {"query", "limit", "category", "since", "until", "kind", "source"}
     assert tool.input_schema["required"] == ["query"]
 
 
@@ -295,7 +295,9 @@ def test_search_returns_structured_and_readable_results(cfg):
     assert len(data["results"]) == 3 and data["results"][0]["post"]["id"] == "main/hiring"
     first = data["results"][0]
     assert {"rank", "score", "found_by", "kind", "id", "heading", "text", "post"} <= set(first)
-    assert {"id", "title", "url", "published_date", "categories"} == set(first["post"])
+    assert {"id", "title", "url", "published_date", "categories", "source", "source_name"} == set(
+        first["post"]
+    )
     out = text(result)
     assert out.startswith('Search: ""bar raiser""')
     assert "[1] " in out and first["post"]["url"] in out and "re-ranked: yes" in out

@@ -25,7 +25,7 @@ def writer(db_config):
 def test_migrations_apply_once(db_config):
     with db.connect(db_config, "writer") as conn:
         assert db.current_version(conn) == 0
-        assert db.apply_migrations(conn) == [1]
+        assert db.apply_migrations(conn) == [1, 2]
         assert db.apply_migrations(conn) == []
         assert db.current_version(conn) == db.latest_version()
         tables = {
@@ -78,15 +78,17 @@ def test_wrong_password_is_reported(db_config):
 
 
 def _insert_passage(conn, schema, pid, title, body, *, kind="passage", n=0, dim=4):
+    post_id = pid.split("#")[0]
+    source = post_id.split("/")[0] if "/" in post_id else "main"
     conn.execute(
-        f"INSERT INTO {schema}.posts (post_id, title, url, word_count, status, fingerprint) "
-        "VALUES (%s, %s, 'https://example.com/p', 10, 'ok', 'fp') ON CONFLICT DO NOTHING",
-        (pid.split("#")[0], title),
+        f"INSERT INTO {schema}.posts (post_id, source, title, url, word_count, status, fingerprint) "
+        "VALUES (%s, %s, %s, 'https://example.com/p', 10, 'ok', 'fp') ON CONFLICT DO NOTHING",
+        (post_id, source, title),
     )
     conn.execute(
-        f"INSERT INTO {schema}.passages (passage_id, post_id, kind, n, body, title, search_title, "
-        "search_body, word_count, embed_sha256, embedding) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,10,'h',%s)",
-        (pid, pid.split("#")[0], kind, n, body, title, title, body, "[" + ",".join(["0.5"] * dim) + "]"),
+        f"INSERT INTO {schema}.passages (passage_id, post_id, source, kind, n, body, title, search_title, "
+        "search_body, word_count, embed_sha256, embedding) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,10,'h',%s)",
+        (pid, post_id, source, kind, n, body, title, title, body, "[" + ",".join(["0.5"] * dim) + "]"),
     )
 
 
@@ -189,3 +191,89 @@ def test_index_lock_is_exclusive(db_config, writer):
             pass
         with db.index_lock(other):
             pass
+
+
+# spec: hybrid-search / Filters (Source filter): a generation built before migration 002
+def test_migration_002_adds_source_to_an_existing_generation(db_config):
+    migrations = db.load_migrations()
+    with db.connect(db_config, "writer") as conn:
+        assert db.apply_migrations(conn, migrations[:1]) == [1]
+        conn.commit()
+        gen = db.create_generation(conn, "test-model", 4)
+        vec = "[" + ",".join(["0.5"] * 4) + "]"
+        for post_id in ("main/hiring", "pragmatic-engineer/on-call", "old-slug"):
+            conn.execute(
+                f"INSERT INTO {gen.schema}.posts (post_id, title, url, word_count, status, fingerprint) "
+                "VALUES (%s, 'T', 'https://example.com/p', 10, 'ok', 'fp')",
+                (post_id,),
+            )
+            conn.execute(
+                f"INSERT INTO {gen.schema}.passages (passage_id, post_id, kind, n, body, title, search_title, "
+                "search_body, word_count, embed_sha256, embedding) "
+                "VALUES (%s, %s, 'passage', 0, 'b', 'T', 'T', 'delegation team', 10, 'h', %s)",
+                (f"{post_id}#0", post_id, vec),
+            )
+        conn.commit()
+        assert db.apply_migrations(conn) == [2]
+        conn.commit()
+        rows = conn.execute(f"SELECT post_id, source FROM {gen.schema}.passages ORDER BY post_id").fetchall()
+        assert rows == [
+            ("main/hiring", "main"),
+            ("old-slug", None),
+            ("pragmatic-engineer/on-call", "pragmatic-engineer"),
+        ]
+        hits = conn.execute(
+            f"SELECT passage_id FROM {gen.schema}.passages WHERE search_body ||| 'delegation' "
+            "AND source = ANY(%s) ORDER BY pdb.score(passage_id) DESC",
+            (["pragmatic-engineer"],),
+        ).fetchall()
+        assert hits == [("pragmatic-engineer/on-call#0",)]
+        # a generation made after the migration requires the source
+        new = db.create_generation(conn, "test-model", 4)
+        with pytest.raises(psycopg.errors.NotNullViolation):
+            conn.execute(
+                f"INSERT INTO {new.schema}.posts (post_id, title, url, word_count, status, fingerprint) "
+                "VALUES ('main/x', 'T', 'https://example.com/p', 10, 'ok', 'fp')"
+            )
+
+
+def test_rows_from_before_the_move_search_without_a_source(db_config):
+    """An upgraded generation can still hold slug-only rows (source NULL) until the first index
+    after `archive migrate` replaces them; searching them works and shows no newsletter name."""
+    from dataclasses import replace as dc_replace
+
+    from newsletter_archive.mcp_server import render_text
+    from newsletter_archive.search.service import SearchRequest, SearchService
+
+    from .test_service_integration import service
+
+    migrations = db.load_migrations()
+    with db.connect(db_config, "writer") as conn:
+        db.apply_migrations(conn, migrations[:1])
+        conn.commit()
+        gen = db.create_generation(conn, "fake-model", 8)
+        vec = "[" + ",".join(["0.5"] * 8) + "]"
+        conn.execute(
+            f"INSERT INTO {gen.schema}.posts (post_id, title, url, word_count, status, fingerprint) "
+            "VALUES ('old-slug', 'Old post', 'https://example.com/old', 10, 'ok', 'fp')"
+        )
+        conn.execute(
+            f"INSERT INTO {gen.schema}.passages (passage_id, post_id, kind, n, body, title, search_title, "
+            "search_body, word_count, embed_sha256, embedding) "
+            "VALUES ('old-slug#0', 'old-slug', 'passage', 0, 'delegation notes', 'Old post', 'old post', "
+            "'delegation notes', 2, 'h', %s)",
+            (vec,),
+        )
+        db.apply_migrations(conn)
+        db.set_generation_status(conn, gen.generation, "ready")
+        db.activate_generation(conn, gen.generation)
+        conn.commit()
+    cfg = dc_replace(
+        db_config, search=dc_replace(db_config.search, embedding_model="fake-model", embedding_dimension=8)
+    )
+    svc: SearchService = service(cfg)
+    resp = svc.search(SearchRequest.create("delegation"))
+    [hit] = resp.results
+    assert (hit.post.source, hit.post.source_name) == (None, None)
+    assert "] passage · Old post · score" in render_text(resp)  # no newsletter, no empty ()
+    assert svc.overview().sources == []  # nothing to list until the move's index run

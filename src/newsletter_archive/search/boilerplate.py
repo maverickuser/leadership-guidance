@@ -140,6 +140,20 @@ class Boilerplate:
 EMPTY = Boilerplate(frozenset(), ())
 
 
+def merge_boilerplate(parts: Iterable[Boilerplate]) -> Boilerplate:
+    """One Boilerplate holding every part's clusters, numbered 1..N. Each paragraph key is kept
+    once (the first cluster wins), so the result can be stored with one row per key."""
+    clusters: list[BoilerplateCluster] = []
+    seen: set[str] = set()
+    for part in parts:
+        for c in part.clusters:
+            keys = tuple(k for k in c.keys if k not in seen)
+            if keys:
+                seen.update(keys)
+                clusters.append(BoilerplateCluster(len(clusters) + 1, keys, c.post_count, c.sample))
+    return Boilerplate(frozenset(seen), tuple(clusters))
+
+
 def find_boilerplate(
     posts: Mapping[str, Sequence[Section]],
     *,

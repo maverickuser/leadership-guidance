@@ -27,6 +27,7 @@ class Post:
     categories: tuple[str, ...] = field(default_factory=tuple)
     word_count: int = 0
     fetched_at: str | None = None
+    source: str = ""  # the newsletter's id (config `sources:`)
 
     @classmethod
     def from_record(cls, d: dict[str, Any]) -> Post:
@@ -43,4 +44,5 @@ class Post:
             categories=tuple(d.get("categories") or ()),
             word_count=int(d.get("word_count") or 0),
             fetched_at=d.get("fetched_at"),
+            source=d.get("source") or "",
         )

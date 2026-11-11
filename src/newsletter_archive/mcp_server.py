@@ -101,11 +101,20 @@ DESCRIPTION_REFRESH_SECONDS = 600.0
 def tool_description(overview: ArchiveOverview | None, default_limit: int = 10, max_limit: int = 30) -> str:
     """What the archive holds and how to search it well (built from the live index)."""
     if overview is None:
-        holding = "A personal archive of a leadership newsletter (its size and categories load shortly)."
+        holding = "A personal archive of leadership newsletters (their size and categories load shortly)."
         cats = ""
     else:
         span = f"from {overview.first} to {overview.last}" if overview.first else "with no dates"
-        holding = f"A personal archive of {overview.posts} posts from a leadership newsletter, {span}."
+        n = len(overview.sources)
+        what = "a leadership newsletter" if n <= 1 else f"{n} newsletters"
+        holding = f"A personal archive of {overview.posts} posts from {what}, {span}."
+        if overview.sources:
+            holding += "\nNewsletters (source id in brackets):" + "".join(
+                f"\n- {s.name} ({s.id}): {s.posts} posts, "
+                + (f"{s.first} to {s.last}" if s.first else "no dates")
+                + (f"; categories: {', '.join(s.categories)}" if s.categories else "")
+                for s in overview.sources
+            )
         cats = f"\nValid categories: {', '.join(overview.categories)}." if overview.categories else ""
     return (
         f"Search the newsletter archive. {holding}{cats}\n\n"
@@ -119,7 +128,8 @@ def tool_description(overview: ArchiveOverview | None, default_limit: int = 10, 
         "Put exact phrases in double quotes. Always cite the "
         "post title and URL.\n"
         f"Arguments: query (required), limit (1-{max_limit}, default {default_limit}), category (one or "
-        "more category names), since / until (YYYY-MM-DD, inclusive), kind (all | passages | summaries)."
+        "more category names), since / until (YYYY-MM-DD, inclusive), kind (all | passages | summaries), "
+        "source (one or more newsletter ids; leave it out to search every newsletter)."
     )
 
 
@@ -137,9 +147,14 @@ def render_text(resp: SearchResponse) -> str:
     blocks = []
     for r in resp.results:
         where = f"{r.post.title} — {r.heading}" if r.heading else r.post.title
-        meta = "; ".join(x for x in (r.post.published_date or "", ", ".join(r.post.categories)) if x)
+        meta = "; ".join(
+            x
+            for x in (r.post.source_name or "", r.post.published_date or "", ", ".join(r.post.categories))
+            if x
+        )
+        about = f"{where} ({meta})" if meta else where
         blocks.append(
-            f"[{r.rank}] {r.kind} · {where} ({meta}) · score {r.score:g} · found by {r.found_by}\n"
+            f"[{r.rank}] {r.kind} · {about} · score {r.score:g} · found by {r.found_by}\n"
             f"{r.post.url}\n{r.text}"
         )
     return "\n".join(head) + "\n\n" + "\n\n".join(blocks)
@@ -221,8 +236,18 @@ def build_server(
         kind: Annotated[
             Literal["all", "passages", "summaries"], Field(description="Passages, summaries or both.")
         ] = "all",
+        source: Annotated[
+            list[str] | str | None,
+            Field(description="Newsletter id(s) from the tool description; leave out to search all."),
+        ] = None,
     ) -> CallToolResult:
-        passed = (("limit", limit), ("category", category), ("since", since), ("until", until))
+        passed = (
+            ("limit", limit),
+            ("category", category),
+            ("since", since),
+            ("until", until),
+            ("source", source),
+        )
         args = ["query", *(n for n, v in passed if v is not None)] + (["kind"] if kind != "all" else [])
         started = time.monotonic()
         try:
@@ -233,6 +258,7 @@ def build_server(
                 since,
                 until,
                 kind,
+                source,
                 default_limit=s.default_limit,
                 max_limit=s.max_limit,
             )

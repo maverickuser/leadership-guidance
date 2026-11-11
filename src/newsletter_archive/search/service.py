@@ -32,7 +32,7 @@ from . import db
 from .embeddings import query_input
 from .filters import KIND_VALUES, Filters
 from .fusion import diversify, rrf
-from .keyword import all_categories, build_keyword_query, keyword_search, resolve_categories
+from .keyword import all_categories, all_sources, build_keyword_query, keyword_search, resolve_categories
 from .rerank import RerankerUnavailableError
 from .vector import vector_search
 
@@ -71,6 +71,7 @@ class SearchRequest:
     since: date | None = None
     until: date | None = None
     kind: str = "all"
+    sources: tuple[str, ...] = ()  # newsletter ids; empty means every newsletter
 
     @classmethod
     def create(
@@ -81,6 +82,7 @@ class SearchRequest:
         since: object = None,
         until: object = None,
         kind: object = "all",
+        source: object = None,
         *,
         default_limit: int = 10,
         max_limit: int = 30,
@@ -113,7 +115,18 @@ class SearchRequest:
             kind = "all"
         if not isinstance(kind, str) or kind not in KIND_VALUES:
             raise SearchError(f"kind must be one of: {', '.join(KIND_VALUES)}")
-        return cls(text, n, cats, start, end, str(kind))
+        if source is None:
+            srcs: tuple[str, ...] = ()
+        elif isinstance(source, str):
+            srcs = (source,)
+        elif isinstance(source, list | tuple) and all(isinstance(s, str) for s in source):
+            srcs = tuple(source)
+        else:
+            raise SearchError("source must be a newsletter id or a list of ids")
+        if any(not s.strip() for s in srcs):
+            raise SearchError("source must be a newsletter id or a list of ids, not blank")
+        srcs = tuple(dict.fromkeys(s.strip().lower() for s in srcs))
+        return cls(text, n, cats, start, end, str(kind), srcs)
 
 
 def _date(name: str, value: object) -> date | None:
@@ -141,6 +154,8 @@ class PostRef:
     url: str
     published_date: str | None
     categories: list[str]
+    source: str | None = None  # the newsletter's id; None for rows indexed before the move
+    source_name: str | None = None  # its name from config.yaml (the id when it has none)
 
 
 @dataclass(frozen=True)
@@ -172,12 +187,25 @@ class SearchResponse:
 
 
 @dataclass(frozen=True)
+class SourceOverview:
+    """One newsletter in the live index."""
+
+    id: str
+    name: str
+    posts: int
+    first: str | None
+    last: str | None
+    categories: list[str]
+
+
+@dataclass(frozen=True)
 class ArchiveOverview:
     generation: db.Generation
     posts: int
     first: str | None
     last: str | None
     categories: list[str]
+    sources: list[SourceOverview] = field(default_factory=list)
 
 
 @dataclass(frozen=True)
@@ -263,9 +291,43 @@ class SearchService:
                 ).fetchone()
                 assert row is not None
                 first, last = (d.isoformat() if isinstance(d, date) else d for d in row[1:])
-                return ArchiveOverview(gen, int(row[0]), first, last, all_categories(conn, gen.schema))
+                return ArchiveOverview(
+                    gen, int(row[0]), first, last, all_categories(conn, gen.schema), self._sources(conn, gen)
+                )
 
         return self._with_db(run)
+
+    def _sources(self, conn: psycopg.Connection, gen: db.Generation) -> list[SourceOverview]:
+        schema = sql.Identifier(gen.schema)
+        counts = conn.execute(
+            sql.SQL(
+                "SELECT source, count(*), min(published_date), max(published_date) FROM {}.posts "
+                "WHERE source IS NOT NULL GROUP BY source ORDER BY source"
+            ).format(schema)
+        ).fetchall()
+        cats: dict[str, list[str]] = dict(
+            conn.execute(
+                sql.SQL(
+                    "SELECT source, array_agg(DISTINCT c ORDER BY c) FROM {}.posts, unnest(categories) AS c "
+                    "WHERE source IS NOT NULL GROUP BY source"
+                ).format(schema)
+            ).fetchall()
+        )
+        out = []
+        for src, n, first, last in counts:
+            first_s, last_s = (d.isoformat() if isinstance(d, date) else d for d in (first, last))
+            out.append(
+                SourceOverview(
+                    src, self._source_name(src) or src, int(n), first_s, last_s, list(cats.get(src) or [])
+                )
+            )
+        return out
+
+    def _source_name(self, source: str | None) -> str | None:
+        if source is None:
+            return None
+        names = {s.id: s.display_name for s in self.config.sources}
+        return names.get(source, source)
 
     def _with_db(self, run: Callable[[], T]) -> T:
         """Database errors as SearchError. If the cached index version was dropped (a swap
@@ -300,7 +362,15 @@ class SearchService:
                 if unknown:
                     valid = ", ".join(all_categories(conn, gen.schema)) or "(none)"
                     raise SearchError(f"unknown category {', '.join(unknown)}; valid categories: {valid}")
-            filters = Filters(cats, req.since, req.until, req.kind)
+            if req.sources:
+                known = all_sources(conn, gen.schema)
+                if any(s not in known for s in req.sources):  # maybe just indexed: read again
+                    known = all_sources(conn, gen.schema, fresh=True)
+                unknown = [s for s in req.sources if s not in known]
+                if unknown:
+                    valid = ", ".join(known) or "(none)"
+                    raise SearchError(f"unknown source {', '.join(unknown)}; valid sources: {valid}")
+            filters = Filters(cats, req.since, req.until, req.kind, req.sources)
             paused = self._semantic_paused_until - self.clock()
             embedding = None if paused > 0 else _pool.submit(self._embed_query, req.query, gen)
             keyword = keyword_search(
@@ -379,6 +449,7 @@ class SearchService:
             "since": req.since.isoformat() if req.since else None,
             "until": req.until.isoformat() if req.until else None,
             "kind": req.kind,
+            "source": list(req.sources) or None,
         }
         notes = [self._redact(n) for n in notes]  # the one place notes are made safe
         return SearchResponse(req.query, filt, semantic, reranked, results, notes, gen.generation)
@@ -423,15 +494,18 @@ class SearchService:
         rows = conn.execute(
             sql.SQL(
                 "SELECT x.passage_id, x.post_id, x.kind, x.heading, x.body, p.title, p.url, "
-                "p.published_date, p.categories FROM {s}.passages x JOIN {s}.posts p USING (post_id) "
+                "p.published_date, p.categories, p.source "
+                "FROM {s}.passages x JOIN {s}.posts p USING (post_id) "
                 "WHERE x.passage_id = ANY(%s)"
             ).format(s=sql.Identifier(schema)),
             (ids,),
         ).fetchall()
         out = {}
-        for pid, post_id, kind, heading, body, title, url, published, categories in rows:
+        for pid, post_id, kind, heading, body, title, url, published, categories, source in rows:
             published_str = published.isoformat() if isinstance(published, date) else published
-            post = PostRef(post_id, title, url, published_str, list(categories or []))
+            post = PostRef(
+                post_id, title, url, published_str, list(categories or []), source, self._source_name(source)
+            )
             out[pid] = _Row(pid, post_id, kind, heading, body, post)
         return out
 
