@@ -1,6 +1,6 @@
 # Newsletter Archive
 
-A personal command-line tool that saves the posts **you subscribe to** on a Ghost-based newsletter site as clean, structured JSON on your own computer. Your agent can then search it through a local MCP server.
+A personal command-line tool that saves the posts **you subscribe to**, from one or more newsletters on Ghost or Substack, as clean, structured JSON on your own computer. Your agent can then search them, together or one at a time, through a local MCP server.
 
 - **Personal use only.** It uses your own login cookie and reads only what your subscription can read. It never bypasses the paywall.
 - **Polite.** One request at a time, at least 2 seconds apart, with backoff on errors.
@@ -47,7 +47,36 @@ Each newsletter's cookie goes in the `.env` variable its `cookie_env` names.
    NEWSLETTER_COOKIE=ghost-members-ssr=<value>; ghost-members-ssr.sig=<value>
    ```
 
-Only the two `ghost-members-ssr` cookies matter, and they last several months. If a run says *"your cookie looks expired"*, it names the newsletter and the `.env` variable to refresh; copy a fresh value the same way. With several newsletters, the others still run.
+Paste the whole header: it is sent only to that newsletter's own site. On a Ghost site, the sign-in cookies are the two `ghost-members-ssr` ones. On a Substack custom domain (such as `newsletter.pragmaticengineer.com`), `connect.sid` alone was enough when we checked; on a `*.substack.com` address it is usually `substack.sid`. Copy from the request header as above: a browser's "export cookies" file often leaves these sign-in cookies out, because they are HttpOnly.
+
+If a run says *"your cookie looks expired"*, it names the newsletter and the `.env` variable to refresh. Copy a fresh value the same way. With several newsletters, the others still run.
+
+### Adding a newsletter
+
+1. **Check what the publisher allows.** Read the site's `robots.txt`. If it has a `Content-Signal` line with `ai-train=no`, keep the posts out of model training: use a **paid** Gemini plan, whose terms don't use your data for training (see *What is sent to Gemini*).
+2. **Add its cookie** to `.env` under a new variable, for example `PRAGMATIC_ENGINEER_COOKIE=connect.sid=<value>`.
+3. **Add an entry under `sources:`** in `config.yaml`:
+
+   ```yaml
+     - id: pragmatic-engineer             # lowercase letters, digits and hyphens; names its folder
+       name: The Pragmatic Engineer       # shown in search results
+       platform: substack                 # ghost or substack
+       base_url: https://newsletter.pragmaticengineer.com
+       cookie_env: PRAGMATIC_ENGINEER_COOKIE
+   ```
+
+4. **Try 5 posts first, without indexing:**
+
+   ```bash
+   archive discover --source pragmatic-engineer          # finds every post (sitemap only)
+   archive fetch --source pragmatic-engineer --limit 5
+   archive extract --source pragmatic-engineer --limit 5
+   ```
+
+   Open a few files in `<data folder>/pragmatic-engineer/posts/` and check that the text is complete. (Don't use `archive run` for this: it also indexes, before you've seen the cost.)
+5. **Load the rest:** `archive fetch --source pragmatic-engineer`, then `archive extract --source pragmatic-engineer`. At one request every 2 seconds, about 600 posts take roughly 25 minutes.
+6. **See the indexing cost, then index:** `archive index --dry-run` shows the estimated Gemini cost. Then run `archive index`, adding `--yes` if the estimate is over your per-run limit (`search.max_embed_tokens_per_run`, 1.5M tokens by default; about 600 long posts are well over it). The run stops and says so if you leave it out.
+7. **Nothing else to set up.** The weekly job already covers every newsletter in `config.yaml`, and searches cover all of them unless you pass `source`.
 
 ## Commands
 
@@ -205,7 +234,7 @@ Claude Code, Claude Desktop or any MCP client can search your archive through a 
    ```
 
    Without it, search still works but isn't re-ranked.
-4. Build the index: `archive index --dry-run` shows the cost, then run `archive index`. For about 250 posts, the first build takes ~20 minutes and costs about $1.30. Later runs only process new or changed posts, and the weekly `archive run` keeps the index up to date.
+4. Build the index: `archive index --dry-run` shows the cost, then run `archive index` (add `--yes` if it says the estimate is over the per-run limit). For about 250 posts, the first build takes ~20 minutes and costs about $1.30. Later runs only process new or changed posts, and the weekly `archive run` keeps the index up to date.
 
 ### Connect your agent
 
@@ -265,6 +294,7 @@ A search takes about 5 seconds. If Gemini is unreachable, results come from keyw
 - **Indexing:** each passage's text, plus its post title and section heading, is sent for embedding. Each post's cleaned text is sent once to write its summary. Both results are cached, so unchanged text is never sent again.
 - **Searching:** only your query text is sent, for embedding.
 - Your cookie and member details are never sent. The re-ranker runs on your machine.
+- **Use a paid Gemini plan** when a newsletter's `robots.txt` says `ai-train=no` (The Pragmatic Engineer does). Google's paid-tier terms don't use your prompts or content to train its models; the free tier's do.
 
 ### Index versions
 
