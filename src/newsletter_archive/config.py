@@ -1,9 +1,10 @@
-"""Load settings from config.yaml and the cookie from the environment / .env."""
+"""Load settings from config.yaml and each newsletter's cookie from the environment / .env."""
 
 from __future__ import annotations
 
 import math
 import os
+import re
 from collections.abc import Callable
 from dataclasses import dataclass, field, fields, replace
 from pathlib import Path
@@ -14,6 +15,7 @@ from dotenv import dotenv_values
 
 from . import __version__
 from .errors import ConfigError
+from .platforms import PLATFORM_NAMES
 from .search.text import squash
 
 COOKIE_ENV = "NEWSLETTER_COOKIE"
@@ -23,16 +25,25 @@ DB_READER_PASSWORD_ENV = "ARCHIVE_DB_READER_PASSWORD"
 DB_PORT_ENV = "ARCHIVE_DB_PORT"
 
 DEFAULTS: dict[str, Any] = {
-    "base_url": None,  # required: the newsletter site, set in config.yaml
+    "sources": None,  # required: the newsletters, set in config.yaml
     "delay_seconds": 2,
     "max_retries": 3,
     "timeout_seconds": 30,
     "min_word_count": 300,
-    "output_dir": "../newsletter-archive-data",  # next to the repo, outside git
+    "output_dir": "../leadership-coach-datasets",  # next to the repo, outside git
     "user_agent": f"newsletter-archive/{__version__} (personal archive; one request every 2s)",
     "search": None,  # optional mapping; see SearchConfig
-    "boilerplate_prefixes": [],  # extra intro openings to strip; kept in the local config only
 }
+
+SOURCE_ID_RE = re.compile(r"[a-z0-9][a-z0-9-]*")
+COOKIE_ENV_RE = re.compile(r"[A-Z][A-Z0-9_]*")
+# Variables that hold other secrets; a source's cookie_env may never point at one of them.
+NON_COOKIE_ENVS = frozenset({GEMINI_KEY_ENV, DB_WRITER_PASSWORD_ENV, DB_READER_PASSWORD_ENV, DB_PORT_ENV})
+# Names a source folder can't take: shared items at the top of output_dir, and the folders of
+# the old single-newsletter layout (so `archive migrate` can never collide with a source).
+RESERVED_SOURCE_IDS = ("logs", "models", "postgres", "posts", "raw")
+SOURCE_FIELDS = {"id", "name", "platform", "base_url", "cookie_env", "boilerplate_prefixes"}
+SOURCE_REQUIRED = ("id", "platform", "base_url", "cookie_env")
 
 MIN_DELAY_SECONDS = 2
 BACKOFF_SECONDS: tuple[int, ...] = (2, 4, 8)  # wait before retry 1, 2, 3
@@ -129,47 +140,33 @@ def _empty_secret() -> Secret:
 
 
 @dataclass(frozen=True)
-class Config:
-    """Validated settings for one run. Build it with load_config()."""
+class SourceConfig:
+    """One newsletter: its site, platform, cookie, and its own folder under output_dir."""
 
+    id: str
+    platform: str
     base_url: str
-    delay_seconds: float
-    max_retries: int
-    timeout_seconds: float
-    min_word_count: int
-    output_dir: Path
-    user_agent: str
+    cookie_env: str
     cookie: Secret
-    search: SearchConfig = field(default_factory=SearchConfig)
+    root: Path  # output_dir / id
+    name: str = ""  # display name; the id when empty
     boilerplate_prefixes: tuple[str, ...] = ()
-    gemini_api_key: Secret = field(default_factory=_empty_secret)
-    db_writer_password: Secret = field(default_factory=_empty_secret)
-    db_reader_password: Secret = field(default_factory=_empty_secret)
 
     @property
-    def secrets(self) -> tuple[Secret, ...]:
-        """Every secret value, for log redaction."""
-        return (self.cookie, self.gemini_api_key, self.db_writer_password, self.db_reader_password)
+    def display_name(self) -> str:
+        return self.name or self.id
 
     @property
     def manifest_path(self) -> Path:
-        return self.output_dir / "manifest.json"
+        return self.root / "manifest.json"
 
     @property
     def raw_dir(self) -> Path:
-        return self.output_dir / "raw"
+        return self.root / "raw"
 
     @property
     def posts_dir(self) -> Path:
-        return self.output_dir / "posts"
-
-    @property
-    def logs_dir(self) -> Path:
-        return self.output_dir / "logs"
-
-    @property
-    def lock_path(self) -> Path:
-        return self.output_dir / ".lock"
+        return self.root / "posts"
 
     def raw_path(self, slug: str) -> Path:
         """Cached HTML for one post."""
@@ -178,6 +175,79 @@ class Config:
     def post_path(self, slug: str) -> Path:
         """JSON record for one post."""
         return self.posts_dir / f"{slug}.json"
+
+    def post_id(self, slug: str) -> str:
+        """The post's id everywhere: in its file, the search store and the eval files."""
+        return f"{self.id}/{slug}"
+
+
+@dataclass(frozen=True)
+class Config:
+    """Validated settings for one run. Build it with load_config()."""
+
+    sources: tuple[SourceConfig, ...]
+    delay_seconds: float
+    max_retries: int
+    timeout_seconds: float
+    min_word_count: int
+    output_dir: Path
+    user_agent: str
+    search: SearchConfig = field(default_factory=SearchConfig)
+    gemini_api_key: Secret = field(default_factory=_empty_secret)
+    db_writer_password: Secret = field(default_factory=_empty_secret)
+    db_reader_password: Secret = field(default_factory=_empty_secret)
+
+    @property
+    def secrets(self) -> tuple[Secret, ...]:
+        """Every secret value, for log redaction."""
+        cookies = tuple(s.cookie for s in self.sources)
+        return (*cookies, self.gemini_api_key, self.db_writer_password, self.db_reader_password)
+
+    @property
+    def old_manifest_path(self) -> Path:
+        """Where the single-newsletter layout kept its manifest (see `archive migrate`)."""
+        return self.output_dir / "manifest.json"
+
+    def source(self, source_id: str) -> SourceConfig:
+        """The source with this id.
+
+        Raises:
+            ConfigError: no such source; the message lists the valid ids.
+        """
+        for s in self.sources:
+            if s.id == source_id:
+                return s
+        valid = ", ".join(s.id for s in self.sources)
+        raise ConfigError(f"unknown source {source_id!r}; valid sources: {valid}")
+
+    def select(self, source_ids: list[str] | None) -> tuple[SourceConfig, ...]:
+        """The sources named, in config order; every source when none are named.
+
+        Raises:
+            ConfigError: a name isn't a configured source.
+        """
+        if not source_ids:
+            return self.sources
+        wanted = {self.source(i).id for i in source_ids}
+        return tuple(s for s in self.sources if s.id in wanted)
+
+    def only_source(self) -> SourceConfig:
+        """The single configured source, for callers that don't name one.
+
+        Raises:
+            ConfigError: several sources are configured, so the caller must name one.
+        """
+        if len(self.sources) != 1:
+            raise ConfigError("several sources are configured; name the one to use")
+        return self.sources[0]
+
+    @property
+    def logs_dir(self) -> Path:
+        return self.output_dir / "logs"
+
+    @property
+    def lock_path(self) -> Path:
+        return self.output_dir / ".lock"
 
     def with_overrides(self, **changes: Any) -> Config:
         return _validate(replace(self, **changes))
@@ -325,16 +395,135 @@ def _validate_search(s: SearchConfig) -> None:
         raise ConfigError("search.summaries.thinking_level must be one of: '', minimal, low, medium, high")
 
 
+def _old_config_message(path: Path, loaded: dict[str, Any]) -> str:
+    """The error for a single-newsletter config: the `sources:` entry to paste in instead."""
+    lines = [
+        "sources:",
+        "  - id: <choose a short id, e.g. main>   # names the newsletter's folder",
+        f"    base_url: {loaded.get('base_url') or 'https://...'}",
+        "    platform: ghost",
+        f"    cookie_env: {COOKIE_ENV}",
+    ]
+    prefixes = loaded.get("boilerplate_prefixes")
+    if isinstance(prefixes, list) and prefixes:
+        lines.append("    boilerplate_prefixes:")
+        lines += [f"      - {p!r}" for p in prefixes]
+    entry = "\n".join(lines)
+    return (
+        f"{path} uses the old single-newsletter settings (base_url). Each newsletter is now an "
+        f"entry under `sources:`. Replace base_url"
+        f"{' and boilerplate_prefixes' if 'boilerplate_prefixes' in loaded else ''} with:\n\n{entry}\n\n"
+        "Then move your data with `archive migrate --source <id>` (see the README)."
+    )
+
+
+def _parse_sources(
+    raw: Any, output_dir: Path, read_env: Callable[[str], str | None]
+) -> tuple[SourceConfig, ...]:
+    """Build and check the `sources:` list.
+
+    Raises:
+        ConfigError: the list is missing or empty, or a source is invalid (the message names it).
+    """
+    if not isinstance(raw, list) or not raw:
+        raise ConfigError(
+            "sources is not set; copy config.example.yaml to config.yaml and add each newsletter "
+            "under `sources:`"
+        )
+    sources: list[SourceConfig] = []
+    for i, item in enumerate(raw, start=1):
+        where = f"sources entry {i}"
+        if not isinstance(item, dict):
+            raise ConfigError(f"{where} must be a mapping of settings")
+        unknown = set(item) - SOURCE_FIELDS
+        if unknown:
+            raise ConfigError(f"unknown setting(s) in {where}: {', '.join(sorted(unknown))}")
+        missing = [k for k in SOURCE_REQUIRED if not item.get(k)]
+        if missing:
+            raise ConfigError(f"{where} needs {', '.join(missing)}")
+        sid = str(item["id"])
+        where = f"source {sid!r}"
+        if not SOURCE_ID_RE.fullmatch(sid):
+            raise ConfigError(f"{where}: id must be lowercase letters, digits and hyphens")
+        if sid in RESERVED_SOURCE_IDS:
+            raise ConfigError(
+                f"{where}: id can't be one of {', '.join(RESERVED_SOURCE_IDS)} (used for shared data)"
+            )
+        platform = str(item["platform"])
+        if platform not in PLATFORM_NAMES:
+            raise ConfigError(
+                f"{where}: unknown platform {platform!r}; use one of: {', '.join(PLATFORM_NAMES)}"
+            )
+        base_url = str(item["base_url"]).rstrip("/")
+        if not base_url.startswith(("http://", "https://")) or not _site_host(base_url):
+            raise ConfigError(f"{where}: base_url must start with http:// or https:// and name a site")
+        cookie_env = str(item["cookie_env"])
+        if not COOKIE_ENV_RE.fullmatch(cookie_env):
+            raise ConfigError(f"{where}: cookie_env must be an environment variable name like {COOKIE_ENV}")
+        if cookie_env in NON_COOKIE_ENVS:
+            # Never send the API key or a database password to a website as a cookie.
+            raise ConfigError(f"{where}: cookie_env {cookie_env} holds another secret, not a cookie")
+        cookie = Secret(clean_cookie(read_env(cookie_env)))
+        if cookie and not _cookie_is_valid(cookie.reveal()):
+            raise ConfigError(
+                f"{cookie_env} contains a line break or non-ASCII character; paste the Cookie header again"
+            )
+        name = item.get("name")
+        if name is not None and not (isinstance(name, str) and name.strip()):
+            raise ConfigError(f"{where}: name must be non-empty text")
+        try:
+            prefixes = _parse_prefixes(item.get("boilerplate_prefixes"))
+        except ConfigError as e:
+            raise ConfigError(f"{where}: {e}") from None
+        sources.append(
+            SourceConfig(
+                id=sid,
+                platform=platform,
+                base_url=base_url,
+                cookie_env=cookie_env,
+                cookie=cookie,
+                root=output_dir / sid,
+                name=(name or "").strip(),
+                boilerplate_prefixes=prefixes,
+            )
+        )
+    return tuple(sources)
+
+
+def _site_host(base_url: str) -> str:
+    """The host part of a site URL, lowercased (`https://www.Example.com/x` -> `www.example.com`)."""
+    return base_url.split("://", 1)[-1].split("/", 1)[0].lower()
+
+
+def _check_sources(sources: tuple[SourceConfig, ...]) -> None:
+    """Ids, sites and cookie variables must be unique across sources: one site gets one cookie,
+    and a cookie goes to one site."""
+    seen_ids: set[str] = set()
+    seen_sites: dict[str, str] = {}
+    seen_cookie_envs: dict[str, str] = {}
+    for s in sources:
+        if s.id in seen_ids:
+            raise ConfigError(f"duplicate source id {s.id!r}")
+        seen_ids.add(s.id)
+        host = _site_host(s.base_url)  # http and https count as the same site
+        if host in seen_sites:
+            raise ConfigError(f"sources {seen_sites[host]!r} and {s.id!r} have the same base_url site")
+        seen_sites[host] = s.id
+        if s.cookie_env in seen_cookie_envs:
+            raise ConfigError(
+                f"sources {seen_cookie_envs[s.cookie_env]!r} and {s.id!r} share cookie_env "
+                f"{s.cookie_env}; each newsletter needs its own cookie variable"
+            )
+        seen_cookie_envs[s.cookie_env] = s.id
+
+
 def _cookie_is_valid(value: str) -> bool:
     """A header value must be printable ASCII on one line."""
     return all(" " <= ch <= "~" for ch in value)
 
 
 def _validate(cfg: Config) -> Config:
-    if cfg.cookie and not _cookie_is_valid(cfg.cookie.reveal()):
-        raise ConfigError(
-            f"{COOKIE_ENV} contains a line break or non-ASCII character; paste the Cookie header again"
-        )
+    _check_sources(cfg.sources)
     if cfg.delay_seconds < MIN_DELAY_SECONDS:
         raise ConfigError(f"delay_seconds must be >= {MIN_DELAY_SECONDS}")
     if not 0 <= cfg.max_retries <= MAX_RETRIES:
@@ -343,8 +532,6 @@ def _validate(cfg: Config) -> Config:
         raise ConfigError("timeout_seconds must be > 0")
     if cfg.min_word_count < 0:
         raise ConfigError("min_word_count must be >= 0")
-    if not cfg.base_url.startswith(("http://", "https://")):
-        raise ConfigError("base_url must start with http:// or https://")
     _validate_search(cfg.search)
     return cfg
 
@@ -369,6 +556,8 @@ def load_config(
             raise ConfigError(f"could not parse {path}: {e}") from None
         if not isinstance(loaded, dict):
             raise ConfigError(f"{path} must be a mapping of settings")
+        if "base_url" in loaded and "sources" not in loaded:
+            raise ConfigError(_old_config_message(path, loaded))
         unknown = set(loaded) - set(DEFAULTS)
         if unknown:
             raise ConfigError(f"unknown setting(s) in {path}: {', '.join(sorted(unknown))}")
@@ -382,22 +571,17 @@ def load_config(
     if not output_dir.is_absolute():
         output_dir = (base_dir / output_dir).resolve()
 
-    if not values["base_url"]:
-        raise ConfigError(
-            f"base_url is not set; copy config.example.yaml to {path} and set the newsletter's address"
-        )
+    sources = _parse_sources(values["sources"], output_dir, read_env)
     try:
         cfg = Config(
-            base_url=str(values["base_url"]).rstrip("/"),
+            sources=sources,
             delay_seconds=float(values["delay_seconds"]),
             max_retries=int(values["max_retries"]),
             timeout_seconds=float(values["timeout_seconds"]),
             min_word_count=int(values["min_word_count"]),
             output_dir=output_dir,
             user_agent=str(values["user_agent"]),
-            cookie=Secret(clean_cookie(read_env(COOKIE_ENV))),
             search=_parse_search(values["search"], read_env(DB_PORT_ENV)),
-            boilerplate_prefixes=_parse_prefixes(values["boilerplate_prefixes"]),
             gemini_api_key=Secret(read_env(GEMINI_KEY_ENV)),
             db_writer_password=Secret(read_env(DB_WRITER_PASSWORD_ENV)),
             db_reader_password=Secret(read_env(DB_READER_PASSWORD_ENV)),
@@ -417,6 +601,7 @@ __all__ = [
     "Config",
     "SearchConfig",
     "Secret",
+    "SourceConfig",
     "SummaryConfig",
     "clean_cookie",
     "load_config",

@@ -80,7 +80,7 @@ def test_hybrid_results_have_every_field(cfg):
     resp = ask(service(cfg, reranker=FakeReranker()), '"bar raiser"', limit=5)
     assert resp.semantic and resp.reranked and resp.notes == []
     top = resp.results[0]
-    assert top.post.id == "hiring" and top.rank == 1 and top.found_by in ("keyword", "both")
+    assert top.post.id == "main/hiring" and top.rank == 1 and top.found_by in ("keyword", "both")
     assert top.post.url and top.post.published_date == "2025-02-01" and top.post.categories == ["Hiring"]
     d = resp.to_dict()
     assert set(d) == {"query", "filters", "semantic", "reranked", "results", "notes"}
@@ -93,7 +93,7 @@ def test_keyword_only_when_the_query_cannot_be_embedded(cfg):
     build(cfg)
     resp = ask(service(cfg, embedder=RuntimeError("GEMINI_API_KEY is not set")), "bar raiser")
     assert not resp.semantic and "semantic search skipped: GEMINI_API_KEY is not set" in resp.notes[0]
-    assert posts(resp)[0] == "hiring" and all(r.found_by == "keyword" for r in resp.results)
+    assert posts(resp)[0] == "main/hiring" and all(r.found_by == "keyword" for r in resp.results)
     assert ask(service(cfg, embedder=RuntimeError("down")), "zzqqxx").results == []  # no match: empty
 
 
@@ -124,11 +124,11 @@ def test_reranker_reorders_and_falls_back(cfg):
             return [1.0 if "promotion" in d else 0.0 for d in documents]
 
     resp = ask(service(cfg, reranker=LovesCareer()), "bar raiser")
-    assert resp.reranked and posts(resp)[0] == "career" and resp.results[0].score == 1.0
+    assert resp.reranked and posts(resp)[0] == "main/career" and resp.results[0].score == 1.0
     broken = Reranking(lambda: FakeReranker(fail=RuntimeError("mps error")), 5)
     broken.wait_loaded(5)
     resp = ask(service(cfg, reranker=broken), "bar raiser")
-    assert not resp.reranked and "re-ranker failed" in resp.notes[0] and posts(resp)[0] == "hiring"
+    assert not resp.reranked and "re-ranker failed" in resp.notes[0] and posts(resp)[0] == "main/hiring"
     resp = ask(service(cfg), "bar raiser")
     assert not resp.reranked and resp.notes == ["results not re-ranked: no re-ranker configured"]
 
@@ -140,7 +140,7 @@ def test_at_most_three_passages_and_one_summary_per_post(cfg):
 
     passages = Counter(r.post.id for r in resp.results if r.kind == "passage")
     summaries = Counter(r.post.id for r in resp.results if r.kind == "summary")
-    assert passages["long"] == 3 and max(summaries.values()) == 1
+    assert passages["main/long"] == 3 and max(summaries.values()) == 1
     assert len({r.id for r in resp.results}) == len(resp.results)
 
 
@@ -148,10 +148,10 @@ def test_filters_and_unknown_category(cfg):
     build(cfg)
     svc = service(cfg)
     resp = ask(svc, "team", category=["hiring"], limit=30)
-    assert set(posts(resp)) == {"hiring"} and resp.filters["category"] == ["Hiring"]
+    assert set(posts(resp)) == {"main/hiring"} and resp.filters["category"] == ["Hiring"]
     assert all(r.kind == "summary" and r.heading is None for r in ask(svc, "team", kind="summaries").results)
     early = ask(svc, "team", until="2025-02-28", limit=30)
-    assert set(posts(early)) == {"delegation", "hiring"}
+    assert set(posts(early)) == {"main/delegation", "main/hiring"}
     with pytest.raises(
         SearchError, match="unknown category Nope; valid categories: Career, Hiring, Leadership"
     ):

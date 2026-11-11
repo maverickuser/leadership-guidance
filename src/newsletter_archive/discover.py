@@ -10,7 +10,7 @@ from urllib.parse import parse_qsl, unquote, urlencode, urljoin, urlsplit, urlun
 from bs4 import BeautifulSoup
 from lxml import etree
 
-from .config import Config
+from .config import Config, SourceConfig
 from .errors import ArchiveError, FetchError
 from .http import Client, origin, to_base_host
 from .models import Manifest, ManifestEntry
@@ -307,12 +307,14 @@ def run_discover(
     limit: int | None = None,
     dry_run: bool = False,
     platform: Platform | None = None,
+    source: SourceConfig | None = None,
 ) -> DiscoverResult:
     """Stage 1: merge sitemap posts and their categories into the manifest (saved unless dry run).
 
     The platform (default Ghost) picks the posts among the sitemap's URLs and finds categories;
     a platform whose categories come from post pages leaves them empty here."""
-    platform = platform or get_platform("ghost")
+    source = source or config.only_source()
+    platform = platform or get_platform(source.platform)
     base = client.base_url
     post_urls = platform.post_urls(collect_sitemap_urls(client, f"{base}/sitemap.xml", base), base)
     log.info("sitemap: %d posts", len(post_urls))
@@ -329,7 +331,7 @@ def run_discover(
     if dry_run:
         log.info("dry run: would add %d, update %d; manifest not written", stats.added, stats.updated)
     else:
-        save_manifest(manifest, config.manifest_path)
+        save_manifest(manifest, source.manifest_path)
     if crawl.failed:
         log.warning("categories incomplete: %s", ", ".join(crawl.failed))
     return DiscoverResult(

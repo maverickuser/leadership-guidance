@@ -121,3 +121,12 @@ def test_mcp_logging_goes_to_stderr_a_daily_file_and_captures_pool_warnings(cfg,
     assert "server line" in logged and "password authentication failed" in logged
     assert "routine pool chatter" not in logged and "server line" in err.getvalue()
     assert logging.getLogger("psycopg.pool").handlers == []
+
+
+def test_every_cookie_is_redacted_pair_by_pair():
+    # Two newsletters, two cookies: the second one's pairs and bare values are scrubbed too.
+    second = "substack.sid=SECONDSECRET789; other=OTHERTOKEN012"
+    f = RedactFilter(Secret(TEST_COOKIE), Secret(second))
+    out = f.redact(f"saw other=OTHERTOKEN012 and just SECONDSECRET789 and {second}")
+    assert "SECONDSECRET789" not in out and "OTHERTOKEN012" not in out
+    assert out.count("[REDACTED]") >= 3

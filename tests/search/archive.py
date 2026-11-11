@@ -36,8 +36,9 @@ def record(
     ]
     text = "\n\n".join(s["text"] for s in sections)
     return {
-        "schema_version": 1,
-        "id": slug,
+        "schema_version": 2,
+        "id": f"main/{slug}",
+        "source": "main",
         "url": f"https://www.example.com/{slug}/",
         "title": title or f"Post {slug}",
         "subtitle": None,
@@ -56,14 +57,15 @@ def record(
 
 
 def write_archive(config: Config, records: list[dict[str, Any]], extra_manifest: list[str] = ()) -> None:
-    config.posts_dir.mkdir(parents=True, exist_ok=True)
+    config.only_source().posts_dir.mkdir(parents=True, exist_ok=True)
     entries = {}
     for r in records:
-        config.post_path(r["id"]).write_text(json.dumps(r), encoding="utf-8")
-        entries[r["id"]] = ManifestEntry(url=r["url"], slug=r["id"], categories=r["categories"], status="ok")
+        slug = r["id"].split("/", 1)[1]
+        config.only_source().post_path(slug).write_text(json.dumps(r), encoding="utf-8")
+        entries[slug] = ManifestEntry(url=r["url"], slug=slug, categories=r["categories"], status="ok")
     for slug in extra_manifest:
         entries[slug] = ManifestEntry(url=f"https://www.example.com/{slug}/", slug=slug, status="ok")
-    save_manifest(Manifest(entries=entries), config.manifest_path)
+    save_manifest(Manifest(entries=entries), config.only_source().manifest_path)
 
 
 def small_config(config: Config, **search) -> Config:
@@ -72,8 +74,8 @@ def small_config(config: Config, **search) -> Config:
 
 
 def remove_post(config: Config, slug: str) -> None:
-    path = Path(config.post_path(slug))
+    path = Path(config.only_source().post_path(slug))
     path.unlink()
-    data = json.loads(config.manifest_path.read_text())
+    data = json.loads(config.only_source().manifest_path.read_text())
     data["posts"] = [p for p in data["posts"] if p["slug"] != slug]
-    config.manifest_path.write_text(json.dumps(data))
+    config.only_source().manifest_path.write_text(json.dumps(data))

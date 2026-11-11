@@ -14,7 +14,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
-from .config import Config
+from .config import Config, SourceConfig
 from .errors import ArchiveError, ExtractError
 from .models import Extracted, Manifest, ManifestEntry, PostCallback, iso_utc, no_callback, utc_now_iso
 from .platforms import Platform, get_platform
@@ -127,7 +127,9 @@ def mtime_iso(path: Path) -> str:
     return iso_utc(datetime.fromtimestamp(path.stat().st_mtime, tz=UTC))
 
 
-def build_record(entry: ManifestEntry, ex: Extracted, fetched_at: str, min_word_count: int) -> dict[str, Any]:
+def build_record(
+    entry: ManifestEntry, ex: Extracted, fetched_at: str, min_word_count: int, source: SourceConfig
+) -> dict[str, Any]:
     """The JSON record for one post. It is `partial` if short or cut off by the paywall.
 
     Categories come from the page when the platform reads them there, else from the manifest."""
@@ -135,7 +137,8 @@ def build_record(entry: ManifestEntry, ex: Extracted, fetched_at: str, min_word_
     categories = ex.categories if ex.categories is not None else entry.categories
     return {
         "schema_version": SCHEMA_VERSION,
-        "id": entry.slug,
+        "id": source.post_id(entry.slug),
+        "source": source.id,
         "url": entry.url,
         "title": ex.title,
         "subtitle": ex.subtitle,
@@ -182,22 +185,24 @@ def run_extract(
     dry_run: bool = False,
     on_post: PostCallback = no_callback,
     platform: Platform | None = None,
+    source: SourceConfig | None = None,
 ) -> ExtractResult:
-    """Extract every cached post into posts/{slug}.json. Reads data/raw/ only; no network.
+    """Extract a source's cached posts into {source}/posts/{slug}.json. Reads its raw/ only.
 
-    The platform (default Ghost) turns each saved page into content."""
-    platform = platform or get_platform("ghost")
+    source defaults to the only configured one; platform to the source's own."""
+    source = source or config.only_source()
+    platform = platform or get_platform(source.platform)
     result = ExtractResult()
     candidates = manifest.ordered() if limit is None else manifest.ordered()[:limit]
     for entry in candidates:
-        raw = config.raw_path(entry.slug)
+        raw = source.raw_path(entry.slug)
         if not raw.exists():
             continue
         try:
             ex = platform.extract(
-                raw.read_text(encoding="utf-8"), entry.url, config.boilerplate_prefixes, config.min_word_count
+                raw.read_text(encoding="utf-8"), entry.url, source.boilerplate_prefixes, config.min_word_count
             )
-            record = build_record(entry, ex, mtime_iso(raw), config.min_word_count)
+            record = build_record(entry, ex, mtime_iso(raw), config.min_word_count, source)
             validate_post(record)
         except Exception as e:  # one bad page must not stop the run
             reason = str(e) if isinstance(e, ExtractError) else f"{type(e).__name__}: {e}"
@@ -205,11 +210,11 @@ def run_extract(
             result.failed += 1
             if not dry_run:
                 entry.status, entry.error = "failed", f"extract: {reason}"
-                save_manifest(manifest, config.manifest_path)
+                save_manifest(manifest, source.manifest_path)
             on_post(entry.slug, "extract", "failed", reason)
             continue
 
-        post_path = config.post_path(entry.slug)
+        post_path = source.post_path(entry.slug)
         unchanged = (
             not refresh
             and post_path.exists()
@@ -233,6 +238,6 @@ def run_extract(
             result.written += 1
         entry.status, entry.error, entry.content_hash = status, None, record["content_hash"]
         entry.categories = list(record["categories"])
-        save_manifest(manifest, config.manifest_path)
+        save_manifest(manifest, source.manifest_path)
         on_post(entry.slug, "extract", status, "unchanged" if unchanged else None)
     return result

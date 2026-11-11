@@ -4,7 +4,8 @@ import pytest
 
 from newsletter_archive.errors import MISSING_COOKIE_MESSAGE, NOT_SIGNED_IN_MESSAGE
 
-from .cli_helpers import BASE, CliEnv
+from .cli_helpers import BASE, SINGLE_SOURCE_CONFIG, CliEnv
+from .conftest import TEST_COOKIE
 from .sitebuilder import ghost_site
 
 SLUGS = ["p1", "p2", "p3", "p4", "p5", "p6", "p7"]
@@ -21,13 +22,13 @@ def env(tmp_path, monkeypatch):
 def test_run_limit_end_to_end(env):
     r = env.run("run", "--limit", "5")
     assert r.exit_code == 0, r.output
-    assert len(list((env.data / "raw").iterdir())) == 5
-    assert len(list((env.data / "posts").iterdir())) == 5
+    assert len(list((env.main / "raw").iterdir())) == 5
+    assert len(list((env.main / "posts").iterdir())) == 5
     assert len(list((env.data / "logs").iterdir())) == 1
     assert "Summary: discovered=7 fetched=5 ok=5 partial=0 failed=0" in r.output
     urls = env.transport.urls()
     assert urls.index(f"{BASE}/sitemap.xml") < urls.index(f"{BASE}/p1/")  # discover before fetch
-    post = json.loads((env.data / "posts" / "p1.json").read_text())
+    post = json.loads((env.main / "posts" / "p1.json").read_text())
     assert post["categories"] == ["Career Growth"]
 
 
@@ -51,16 +52,16 @@ def test_one_client_shared_and_spacing_kept_across_stages(env):
 
 def test_stage_commands(env):
     assert env.run("discover").exit_code == 0
-    assert json.loads((env.data / "manifest.json").read_text())["posts"][0]["status"] == "discovered"
+    assert json.loads((env.main / "manifest.json").read_text())["posts"][0]["status"] == "discovered"
     assert env.run("fetch", "--limit", "2").exit_code == 0
-    assert sorted(p.name for p in (env.data / "raw").iterdir()) == ["p1.html", "p2.html"]
+    assert sorted(p.name for p in (env.main / "raw").iterdir()) == ["p1.html", "p2.html"]
     r = env.run("extract")
     assert r.exit_code == 0 and "ok=2" in r.output
 
 
 def test_discover_limit_caps_new_posts(env):
     env.run("discover", "--limit", "3")
-    assert len(json.loads((env.data / "manifest.json").read_text())["posts"]) == 3
+    assert len(json.loads((env.main / "manifest.json").read_text())["posts"]) == 3
 
 
 # spec: archive-cli / Dry run
@@ -71,14 +72,14 @@ def test_fetch_dry_run_writes_nothing(env):
     assert r.exit_code == 0
     assert "p1  fetch  would-fetch" in r.output
     assert len(env.transport.calls) == calls
-    assert not (env.data / "raw").exists() and not (env.data / "posts").exists()
+    assert not (env.main / "raw").exists() and not (env.main / "posts").exists()
 
 
 def test_run_dry_run_lists_new_posts_without_writing(env):
     r = env.run("run", "--dry-run", "--limit", "2")
     assert r.exit_code == 0
     assert "p1  fetch  would-fetch" in r.output and "p2  fetch  would-fetch" in r.output
-    assert not (env.data / "manifest.json").exists()
+    assert not (env.main / "manifest.json").exists()
     assert not any(u.endswith("/p1/") for u in env.transport.urls())
 
 
@@ -87,7 +88,7 @@ def test_missing_cookie_exit_1(tmp_path, monkeypatch):
     e = CliEnv(tmp_path, monkeypatch, cookie="")
     ghost_site(e.transport, BASE, SLUGS)
     r = e.run("run", "--limit", "1")
-    assert r.exit_code == 1 and MISSING_COOKIE_MESSAGE in r.output
+    assert r.exit_code == 1 and MISSING_COOKIE_MESSAGE.format(env="NEWSLETTER_COOKIE") in r.output
     assert e.transport.calls == []
 
 
@@ -108,7 +109,7 @@ def test_signed_out_exit_2(tmp_path, monkeypatch):
 
 
 def test_bad_config_exit_1(env):
-    env.config.write_text(f"base_url: {BASE}\ndelay_seconds: 0\n")
+    env.config.write_text(SINGLE_SOURCE_CONFIG + "delay_seconds: 0\n")
     r = env.run("discover")
     assert r.exit_code == 1 and "delay_seconds" in r.output
 
@@ -241,7 +242,9 @@ def test_mcp_command_starts_the_server(env, monkeypatch):
     from newsletter_archive import mcp_server
 
     seen = []
-    monkeypatch.setattr(mcp_server, "serve", lambda cfg, verbose: seen.append((cfg.base_url, verbose)))
+    monkeypatch.setattr(
+        mcp_server, "serve", lambda cfg, verbose: seen.append((cfg.only_source().base_url, verbose))
+    )
     r = env.run("mcp", "--verbose")
     assert r.exit_code == 0, r.output
     assert seen == [(BASE, True)]
@@ -274,7 +277,7 @@ def test_mcp_force_alone_is_an_error(env):
 
 
 def test_mcp_command_with_a_broken_config(env):
-    env.config.write_text(f"base_url: {BASE}\ndelay_seconds: 0.5\n", encoding="utf-8")
+    env.config.write_text(SINGLE_SOURCE_CONFIG + "delay_seconds: 0.5\n", encoding="utf-8")
     r = env.run("mcp")
     assert r.exit_code == 1 and "Error:" in r.output
 
@@ -289,3 +292,36 @@ def test_mcp_command_reports_start_up_errors(env, monkeypatch):
     monkeypatch.setattr(mcp_server, "serve", fail)
     r = env.run("mcp")
     assert r.exit_code == 1 and "ARCHIVE_DB_READER_PASSWORD" in r.output
+
+
+TWO_SOURCE_CONFIG = SINGLE_SOURCE_CONFIG + (
+    "  - id: pe\n    name: The Pragmatic Engineer\n    platform: ghost\n"
+    "    base_url: https://newsletter.example.org\n    cookie_env: PE_COOKIE\n"
+)
+
+
+def two_sources(tmp_path, monkeypatch, pe_cookie=TEST_COOKIE, **site):
+    e = CliEnv(tmp_path, monkeypatch)
+    e.config.write_text(TWO_SOURCE_CONFIG, encoding="utf-8")
+    (tmp_path / ".env").write_text(
+        f"NEWSLETTER_COOKIE={TEST_COOKIE}\nPE_COOKIE={pe_cookie}\n", encoding="utf-8"
+    )
+    ghost_site(e.transport, BASE, SLUGS)
+    ghost_site(e.transport, "https://newsletter.example.org", ["q1", "q2"], **site)
+    return e
+
+
+# spec: newsletter-sources / One source failing (One cookie expired)
+def test_missing_cookie_names_the_newsletters_variable(tmp_path, monkeypatch):
+    e = two_sources(tmp_path, monkeypatch, pe_cookie="")
+    r = e.run("run", "--limit", "1")
+    assert r.exit_code == 1 and "PE_COOKIE is not set" in r.output and "NEWSLETTER_COOKIE" not in r.output
+    assert e.transport.calls == []
+
+
+def test_summary_counts_every_newsletter_even_when_one_fails(tmp_path, monkeypatch):
+    e = two_sources(tmp_path, monkeypatch, signed_out={"q1"})
+    r = e.run("run", "--limit", "3")
+    assert r.exit_code == 2 and NOT_SIGNED_IN_MESSAGE in r.output
+    assert "== The Pragmatic Engineer: fetch" in r.output
+    assert "Summary: discovered=9 fetched=3" in r.output  # 7 from the first site, 2 from the second

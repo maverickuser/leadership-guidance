@@ -15,6 +15,8 @@ STATUSES: tuple[str, ...] = ("discovered", "fetched", "ok", "partial", "failed")
 # Slugs become file names, so they may only hold these characters (no "/" or "..").
 SLUG_PATTERN = r"^[a-z0-9][a-z0-9-]*$"
 _SLUG_RE = re.compile(SLUG_PATTERN)
+# A post id is "<source id>/<slug>"; both parts follow the slug rule.
+POST_ID_PATTERN = r"^[a-z0-9][a-z0-9-]*/[a-z0-9][a-z0-9-]*$"
 
 
 def iso_utc(dt: datetime) -> str:

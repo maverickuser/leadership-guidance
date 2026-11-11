@@ -1,4 +1,4 @@
-"""JSON Schema for data/posts/{slug}.json (schema_version 1)."""
+"""JSON Schema for {source}/posts/{slug}.json (schema_version 2)."""
 
 from __future__ import annotations
 
@@ -7,9 +7,11 @@ from typing import Any
 from jsonschema import Draft202012Validator
 
 from .errors import ExtractError
-from .models import SLUG_PATTERN
+from .models import POST_ID_PATTERN, SLUG_PATTERN
 
-SCHEMA_VERSION = 1
+# 2: adds `source`, and `id` became "<source>/<slug>". Version-1 files belong to the old
+# single-newsletter layout; only `archive migrate` reads them.
+SCHEMA_VERSION = 2
 
 POST_SCHEMA: dict[str, Any] = {
     "$schema": "https://json-schema.org/draft/2020-12/schema",
@@ -19,6 +21,7 @@ POST_SCHEMA: dict[str, Any] = {
     "required": [
         "schema_version",
         "id",
+        "source",
         "url",
         "title",
         "subtitle",
@@ -36,7 +39,8 @@ POST_SCHEMA: dict[str, Any] = {
     ],
     "properties": {
         "schema_version": {"const": SCHEMA_VERSION},
-        "id": {"type": "string", "pattern": SLUG_PATTERN},
+        "id": {"type": "string", "pattern": POST_ID_PATTERN},
+        "source": {"type": "string", "pattern": SLUG_PATTERN},
         "url": {"type": "string", "pattern": "^https?://"},
         "title": {"type": "string", "minLength": 1},
         "subtitle": {"type": ["string", "null"]},
@@ -87,3 +91,5 @@ def validate_post(record: dict[str, Any]) -> None:
         e = errors[0]
         where = "/".join(str(p) for p in e.path) or "(root)"
         raise ExtractError(f"schema: {where}: {e.message}")
+    if not record["id"].startswith(record["source"] + "/"):
+        raise ExtractError(f"schema: id: {record['id']!r} is not in source {record['source']!r}")

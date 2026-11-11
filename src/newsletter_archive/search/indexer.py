@@ -208,26 +208,33 @@ class _Loaded:
 
 
 def load_posts(config: Config) -> tuple[dict[str, Post], dict[str, str], set[str]]:
-    """Every eligible post from the manifest and posts/*.json, in manifest order:
-    (posts, load failures, posts to keep as they are). A post whose manifest status is
-    temporarily something else (a failed re-fetch, a run cut off between fetch and extract)
-    but whose JSON is still on disk is kept: only posts gone from the archive are removed."""
-    manifest = load_manifest(config.manifest_path)
+    """Every eligible post from each source's manifest and posts/*.json, in config then
+    manifest order: (posts, load failures, posts to keep as they are), all keyed by post id.
+    A post whose manifest status is temporarily something else (a failed re-fetch, a run cut
+    off between fetch and extract) but whose JSON is still on disk is kept: only posts gone
+    from the archive are removed."""
     posts: dict[str, Post] = {}
     failed: dict[str, str] = {}
-    keep = {
-        e.slug
-        for e in manifest.ordered()
-        if e.status not in ELIGIBLE and Path(config.post_path(e.slug)).exists()
-    }
-    for entry in [e for e in manifest.ordered() if e.status in ELIGIBLE]:
-        path = config.post_path(entry.slug)
-        try:
-            record = json.loads(Path(path).read_text(encoding="utf-8"))
-            validate_post(record)
-            posts[record["id"]] = Post.from_record(record)
-        except (OSError, ValueError, ArchiveError) as e:
-            failed[entry.slug] = f"{type(e).__name__}: {e}"[:300]
+    keep: set[str] = set()
+    for source in config.sources:
+        manifest = load_manifest(source.manifest_path)
+        keep |= {
+            source.post_id(e.slug)
+            for e in manifest.ordered()
+            if e.status not in ELIGIBLE and Path(source.post_path(e.slug)).exists()
+        }
+        for entry in [e for e in manifest.ordered() if e.status in ELIGIBLE]:
+            path = source.post_path(entry.slug)
+            try:
+                record = json.loads(Path(path).read_text(encoding="utf-8"))
+                if not isinstance(record, dict):
+                    raise ArchiveError("not a post record")
+                if record.get("schema_version") == 1:
+                    raise ArchiveError("an old-layout post file; run `archive migrate`")
+                validate_post(record)
+                posts[record["id"]] = Post.from_record(record)
+            except (OSError, ValueError, ArchiveError) as e:
+                failed[source.post_id(entry.slug)] = f"{type(e).__name__}: {e}"[:300]
     return posts, failed, keep
 
 

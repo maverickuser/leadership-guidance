@@ -16,7 +16,7 @@ services:
       ARCHIVE_DB_WRITER_PASSWORD: ${ARCHIVE_DB_WRITER_PASSWORD:?set ARCHIVE_DB_WRITER_PASSWORD in .env}
       ARCHIVE_DB_READER_PASSWORD: ${ARCHIVE_DB_READER_PASSWORD:?set ARCHIVE_DB_READER_PASSWORD in .env}
     volumes:
-      - ${ARCHIVE_DB_DATA:-../newsletter-archive-data/postgres}:/var/lib/postgresql/data
+      - ${ARCHIVE_DB_DATA:-../leadership-coach-datasets/postgres}:/var/lib/postgresql/data
       - ./db/init/20_archive_roles.sh:/docker-entrypoint-initdb.d/20_archive_roles.sh:ro
     healthcheck:
       # TCP, not the socket: during first-start setup Postgres runs a socket-only server,

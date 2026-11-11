@@ -26,21 +26,24 @@ post_log = logging.getLogger(f"{LOGGER}.run")
 
 
 class RedactFilter(logging.Filter):
-    """Scrubs secrets from every record: the cookie (whole value, each name=value pair, Cookie
+    """Scrubs secrets from every record: every cookie (whole value, each name=value pair, Cookie
     lines), any other secret values passed in (API key, database passwords), and anything
     shaped like a Google API key."""
 
-    def __init__(self, secret: Secret, *others: Secret) -> None:
+    def __init__(self, *secrets: Secret) -> None:
         super().__init__()
-        value = secret.reveal()
-        pieces = {value} if value else set()
-        for pair in value.split(";"):
-            if "=" in pair:
-                v = pair.split("=", 1)[1].strip()
-                if len(v) >= MIN_SECRET_CHARS:
-                    pieces.add(v)
-        # Same length floor as cookie pieces: a short secret would garble ordinary words.
-        pieces.update(o.reveal() for o in others if len(o.reveal()) >= MIN_SECRET_CHARS)
+        pieces: set[str] = set()
+        for secret in secrets:
+            value = secret.reveal()
+            # Same length floor for every piece: a short secret would garble ordinary words.
+            if len(value) >= MIN_SECRET_CHARS:
+                pieces.add(value)
+            # Each name=value pair of a cookie, whichever newsletter it belongs to.
+            for pair in value.split(";"):
+                if "=" in pair:
+                    v = pair.split("=", 1)[1].strip()
+                    if len(v) >= MIN_SECRET_CHARS:
+                        pieces.add(v)
         self._pieces = sorted(pieces, key=len, reverse=True)
 
     def redact(self, text: str) -> str:

@@ -1,6 +1,7 @@
 import hashlib
 import json
 import os
+from pathlib import Path
 
 import pytest
 
@@ -11,7 +12,7 @@ from newsletter_archive.models import Extracted, Manifest, ManifestEntry, Sectio
 from newsletter_archive.schema import validate_post
 from newsletter_archive.store import build_record, load_manifest, run_extract, write_text_atomic
 
-from .conftest import fixture_text
+from .conftest import fixture_text, make_source
 from .sitebuilder import post_page
 
 BASE = "https://www.example.com"
@@ -23,7 +24,7 @@ def seed(cfg, slugs, html=None, categories=None):
         m.entries[s] = ManifestEntry(
             url=f"{BASE}/{s}", slug=s, categories=list(categories or []), status="fetched"
         )
-        write_text_atomic(cfg.raw_dir / f"{s}.html", html or post_page(s))
+        write_text_atomic(cfg.only_source().raw_dir / f"{s}.html", html or post_page(s))
     return m
 
 
@@ -44,14 +45,18 @@ def sample_extracted(words=500, paywalled=False):
 
 
 # spec: post-storage / Valid output
+MAIN = make_source(Path("/tmp/unused"))
+
+
 def test_record_validates_and_hash_matches():
     entry = ManifestEntry(url=f"{BASE}/a", slug="a", categories=["Career Growth"])
-    rec = build_record(entry, sample_extracted(), "2026-10-31T11:00:00Z", 300)
+    rec = build_record(entry, sample_extracted(), "2026-10-31T11:00:00Z", 300, MAIN)
     validate_post(rec)
     assert rec["content_hash"] == hashlib.sha256(rec["text"].encode()).hexdigest()
     assert list(rec) == [
         "schema_version",
         "id",
+        "source",
         "url",
         "title",
         "subtitle",
@@ -82,7 +87,7 @@ def test_record_validates_and_hash_matches():
 )
 def test_status_from_word_count_and_paywall(words, paywalled, status):
     entry = ManifestEntry(url=f"{BASE}/a", slug="a")
-    rec = build_record(entry, sample_extracted(words, paywalled), "2026-10-31T11:00:00Z", 300)
+    rec = build_record(entry, sample_extracted(words, paywalled), "2026-10-31T11:00:00Z", 300, MAIN)
     assert rec["status"] == status and rec["word_count"] == words
 
 
@@ -95,12 +100,15 @@ def test_status_from_word_count_and_paywall(words, paywalled, status):
         lambda r: r.update(status="failed"),
         lambda r: r.update(content_hash="abc"),
         lambda r: r["sections"].append({"heading": None, "level": 9, "text": "x"}),
-        lambda r: r.update(schema_version=2),
+        lambda r: r.update(schema_version=1),
+        lambda r: r.pop("source"),
+        lambda r: r.update(id="a"),
+        lambda r: r.update(id="other/a"),
     ],
 )
 def test_schema_rejects_bad_records(mutate):
     rec = build_record(
-        ManifestEntry(url=f"{BASE}/a", slug="a"), sample_extracted(), "2026-10-31T11:00:00Z", 300
+        ManifestEntry(url=f"{BASE}/a", slug="a"), sample_extracted(), "2026-10-31T11:00:00Z", 300, MAIN
     )
     mutate(rec)
     with pytest.raises(ExtractError, match="schema"):
@@ -111,11 +119,11 @@ def test_run_extract_writes_valid_posts(cfg):
     m = seed(cfg, ["a", "b"], categories=["Career Growth"])
     result = run_extract(cfg, m)
     assert (result.ok, result.written, result.failed) == (2, 2, 0)
-    rec = json.loads((cfg.posts_dir / "a.json").read_text())
+    rec = json.loads((cfg.only_source().posts_dir / "a.json").read_text())
     validate_post(rec)
-    assert rec["id"] == "a" and rec["categories"] == ["Career Growth"]
-    assert rec["fetched_at"] == store.mtime_iso(cfg.raw_dir / "a.html")
-    saved = load_manifest(cfg.manifest_path).entries["a"]
+    assert rec["id"] == "main/a" and rec["source"] == "main" and rec["categories"] == ["Career Growth"]
+    assert rec["fetched_at"] == store.mtime_iso(cfg.only_source().raw_dir / "a.html")
+    saved = load_manifest(cfg.only_source().manifest_path).entries["a"]
     assert saved.status == "ok" and saved.content_hash == rec["content_hash"]
 
 
@@ -123,7 +131,7 @@ def test_run_extract_writes_valid_posts(cfg):
 def test_unchanged_post_not_rewritten(cfg):
     m = seed(cfg, ["a"])
     run_extract(cfg, m)
-    path = cfg.posts_dir / "a.json"
+    path = cfg.only_source().posts_dir / "a.json"
     os.utime(path, (1_000_000, 1_000_000))
     result = run_extract(cfg, m)
     assert result.unchanged == 1 and result.written == 0
@@ -137,11 +145,14 @@ def test_changed_text_rewrites(cfg):
     old_hash = m.entries["a"].content_hash
     html = post_page("a").replace("Good intentions.", "Brand new heading")
     html = html.replace("Meeting idea outcome", "Completely different opening", 1)
-    write_text_atomic(cfg.raw_dir / "a.html", html)
+    write_text_atomic(cfg.only_source().raw_dir / "a.html", html)
     result = run_extract(cfg, m)
     assert result.written == 1
     assert m.entries["a"].content_hash != old_hash
-    assert json.loads((cfg.posts_dir / "a.json").read_text())["content_hash"] == m.entries["a"].content_hash
+    assert (
+        json.loads((cfg.only_source().posts_dir / "a.json").read_text())["content_hash"]
+        == m.entries["a"].content_hash
+    )
 
 
 # spec: post-storage / Categories changed, text unchanged
@@ -150,7 +161,7 @@ def test_category_change_rewrites(cfg):
     run_extract(cfg, m)
     m.entries["a"].categories = ["One", "Two"]
     assert run_extract(cfg, m).written == 1
-    assert json.loads((cfg.posts_dir / "a.json").read_text())["categories"] == ["One", "Two"]
+    assert json.loads((cfg.only_source().posts_dir / "a.json").read_text())["categories"] == ["One", "Two"]
 
 
 def test_refresh_rewrites_even_if_unchanged(cfg):
@@ -162,11 +173,11 @@ def test_refresh_rewrites_even_if_unchanged(cfg):
 def test_extract_error_marks_failed_and_continues(cfg):
     m = seed(cfg, ["good"])
     m.entries["bad"] = ManifestEntry(url=f"{BASE}/bad", slug="bad", status="fetched")
-    write_text_atomic(cfg.raw_dir / "bad.html", "<html><body>nothing here</body></html>")
+    write_text_atomic(cfg.only_source().raw_dir / "bad.html", "<html><body>nothing here</body></html>")
     result = run_extract(cfg, m)
     assert (result.ok, result.failed) == (1, 1)
     assert m.entries["bad"].status == "failed" and m.entries["bad"].error.startswith("extract:")
-    assert not (cfg.posts_dir / "bad.json").exists()
+    assert not (cfg.only_source().posts_dir / "bad.json").exists()
 
 
 def test_unexpected_exception_is_contained(cfg, monkeypatch):
@@ -196,21 +207,21 @@ def test_posts_without_raw_are_skipped(cfg):
 def test_limit_applies_to_first_n(cfg):
     m = seed(cfg, ["a", "b", "c"])
     assert run_extract(cfg, m, limit=2).written == 2
-    assert not (cfg.posts_dir / "c.json").exists()
+    assert not (cfg.only_source().posts_dir / "c.json").exists()
 
 
 def test_dry_run_writes_nothing(cfg):
     m = seed(cfg, ["a"])
     result = run_extract(cfg, m, dry_run=True)
     assert result.would_write == ["a"]
-    assert not cfg.posts_dir.exists() and not cfg.manifest_path.exists()
+    assert not cfg.only_source().posts_dir.exists() and not cfg.only_source().manifest_path.exists()
 
 
 def test_partial_for_paywalled_page(cfg):
     m = seed(cfg, ["a"], html=fixture_text("post-signed-out.html"))
     result = run_extract(cfg, m)
     assert result.partial == 1
-    assert json.loads((cfg.posts_dir / "a.json").read_text())["status"] == "partial"
+    assert json.loads((cfg.only_source().posts_dir / "a.json").read_text())["status"] == "partial"
 
 
 # spec: content-extraction / Extract without network

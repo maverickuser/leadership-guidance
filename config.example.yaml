@@ -1,16 +1,31 @@
 # Newsletter Archive settings. Copy to config.yaml (git-ignored) and edit. CLI flags override these.
-base_url: https://www.example.com   # required: the Ghost newsletter site you subscribe to
-delay_seconds: 2          # minimum gap between requests; values below 2 are rejected
+
+# The newsletters you subscribe to, one entry each. Each gets its own folder in output_dir
+# (named by its id), and its cookie is read from the .env variable named by cookie_env.
+sources:
+  - id: main                         # lowercase letters, digits and hyphens; names the folder
+    name: "Example newsletter"       # optional: shown in search results (defaults to the id)
+    platform: ghost
+    base_url: https://www.example.com
+    cookie_env: NEWSLETTER_COOKIE
+    # Extra intro openings the extractor strips from the top of each post (optional).
+    # Put your newsletter's own wording here, in your local config.yaml only.
+    # boilerplate_prefixes:
+    #   - "Welcome to the Example newsletter"
+  # A Substack newsletter (Substack support arrives in a later release; until then only
+  # platform: ghost is accepted, so keep this commented out):
+  # - id: pragmatic-engineer
+  #   name: "The Pragmatic Engineer"
+  #   platform: substack
+  #   base_url: https://newsletter.pragmaticengineer.com
+  #   cookie_env: PRAGMATIC_ENGINEER_COOKIE
+
+delay_seconds: 2          # minimum gap between requests, across all newsletters; values below 2 are rejected
 max_retries: 3            # retries on timeout / connection error / 5xx (backoff 2s, 4s, 8s)
 timeout_seconds: 30
 min_word_count: 300       # posts with fewer words are marked "partial"
-output_dir: ../newsletter-archive-data   # next to the repo, so archived posts can never be committed
+output_dir: ../leadership-coach-datasets   # next to the repo, so archived posts can never be committed
 user_agent: "newsletter-archive/0.1 (personal archive; one request every 2s)"
-
-# Extra intro openings the extractor strips from the top of each post (optional).
-# Put your newsletter's own wording here, in your local config.yaml only.
-# boilerplate_prefixes:
-#   - "Welcome to the Example newsletter"
 
 # Search (optional; these are the defaults). See openspec/changes/archive/2026-11-10-add-hybrid-search/lld.md.
 # search:

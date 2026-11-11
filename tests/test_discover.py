@@ -248,7 +248,7 @@ def discover_site(t):
 def test_run_discover_writes_manifest(cfg, clock):
     t = discover_site(FakeTransport(clock=clock))
     result = run_discover(make_client(cfg, t, clock), cfg, Manifest())
-    data = json.loads(cfg.manifest_path.read_text())
+    data = json.loads(cfg.only_source().manifest_path.read_text())
     assert [p["slug"] for p in data["posts"]] == ["p1", "p2", "p3"]
     assert data["posts"][0] == {
         "url": f"{BASE}/p1",
@@ -267,10 +267,10 @@ def test_run_discover_writes_manifest(cfg, clock):
 def test_rediscovery_keeps_status(cfg, clock):
     m = Manifest()
     m.entries["p1"] = ManifestEntry(url=f"{BASE}/p1", slug="p1", status="ok", content_hash="abc")
-    save_manifest(m, cfg.manifest_path)
+    save_manifest(m, cfg.only_source().manifest_path)
     t = discover_site(FakeTransport(clock=clock))
-    run_discover(make_client(cfg, t, clock), cfg, load_manifest(cfg.manifest_path))
-    again = load_manifest(cfg.manifest_path)
+    run_discover(make_client(cfg, t, clock), cfg, load_manifest(cfg.only_source().manifest_path))
+    again = load_manifest(cfg.only_source().manifest_path)
     assert again.entries["p1"].status == "ok" and again.entries["p1"].content_hash == "abc"
     assert again.entries["p1"].categories == ["Career Growth"]
     assert again.entries["p2"].status == "discovered"
@@ -282,7 +282,7 @@ def test_discover_dry_run_writes_nothing(cfg, clock):
     m = Manifest()
     result = run_discover(make_client(cfg, t, clock), cfg, m, dry_run=True)
     assert result.stats.added == 3 and len(m) == 3  # merged in memory only
-    assert not cfg.manifest_path.exists()
+    assert not cfg.only_source().manifest_path.exists()
 
 
 def test_discover_does_not_need_cookie(tmp_path, clock):

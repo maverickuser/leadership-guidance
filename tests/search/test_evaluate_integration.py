@@ -31,9 +31,9 @@ from .test_mcp_server import index, make_service, records
 pytestmark = pytest.mark.db
 
 QUESTIONS = [
-    Question("bar-raiser", "local", '"bar raiser"', ("hiring",)),
-    Question("promotion", "intent", "ask for a promotion with evidence", ("career",)),
-    Question("broad", "global", "team", ("delegation", "hiring", "career")),
+    Question("bar-raiser", "local", '"bar raiser"', ("main/hiring",)),
+    Question("promotion", "intent", "ask for a promotion with evidence", ("main/career",)),
+    Question("broad", "global", "team", ("main/delegation", "main/hiring", "main/career")),
 ]
 
 
@@ -167,9 +167,9 @@ def test_a_database_error_in_the_gate_is_a_generation_error(cfg, caplog):
 
 
 def test_unknown_expected_posts_are_reported(cfg):
-    report = evaluate(make_service(cfg), [Question("q", "local", "bar raiser", ("hiring", "gone"))])
-    assert report.unknown_expected == {"q": ["gone"]}
-    assert "q expects posts that aren't in the index: gone" in "\n".join(report.lines())
+    report = evaluate(make_service(cfg), [Question("q", "local", "bar raiser", ("main/hiring", "main/gone"))])
+    assert report.unknown_expected == {"q": ["main/gone"]}
+    assert "q expects posts that aren't in the index: main/gone" in "\n".join(report.lines())
 
 
 def test_reader_service_reuses_one_connection(cfg):
@@ -239,7 +239,7 @@ def test_trace_records_each_stage(cfg):
     svc.reranker = FakeReranker()
     resp = svc.search(SearchRequest.create("bar raiser"), trace=trace)
     assert set(trace) == {"keyword", "semantic", "combined", "reranked", "post_of"}
-    assert trace["reranked"] and trace["post_of"][trace["keyword"][0]] == "hiring"
+    assert trace["reranked"] and trace["post_of"][trace["keyword"][0]] == "main/hiring"
     assert resp.results[0].id in trace["reranked"]
 
 
@@ -247,7 +247,7 @@ def test_outcomes_keep_rankings_and_hits_for_the_judge(cfg):
     report = evaluate(make_service(cfg), QUESTIONS[:1], variants=(True,))
     [o] = report.outcomes
     assert set(o.rankings) == {"keyword", "semantic", "combined", "reranked", "returned"}
-    assert o.rankings["keyword"][0] == "hiring" and o.hits and len(set(o.hits)) == len(o.hits)
+    assert o.rankings["keyword"][0] == "main/hiring" and o.hits and len(set(o.hits)) == len(o.hits)
 
 
 def test_load_candidates_shows_found_passages_first(cfg):
@@ -260,9 +260,12 @@ def test_load_candidates_shows_found_passages_first(cfg):
             for r in conn.execute(f"SELECT passage_id FROM {gen.schema}.passages ORDER BY n DESC").fetchall()
         ]
         found = load_candidates(
-            conn, gen.schema, ["hiring", "career", "nope"], [i for i in ids if i.startswith("career")]
+            conn,
+            gen.schema,
+            ["main/hiring", "main/career", "main/nope"],
+            [i for i in ids if i.startswith("main/career")],
         )
-    assert set(found) == {"hiring", "career"}
-    hiring = found["hiring"]
+    assert set(found) == {"main/hiring", "main/career"}
+    hiring = found["main/hiring"]
     assert hiring.title and hiring.summary and 1 <= len(hiring.passages) <= 2
     assert "bar raiser" in " ".join(hiring.passages)
