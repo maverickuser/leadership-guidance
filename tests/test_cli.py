@@ -2,7 +2,7 @@ import json
 
 import pytest
 
-from newsletter_archive.errors import MISSING_COOKIE_MESSAGE, NOT_SIGNED_IN_MESSAGE
+from newsletter_archive.errors import MISSING_COOKIE_REASON, NOT_SIGNED_IN_REASON, stop_message
 
 from .cli_helpers import BASE, SINGLE_SOURCE_CONFIG, CliEnv
 from .conftest import TEST_COOKIE
@@ -88,7 +88,8 @@ def test_missing_cookie_exit_1(tmp_path, monkeypatch):
     e = CliEnv(tmp_path, monkeypatch, cookie="")
     ghost_site(e.transport, BASE, SLUGS)
     r = e.run("run", "--limit", "1")
-    assert r.exit_code == 1 and MISSING_COOKIE_MESSAGE.format(env="NEWSLETTER_COOKIE") in r.output
+    assert r.exit_code == 1 and stop_message("main", MISSING_COOKIE_REASON, "NEWSLETTER_COOKIE") in r.output
+    assert "Stopped: main (NEWSLETTER_COOKIE): cookie is not set" in r.output
     assert e.transport.calls == []
 
 
@@ -103,8 +104,10 @@ def test_signed_out_exit_2(tmp_path, monkeypatch):
     e = CliEnv(tmp_path, monkeypatch)
     ghost_site(e.transport, BASE, SLUGS, signed_out={"p1"})
     r = e.run("run", "--limit", "3")
-    assert r.exit_code == 2 and NOT_SIGNED_IN_MESSAGE in r.output
-    assert "Summary:" in r.output
+    assert r.exit_code == 2 and stop_message("main", NOT_SIGNED_IN_REASON, "NEWSLETTER_COOKIE") in r.output
+    assert (
+        "Summary:" in r.output and "Stopped: main (NEWSLETTER_COOKIE): your cookie looks expired" in r.output
+    )
     assert not (e.data / "raw" / "p1.html").exists()
 
 
@@ -311,17 +314,24 @@ def two_sources(tmp_path, monkeypatch, pe_cookie=TEST_COOKIE, **site):
     return e
 
 
-# spec: newsletter-sources / One source failing (One cookie expired)
-def test_missing_cookie_names_the_newsletters_variable(tmp_path, monkeypatch):
+# spec: newsletter-sources / One source failing (missing cookie)
+def test_missing_cookie_stops_only_that_newsletter(tmp_path, monkeypatch):
     e = two_sources(tmp_path, monkeypatch, pe_cookie="")
     r = e.run("run", "--limit", "1")
-    assert r.exit_code == 1 and "PE_COOKIE is not set" in r.output and "NEWSLETTER_COOKIE" not in r.output
-    assert e.transport.calls == []
+    assert r.exit_code == 1, r.output
+    assert "Stopped: The Pragmatic Engineer (PE_COOKIE): cookie is not set" in r.output
+    assert "NEWSLETTER_COOKIE" not in r.output  # the first newsletter ran
+    urls = e.transport.urls()
+    assert any(u.startswith(BASE) for u in urls) and not any("newsletter.example.org" in u for u in urls)
+    assert (e.main / "posts" / "p1.json").exists()
 
 
-def test_summary_counts_every_newsletter_even_when_one_fails(tmp_path, monkeypatch):
+# spec: newsletter-sources / One source failing (One cookie expired)
+def test_summary_counts_every_newsletter_even_when_one_stops(tmp_path, monkeypatch):
     e = two_sources(tmp_path, monkeypatch, signed_out={"q1"})
     r = e.run("run", "--limit", "3")
-    assert r.exit_code == 2 and NOT_SIGNED_IN_MESSAGE in r.output
+    assert r.exit_code == 2, r.output
+    assert stop_message("The Pragmatic Engineer", NOT_SIGNED_IN_REASON, "PE_COOKIE") in r.output
     assert "== The Pragmatic Engineer: fetch" in r.output
     assert "Summary: discovered=9 fetched=3" in r.output  # 7 from the first site, 2 from the second
+    assert "Stopped: The Pragmatic Engineer (PE_COOKIE): your cookie looks expired" in r.output

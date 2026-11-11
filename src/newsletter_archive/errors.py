@@ -2,8 +2,15 @@
 
 from __future__ import annotations
 
-MISSING_COOKIE_MESSAGE = "{env} is not set. Copy your Cookie header into .env (see README)."
-NOT_SIGNED_IN_MESSAGE = "Your cookie looks expired. Copy a fresh Cookie header into .env."
+# Why one newsletter stopped, as `archive run` reports it and the weekly job shows it:
+# "{newsletter}: {reason} ({cookie_env})."
+MISSING_COOKIE_REASON = "cookie is not set. Copy your Cookie header into .env"
+NOT_SIGNED_IN_REASON = "your cookie looks expired. Paste a fresh Cookie header into .env"
+
+
+def stop_message(name: str, reason: str, cookie_env: str) -> str:
+    """The user-facing line for a newsletter that stopped, naming its .env variable."""
+    return f"{name}: {reason} ({cookie_env})."
 
 
 class ArchiveError(Exception):
@@ -16,19 +23,29 @@ class ConfigError(ArchiveError):
     exit_code = 1
 
 
-class MissingCookieError(ArchiveError):
+class SourceStopError(ArchiveError):
+    """One newsletter can't go on (its cookie is missing or expired). The run continues with
+    the other newsletters and reports `Stopped: {name} ({cookie_env}): {reason}` at the end."""
+
+    reason = ""
+
+    def __init__(self, name: str, cookie_env: str) -> None:
+        super().__init__(stop_message(name, self.reason, cookie_env))
+        self.name = name
+        self.cookie_env = cookie_env
+
+
+class MissingCookieError(SourceStopError):
     exit_code = 1
-
-    def __init__(self, env: str = "NEWSLETTER_COOKIE") -> None:
-        """`env` is the .env variable the newsletter's cookie is read from (its `cookie_env`)."""
-        super().__init__(MISSING_COOKIE_MESSAGE.format(env=env))
+    reason = MISSING_COOKIE_REASON
 
 
-class NotSignedInError(ArchiveError):
+class NotSignedInError(SourceStopError):
     exit_code = 2
+    reason = NOT_SIGNED_IN_REASON
 
-    def __init__(self, slug: str) -> None:
-        super().__init__(NOT_SIGNED_IN_MESSAGE)
+    def __init__(self, slug: str, name: str, cookie_env: str) -> None:
+        super().__init__(name, cookie_env)
         self.slug = slug
 
 

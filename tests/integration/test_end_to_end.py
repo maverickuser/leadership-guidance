@@ -8,7 +8,7 @@ import time
 
 import pytest
 
-from newsletter_archive.errors import NOT_SIGNED_IN_MESSAGE
+from newsletter_archive.errors import NOT_SIGNED_IN_REASON
 from newsletter_archive.schema import validate_post
 
 from ..conftest import SECRET_PARTS, TEST_COOKIE
@@ -55,7 +55,7 @@ def test_second_run_is_idempotent(harness):
 def test_cookie_expires_mid_run(harness):
     harness.site.expire_after = 2
     r = harness.run("run")
-    assert r.exit_code == 2 and NOT_SIGNED_IN_MESSAGE in r.output
+    assert r.exit_code == 2 and f"main: {NOT_SIGNED_IN_REASON} (NEWSLETTER_COOKIE)." in r.output
     assert sorted(p.stem for p in (harness.main / "raw").iterdir()) == ["post-1", "post-2"]
     manifest = {p["slug"]: p for p in json.loads((harness.main / "manifest.json").read_text())["posts"]}
     assert manifest["post-3"]["status"] == "discovered" and manifest["post-3"]["last_attempt"] is None
