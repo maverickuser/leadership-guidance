@@ -47,3 +47,31 @@ def test_placeholders_and_references_pass(tmp_path):
         },
     )
     assert result.returncode == 0, result.stdout
+
+
+SUBSTACK_SID = "connect" + ".sid"  # split so the safety check does not flag this file
+
+
+@pytest.mark.parametrize(
+    "files, problem",
+    [
+        ({"notes.md": f"{SUBSTACK_SID}=s%3AaB3dEf9GhIjK.realLookingValue\n"}, "Substack session cookie"),
+        ({"notes.md": "substack" + ".sid=s%3AaB3dEf9GhIjKlMnOp\n"}, "Substack session cookie"),
+        ({"setup.md": "PRAGMATIC_ENGINEER" + "_COOKIE=abc123realvalue\n"}, "PRAGMATIC_ENGINEER_COOKIE has"),
+    ],
+)
+def test_substack_and_named_cookie_values_fail(tmp_path, files, problem):
+    result = run_check(tmp_path, files)
+    assert result.returncode == 1 and problem in result.stdout
+
+
+def test_substack_fakes_and_placeholders_pass(tmp_path):
+    result = run_check(
+        tmp_path,
+        {
+            "tests/a.py": f'COOKIE = "{SUBSTACK_SID}=TESTSECRET123"\n',
+            ".env.example": "# PRAGMATIC_ENGINEER" + "_COOKIE=\nPE" + "_COOKIE=<paste the Cookie header>\n",
+            "README.md": "`PRAGMATIC_ENGINEER" + "_COOKIE=` in .env\nX" + "_COOKIE=${SECRET}\n",
+        },
+    )
+    assert result.returncode == 0, result.stdout

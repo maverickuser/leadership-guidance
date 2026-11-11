@@ -13,6 +13,7 @@ The input folder is git-ignored and never committed.
 from __future__ import annotations
 
 import argparse
+import json
 import random
 import re
 import sys
@@ -253,11 +254,158 @@ def build_tag_pages(src: Path, out: Path, page2_slugs: list[str]) -> list[str]:
     return p1_slugs
 
 
+# -- Substack ----------------------------------------------------------------
+
+SUBSTACK_BASE = "https://newsletter.example.org"
+SUBSTACK_BODY = "div.available-content div.body.markup"
+SUBSTACK_BLOCKS = 60  # top-level body blocks kept: enough markup kinds, a smaller file
+URL_ATTRS = ("href", "src", "srcset", "data-attrs", "data-component-name", "poster")
+
+
+def _fill_all_text(el, seed: str) -> None:
+    filler = Filler(seed)
+    for node in list(el.find_all(string=True)):
+        if not isinstance(node, Comment):
+            _replace_text(node, filler)
+
+
+def _neutral_attrs(el) -> None:
+    """Links point at example.org, media and widget data are dropped; classes stay."""
+    for i, tag in enumerate([el, *el.find_all(True)]):
+        for name in list(tag.attrs):
+            if name == "href":
+                tag["href"] = f"{SUBSTACK_BASE}/link-{i}"
+            elif name in URL_ATTRS or name.startswith("data-") or name in {"id", "style", "alt", "title"}:
+                del tag.attrs[name]
+
+
+def _substack_page(post_html: str, seed: str, signed_in: bool) -> tuple[str, str]:
+    """A structure-only Substack post page and the original body text (for the copy check).
+
+    Kept from the real page: the body markup (tags and classes, first SUBSTACK_BLOCKS blocks)
+    and the paywall block. Everything identifying is rebuilt: page data with a fake reader,
+    meta tags, JSON-LD, title and subtitle."""
+    src = BeautifulSoup(post_html, "lxml")
+    body = src.select_one(SUBSTACK_BODY)
+    if body is None:
+        raise SystemExit("no Substack body in post page")
+    original = body.get_text(" ")
+    for extra in [c for c in body.find_all(True, recursive=False)][SUBSTACK_BLOCKS:]:
+        extra.decompose()
+    _fill_all_text(body, seed)
+    _neutral_attrs(body)
+    paywall = src.select_one("div.paywall")
+    paywall_html = ""
+    if paywall is not None:
+        _fill_all_text(paywall, seed + "-paywall")
+        _neutral_attrs(paywall)
+        paywall_html = str(paywall)
+    data = {
+        "user": {"id": 1001, "name": "Test Reader", "handle": "test-reader"} if signed_in else None,
+        "post": {
+            "id": 2002,
+            "slug": "example-post",
+            "title": "Example Post",
+            "audience": "only_paid",
+            "type": "newsletter",
+            "section_id": 30,
+            "post_date": "2025-03-04T09:00:00.000Z",
+        },
+        "pub": {
+            "name": "Example Engineering Letter",
+            "sections": [
+                {"id": 10, "name": "The Weekly", "slug": "the-weekly"},
+                {"id": 30, "name": "Deep Dives", "slug": "deep-dives"},
+            ],
+        },
+    }
+    ld = {
+        "@context": "https://schema.org",
+        "@type": "NewsArticle",
+        "headline": "Example Post",
+        "datePublished": "2025-03-04T09:00:00+00:00",
+        "author": [{"@type": "Person", "name": "Example Author"}],
+    }
+    page = f"""<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Example Post - by Example Author</title>
+<meta property="og:title" content="Example Post">
+<meta name="author" content="Example Author">
+<meta name="description" content="Short description of the example post.">
+<script type="application/ld+json">{json.dumps(ld)}</script>
+<script type="application/json" id="preloads-json">{json.dumps(data)}</script>
+</head>
+<body>
+<div id="main">
+<article class="typography newsletter-post post">
+<div class="post-header">
+<h1 class="post-title published">Example Post</h1>
+<h3 class="subtitle">A subtitle for the example post</h3>
+</div>
+<div class="available-content">{body}</div>
+{paywall_html}
+</article>
+</div>
+</body>
+</html>
+"""
+    return _finalize(page), original
+
+
+def build_substack_sitemap(out: Path) -> None:
+    """Every URL kind the real sitemap has, plus the ones to drop: comments and off-site."""
+    paths = [
+        "/archive",
+        "/about",
+        "/podcast",
+        "/p/first-example-post",
+        "/p/second-example-post?utm_source=feed",
+        "/p/third-example-post/",
+        "/p/first-example-post/comment/12345",
+    ]
+    urls = [f"{SUBSTACK_BASE}{p}" for p in paths] + ["https://other.example.com/p/not-ours"]
+    entries = "".join(f"<url><loc>{u}</loc><lastmod>2025-03-04</lastmod></url>" for u in urls)
+    (out / "sitemap.xml").write_text(
+        '<?xml version="1.0" encoding="UTF-8"?>\n'
+        f'<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">{entries}</urlset>\n',
+        encoding="utf-8",
+    )
+
+
+def build_substack(src: Path, out: Path) -> None:
+    out.mkdir(parents=True, exist_ok=True)
+    for name, signed_in in (("post-signed-in.html", True), ("post-signed-out.html", False)):
+        source = src / ("post.html" if signed_in else "post-signed-out.html")
+        page, original = _substack_page(source.read_text(encoding="utf-8"), name, signed_in)
+        new_body = BeautifulSoup(page, "lxml").select_one(SUBSTACK_BODY)
+        overlap = _ngrams(original) & _ngrams(new_body.get_text(" ") if new_body else "")
+        if overlap:
+            raise SystemExit(f"{name}: {len(overlap)} {NGRAM}-word runs copied from the source")
+        if UUID_RE.search(page) or any(m != "noreply@example.com" for m in EMAIL_RE.findall(page)):
+            raise SystemExit(f"{name}: email or uuid left after scrubbing")
+        (out / name).write_text(page, encoding="utf-8")
+    build_substack_sitemap(out)
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     ap.add_argument("--src", type=Path, default=Path("data/inspect"))
     ap.add_argument("--out", type=Path, default=Path("tests/fixtures"))
+    ap.add_argument(
+        "--substack",
+        action="store_true",
+        help="Build the Substack fixtures from <src>/substack/ into <out>/substack/.",
+    )
     args = ap.parse_args()
+    if args.substack:
+        if not (args.src / "substack").is_dir():
+            print(f"missing {args.src / 'substack'}; save the Substack pages there first", file=sys.stderr)
+            return 1
+        build_substack(args.src / "substack", args.out / "substack")
+        print(f"Substack fixtures written to {args.out / 'substack'}")
+        return 0
     if not args.src.is_dir():
         print(f"missing {args.src}; save the site pages there first", file=sys.stderr)
         return 1

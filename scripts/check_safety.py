@@ -2,7 +2,7 @@
 """Fail if tracked files could leak private data in this public repo.
 
 Checks: no tracked data/ or .env* files (except .env.example), no real cookie values
-in the cookie env variable or in Ghost member cookies, no Google API keys, no literal
+in any *_COOKIE env variable or in Ghost or Substack session cookies, no Google API keys, no literal
 database passwords, and no emails or uuids in test fixtures. Run in CI and before pushing.
 """
 
@@ -15,12 +15,17 @@ from pathlib import Path
 
 ALLOWED_FAKE_VALUES = {"TESTSECRET123", "SIGSECRET456"}
 COOKIE_RE = re.compile(r"ghost-members-ssr(?:\.sig)?=([A-Za-z0-9%._\-]+)")
+# Substack keeps a reader signed in with these (connect.sid on custom domains).
+SUBSTACK_COOKIE_RE = re.compile(r"(?:substack\.sid|substack\.lli|connect\.sid)=([A-Za-z0-9%._\-]+)")
 EMAIL_RE = re.compile(r"[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}")
 UUID_RE = re.compile(r"\b[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\b", re.I)
 FIXTURE_EMAIL_ALLOW = {"noreply@example.com"}
-# NEWSLETTER_COOKIE=<literal>; placeholders, f-string fields and the test fakes are fine
-ENV_COOKIE_RE = re.compile(r"NEWSLETTER_COOKIE=([^\s'\"]+)")
-ENV_COOKIE_OK = re.compile(r"^(\{|<|ghost-members-ssr|from-file\b)")
+# <ANY>_COOKIE=<literal>; placeholders, f-string fields and named cookies (whose values the
+# cookie patterns above check) are fine
+ENV_COOKIE_RE = re.compile(r"\b([A-Z][A-Z0-9_]*_COOKIE)=([^\s'\"`]+)")
+ENV_COOKIE_OK = re.compile(
+    r"^(\{|<|\$|ghost-members-ssr|substack\.sid|substack\.lli|connect\.sid|from-file\b)"
+)
 GOOGLE_KEY_RE = re.compile(r"AIza[0-9A-Za-z_\-]{35}")
 # ARCHIVE_DB_*_PASSWORD=<literal> or `: <literal>`; references, placeholders and ci-/test- values are fine
 DB_PASSWORD_RE = re.compile(r"ARCHIVE_DB_[A-Z]+_PASSWORD\s*[:=][ \t]*[\"']?([^\s'\"]+)")
@@ -53,9 +58,12 @@ def main() -> int:
         for m in COOKIE_RE.finditer(text):
             if m.group(1) not in ALLOWED_FAKE_VALUES:
                 problems.append(f"{path}: looks like a real ghost-members-ssr cookie value")
+        for m in SUBSTACK_COOKIE_RE.finditer(text):
+            if m.group(1) not in ALLOWED_FAKE_VALUES:
+                problems.append(f"{path}: looks like a real Substack session cookie value")
         for m in ENV_COOKIE_RE.finditer(text):
-            if not ENV_COOKIE_OK.match(m.group(1)):
-                problems.append(f"{path}: NEWSLETTER_COOKIE has what looks like a real value")
+            if not ENV_COOKIE_OK.match(m.group(2)):
+                problems.append(f"{path}: {m.group(1)} has what looks like a real value")
         if GOOGLE_KEY_RE.search(text):
             problems.append(f"{path}: looks like a Google API key")
         for m in DB_PASSWORD_RE.finditer(text):

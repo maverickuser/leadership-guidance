@@ -125,12 +125,14 @@ def strip_boilerplate(body: Tag, extra_prefixes: tuple[str, ...] = ()) -> int:
     return removed
 
 
-def clean_body(body: Tag, extra_prefixes: tuple[str, ...] = ()) -> Tag:
-    """Return a cleaned copy of the article body (the input is not modified)."""
+def clean_body(body: Tag, extra_prefixes: tuple[str, ...] = (), remove: str = REMOVE_SELECTORS) -> Tag:
+    """Return a cleaned copy of the article body (the input is not modified).
+
+    `remove` is the CSS selector list of clutter to drop; each platform passes its own."""
     copy = BeautifulSoup(str(body), "lxml").find(body.name)
     if not isinstance(copy, Tag):  # pragma: no cover - re-parsing a tag always finds it
         raise ExtractError("could not copy the article body")
-    for el in copy.select(REMOVE_SELECTORS):
+    for el in copy.select(remove):
         el.decompose()
     for el in copy.find_all(True):
         for name in ("alt", "title"):

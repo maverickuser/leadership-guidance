@@ -51,7 +51,7 @@ class Platform(Protocol):
 
 
 # Every platform name, so config validation can check a name without loading the platforms.
-PLATFORM_NAMES: tuple[str, ...] = ("ghost",)
+PLATFORM_NAMES: tuple[str, ...] = ("ghost", "substack")
 
 
 @cache
@@ -63,10 +63,14 @@ def get_platform(name: str) -> Platform:
     """
     if name not in PLATFORM_NAMES:
         raise ConfigError(f"unknown platform {name!r}; use one of: {', '.join(PLATFORM_NAMES)}")
-    from .ghost import GhostPlatform  # here, not at the top: ghost.py imports the stage modules
+    # Imported here, not at the top: the platforms import the stage modules.
+    if name == "substack":
+        from .substack import SubstackPlatform
 
-    platforms: dict[str, Platform] = {"ghost": GhostPlatform()}
-    return platforms[name]
+        return SubstackPlatform()
+    from .ghost import GhostPlatform
+
+    return GhostPlatform()
 
 
 __all__ = ["PLATFORM_NAMES", "Platform", "get_platform"]

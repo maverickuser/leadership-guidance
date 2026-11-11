@@ -12,8 +12,8 @@ sources:
     # Put your newsletter's own wording here, in your local config.yaml only.
     # boilerplate_prefixes:
     #   - "Welcome to the Example newsletter"
-  # A Substack newsletter (Substack support arrives in a later release; until then only
-  # platform: ghost is accepted, so keep this commented out):
+  # A Substack newsletter, custom domain or *.substack.com. Its cookie is the Cookie header
+  # from a signed-in tab (the session cookie there is connect.sid or substack.sid):
   # - id: pragmatic-engineer
   #   name: "The Pragmatic Engineer"
   #   platform: substack
