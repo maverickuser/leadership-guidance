@@ -87,4 +87,4 @@
   - index cost shown, then indexed;
   - a mixed search returns both newsletters.
 - [x] 8.3 One weekly run (or `scripts/scheduled-run.sh` by hand) updates both newsletters and the index
-- [ ] 8.4 After merge: sync the delta specs into `openspec/specs/` and archive this change
+- [x] 8.4 After merge: sync the delta specs into `openspec/specs/` and archive this change

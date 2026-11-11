@@ -4,10 +4,10 @@
 Turning each fetched post page into clean Markdown with metadata (title, date, author, categories), keeping the post's own words and structure.
 ## Requirements
 ### Requirement: Article body only
-The system SHALL extract only the article body (on this Ghost site, the `.gh-content` element inside `article.gh-article`) and MUST remove the paywall call-to-action box (`.gh-post-upgrade-cta`), navigation, header, footer, subscribe or upgrade boxes, share buttons, related-post widgets, comments, and images including captions and alt text.
+For a Ghost source, the system SHALL extract only the article body (the `.gh-content` element inside `article.gh-article`). It MUST remove the paywall call-to-action box (`.gh-post-upgrade-cta`), navigation, header, footer, subscribe or upgrade boxes, share buttons, related-post widgets, comments, and images including captions and alt text. Substack bodies follow `substack-platform`.
 
 #### Scenario: Post page with clutter
-- **WHEN** a saved post page contains a nav bar, a subscribe box, share buttons, a related-posts widget, a comment thread and a figure with a caption
+- **WHEN** a saved Ghost post page contains a nav bar, a subscribe box, share buttons, a related-posts widget, a comment thread and a figure with a caption
 - **THEN** the extracted text contains none of the nav, subscribe, share, related, comment or caption text, and no image alt text
 
 ### Requirement: Strip newsletter boilerplate
@@ -58,14 +58,14 @@ The system SHALL collect links inside the article body only, each as `{text, url
 - **THEN** `links` holds only the two body links
 
 ### Requirement: Paywall detection
-The system SHALL compute `word_count` from `text`, and SHALL set `status: "partial"` when `word_count < min_word_count` (default 300) or when the paywall box (`.gh-post-upgrade-cta`) is present inside the article body; otherwise `status: "ok"`.
+The system SHALL compute `word_count` from `text`. For a Ghost source it SHALL set `status: "partial"` when `word_count < min_word_count` (default 300) or when the paywall box (`.gh-post-upgrade-cta`) is present inside the article body; otherwise `status: "ok"`. Substack paywall detection follows `substack-platform`.
 
 #### Scenario: Truncated paid post
-- **WHEN** a paid post's extracted text has 120 words
+- **WHEN** a paid Ghost post's extracted text has 120 words
 - **THEN** its status is `partial`
 
 #### Scenario: Paywall box inside the body
-- **WHEN** a signed-in page shows a 700-word preview followed by the `.gh-post-upgrade-cta` box inside `.gh-content` (for example a free member reading a paid post)
+- **WHEN** a signed-in Ghost page shows a 700-word preview followed by the `.gh-post-upgrade-cta` box inside `.gh-content` (for example a free member reading a paid post)
 - **THEN** its status is `partial`
 
 #### Scenario: Paywall class only in page CSS
