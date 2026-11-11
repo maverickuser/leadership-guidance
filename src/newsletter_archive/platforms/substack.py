@@ -45,7 +45,9 @@ PRELOADS_SCRIPT_ID = "preloads-json"
 LEGACY_PRELOADS = re.compile(r"window\._preloads\s*=\s*JSON\.parse\(\s*(\"(?:[^\"\\]|\\.)*\")\s*\)", re.S)
 
 # Clutter inside the body: images and their captions and buttons, heading link buttons,
-# embeds, subscribe/share widgets, and the paywall jump anchor. Each Substack class here was
+# embeds, subscribe/share widgets, and the paywall jump anchor. Classes are matched as whole
+# tokens, never as substrings, so a paragraph whose class merely contains "share" stays. Each
+# Substack class here was
 # seen on a real page or is a documented Substack widget; tests assert each one is removed.
 REMOVE_SELECTORS = ", ".join(
     [
@@ -81,8 +83,12 @@ REMOVE_SELECTORS = ", ".join(
         ".button-wrapper",
         ".paywall-jump",
         ".poll-embed",
-        '[class*="share"]',
-        '[class*="subscribe"]',
+        ".share-dialog",
+        ".post-ufi",
+        ".subscribe-widget",
+        ".subscription-widget",
+        ".subscribe-footer",
+        ".share-button-wrap",
     ]
 )
 
@@ -117,7 +123,7 @@ def preloads(soup: BeautifulSoup) -> dict[str, Any]:
             data = None
         if isinstance(data, dict):
             return data
-        raise ExtractError("no Substack page data")
+        # broken: try the older form below before giving up
     for s in soup.find_all("script"):
         m = LEGACY_PRELOADS.search(s.string or "")
         if m:
@@ -130,18 +136,22 @@ def _post(data: dict[str, Any]) -> dict[str, Any]:
     return post if isinstance(post, dict) else {}
 
 
-def section_categories(data: dict[str, Any]) -> list[str]:
-    """[the post's section name], or [] when it has none (or the section isn't listed)."""
-    section_id = _post(data).get("section_id")
+def section_categories(data: dict[str, Any]) -> list[str] | None:
+    """[the post's section name]; [] when the post has no section; None when the page doesn't
+    say (no section list, or the section isn't in it), so the categories already stored stay."""
+    post = _post(data)
+    if "section_id" in post and post["section_id"] is None:
+        return []
+    section_id = post.get("section_id")
     pub = data.get("pub")
     sections = pub.get("sections") if isinstance(pub, dict) else None
     if section_id is None or not isinstance(sections, list):
-        return []
+        return None
     for s in sections:
         if isinstance(s, dict) and s.get("id") == section_id and isinstance(s.get("name"), str):
             name = s["name"].strip()
-            return [name] if name else []
-    return []
+            return [name] if name else None
+    return None
 
 
 class SubstackPlatform:
@@ -151,11 +161,14 @@ class SubstackPlatform:
     name = "substack"
 
     def post_urls(self, sitemap_urls: list[str], base_url: str) -> list[str]:
+        # One URL per post: on the configured site, path lowercased, no query (Substack adds
+        # share and redirect parameters such as ?r= and ?triedRedirect=), no port or fragment.
         seen: dict[str, None] = {}
         for u in sitemap_urls:
             n = normalize_url(u)
-            if same_site(n, base_url) and POST_PATH.match(urlsplit(n).path):
-                seen.setdefault(n, None)
+            path = urlsplit(n).path.lower().rstrip("/")
+            if same_site(n, base_url) and POST_PATH.match(path):
+                seen.setdefault(base_url.rstrip("/") + path, None)
         return list(seen)
 
     def discover_categories(self, client: Client, base_url: str) -> None:
@@ -182,6 +195,11 @@ class SubstackPlatform:
         if body is None:
             raise ExtractError("no article body found")
         cleaned = clean_body(body, boilerplate_prefixes, REMOVE_SELECTORS)
+        # Clutter is decided above. Clear the class and id names so the text extractor's own
+        # class-name rules (it drops e.g. class="shared-context") can't drop real paragraphs.
+        for el in [cleaned, *cleaned.find_all(True)]:
+            el.attrs.pop("class", None)
+            el.attrs.pop("id", None)
         sections = build_sections(cleaned, page_url)
         text = "\n\n".join(s.text for s in sections)
         word_count = len(text.split())

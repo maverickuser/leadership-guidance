@@ -44,6 +44,51 @@ def with_data(html: str, **changes) -> str:
     return str(soup)
 
 
+@pytest.mark.parametrize(
+    "variant",
+    [
+        "/p/first-example-post?r=abc12",
+        "/p/first-example-post?triedRedirect=true",
+        "/p/First-Example-Post",
+        "/p/first-example-post/",
+        ":443/p/first-example-post#comments",
+    ],
+)
+def test_share_and_redirect_variants_are_one_post(variant):
+    urls = [f"{SB}/p/first-example-post", f"{SB}{variant}", f"https://www.newsletter.example.org{variant}"]
+    assert SUBSTACK.post_urls(urls, SB) == [f"{SB}/p/first-example-post"]
+
+
+def test_classes_that_only_contain_share_or_subscribe_are_kept():
+    soup = BeautifulSoup(page("post-signed-in.html"), "lxml")
+    body = soup.select_one("div.body.markup")
+    body.insert(1, BeautifulSoup('<p class="shared-context">zebrasharedtext stays</p>', "html.parser").p)
+    body.insert(
+        2, BeautifulSoup('<div class="subscribed-note"><p>zebranotetext</p></div>', "html.parser").div
+    )
+    text = SUBSTACK.extract(str(soup), URL, (), 300).text
+    assert "zebrasharedtext" in text and "zebranotetext" in text
+
+
+@pytest.mark.parametrize("tag", ["img", "source", "input", "embed"])
+def test_void_media_tags_are_removed(tag):
+    from newsletter_archive.extract import clean_body
+
+    body = BeautifulSoup(f"<div><p>kept <{tag} src='x'></p></div>", "html.parser").div
+    assert clean_body(body, (), REMOVE_SELECTORS).find(tag) is None
+
+
+def test_broken_new_page_data_falls_back_to_the_older_form():
+    soup = BeautifulSoup(page("post-signed-in.html"), "lxml")
+    script = soup.find("script", id="preloads-json")
+    data = script.string
+    script.string = "{ broken"
+    legacy = soup.new_tag("script")
+    legacy.string = f"window._preloads = JSON.parse({json.dumps(data)})"
+    soup.head.append(legacy)
+    assert SUBSTACK.signed_in(str(soup))
+
+
 def test_registered_as_a_platform():
     assert isinstance(get_platform("substack"), SubstackPlatform)
     assert get_platform("substack") is get_platform("substack")
@@ -187,11 +232,12 @@ def test_missing_title_or_date_fails():
             {"post": {"section_id": 30}, "pub": {"sections": [{"id": 30, "name": " Deep Dives "}]}},
             ["Deep Dives"],
         ),
-        ({"post": {"section_id": None}, "pub": {"sections": [{"id": 30, "name": "X"}]}}, []),
-        ({"post": {"section_id": 99}, "pub": {"sections": [{"id": 30, "name": "X"}]}}, []),
-        ({"post": {"section_id": 30}, "pub": {"sections": [{"id": 30, "name": " "}]}}, []),
-        ({"post": {"section_id": 30}, "pub": {}}, []),
-        ({"post": "odd", "pub": "odd"}, []),
+        ({"post": {"section_id": None}, "pub": {"sections": [{"id": 30, "name": "X"}]}}, []),  # no section
+        # the page doesn't say: None keeps the categories already stored
+        ({"post": {"section_id": 99}, "pub": {"sections": [{"id": 30, "name": "X"}]}}, None),
+        ({"post": {"section_id": 30}, "pub": {"sections": [{"id": 30, "name": " "}]}}, None),
+        ({"post": {"section_id": 30}, "pub": {}}, None),
+        ({"post": "odd", "pub": "odd"}, None),
     ],
 )
 def test_section_categories(data, categories):

@@ -75,3 +75,37 @@ def test_substack_fakes_and_placeholders_pass(tmp_path):
         },
     )
     assert result.returncode == 0, result.stdout
+
+
+SUBSTACK_LLI = "substack" + ".lli"
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        f'{{"{SUBSTACK_SID}": "s%3AaB3dEf9GhIjKlMnOp"}}\n',  # JSON export
+        f"newsletter.example.org\tFALSE\t/\tTRUE\t0\t{SUBSTACK_SID}\ts%3AaB3dEf9GhIjKlMnOp\n",  # cookies.txt
+        f'{SUBSTACK_LLI}="s%3AaB3dEf9GhIjKlMnOp"\n',  # quoted
+    ],
+)
+def test_substack_cookie_in_any_export_format_fails(tmp_path, text):
+    result = run_check(tmp_path, {"notes.txt": text})
+    assert result.returncode == 1 and "Substack session cookie" in result.stdout
+
+
+@pytest.mark.parametrize(
+    "line",
+    [
+        "NEWSLETTER" + '_COOKIE="s%3AaB3dEf9GhIjKlMnOp"\n',  # quoted
+        "NEWSLETTER" + "_COOKIE='realvaluerealvalue'\n",
+        "X" + "_COOKIE=" + "substack" + ".sidREALVALUEREAL\n",  # an allowed-looking prefix
+    ],
+)
+def test_quoted_or_disguised_env_cookies_fail(tmp_path, line):
+    result = run_check(tmp_path, {"setup.md": line})
+    assert result.returncode == 1 and "_COOKIE has" in result.stdout
+
+
+def test_short_test_values_pass(tmp_path):
+    result = run_check(tmp_path, {"tests/b.py": "X" + '_COOKIE="a=1\\nX: 2"\n'})
+    assert result.returncode == 0, result.stdout
