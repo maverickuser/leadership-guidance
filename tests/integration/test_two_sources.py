@@ -147,3 +147,34 @@ def test_both_cookies_expired_lists_both(two):
         PE_STOPPED + "your cookie looks expired. Paste a fresh Cookie header into .env",
     ]
     assert CATEGORIES  # the main site still served its category pages before the first post
+
+
+# CONTRIBUTING: one request at a time, at least 2 s apart, across every newsletter.
+def test_a_stopped_newsletter_still_passes_the_rate_limiter_on(two, monkeypatch):
+    two.site.expire_after = 1  # the first newsletter stops at its second post
+    made = []
+    real = cli.make_client
+
+    def recording(cfg, source, limiter):
+        client = real(cfg, source, limiter)
+        made.append((source.id, limiter, client.limiter))
+        return client
+
+    monkeypatch.setattr(cli, "make_client", recording)
+    r = two.run("run")
+    assert r.exit_code == 2, r.output
+    (first, _, first_limiter), (second_id, passed, _) = made
+    assert (first, second_id) == ("main", "pragmatic-engineer")
+    assert passed is first_limiter  # the second site waits for the first site's last request
+
+
+# spec: newsletter-sources / One source failing
+def test_a_corrupt_manifest_stops_only_that_newsletter(two):
+    two.pe.mkdir(parents=True)
+    (two.pe / "manifest.json").write_text("{ not json", encoding="utf-8")
+    r = two.run("run")
+    assert r.exit_code == 1, r.output
+    assert post_ids(two.main) == sorted(f"main/{s}" for s in SLUGS)
+    stopped = [line for line in r.output.splitlines() if line.startswith("Stopped: ")]
+    assert len(stopped) == 1 and stopped[0].startswith(PE_STOPPED)
+    assert two.second.requests == [] and len(two.index_calls) == 1

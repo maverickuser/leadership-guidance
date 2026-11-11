@@ -8,9 +8,13 @@ cd "$(dirname "$0")/.." || exit 1
 # launchd starts jobs with a minimal PATH; Docker Desktop installs its CLI here.
 export PATH="/usr/local/bin:/opt/homebrew/bin:$PATH"
 
+# The text goes to AppleScript as an argument, never inside the script, so a quote or
+# backslash in a newsletter name or an error can't break the notification or run anything.
 notify() {
   command -v osascript >/dev/null 2>&1 &&
-    osascript -e "display notification \"$1\" with title \"Newsletter archive\"" >/dev/null 2>&1
+    osascript -e 'on run argv' \
+      -e 'display notification (item 1 of argv) with title "Newsletter archive"' \
+      -e 'end run' "$1" >/dev/null 2>&1
   return 0
 }
 
@@ -34,21 +38,29 @@ stopped=$(echo "$output" | sed -n 's/^Stopped: \(.*\) (\([A-Z][A-Z0-9_]*\)): \(.
 # Newsletters in the run: those with stage lines ("== <name>: <stage>") or a Stopped line.
 sources=$(echo "$output" | sed -n -e 's/^== \(.*\): [a-z]*.*$/\1/p' -e 's/^Stopped: \(.*\) ([A-Z][A-Z0-9_]*): .*$/\1/p' | sort -u | wc -l | tr -d ' ')
 
+# "<name>: <reason> (<ENV>)." for each stopped newsletter, plus "Others updated." when others ran.
+stopped_message=""
+if [ -n "$stopped" ]; then
+  stopped_message=$(echo "$stopped" | paste -sd ' ' -)
+  if [ "$(echo "$stopped" | wc -l | tr -d ' ')" -lt "${sources:-0}" ]; then
+    stopped_message="$stopped_message Others updated."
+  fi
+fi
+
 case $code in
   0) [ "${fetched:-0}" -gt 0 ] && notify "Archived ${fetched} new post(s)." ;;
   1|2)
-    if [ -n "$stopped" ]; then
-      message=$(echo "$stopped" | paste -sd ' ' -)
-      if [ "$(echo "$stopped" | wc -l | tr -d ' ')" -lt "${sources:-0}" ]; then
-        message="$message Others updated."
-      fi
-      notify "$message"
+    if [ -n "$stopped_message" ]; then
+      notify "$stopped_message"
     elif [ "$code" -eq 2 ]; then
       notify "Your cookie looks expired. Paste a fresh Cookie header into .env."
     else
       notify "Update failed (exit ${code}). See the latest log in the archive's logs folder."
     fi ;;
-  3) notify "New posts were archived, but updating the search index failed. Is Docker running? See the latest log." ;;
+  3)
+    # An index failure outranks a stopped newsletter in the exit code; name both.
+    index_message="New posts were archived, but updating the search index failed. Is Docker running? See the latest log."
+    notify "${stopped_message:+$stopped_message }$index_message" ;;
   *) notify "Update failed (exit ${code}). See the latest log in the archive's logs folder." ;;
 esac
 exit $code

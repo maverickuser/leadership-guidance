@@ -6,7 +6,6 @@ code under test, and a fake `osascript` that records the notification text."""
 from __future__ import annotations
 
 import os
-import re
 import shutil
 import stat
 import subprocess
@@ -15,7 +14,6 @@ from pathlib import Path
 import pytest
 
 SCRIPT = Path(__file__).resolve().parents[1] / "scripts" / "scheduled-run.sh"
-TITLE = ' with title "Newsletter archive"'
 
 TWO_SOURCES = "== main: discover\n== main: fetch\n== The Pragmatic Engineer: discover\n== index\n"
 PE_STOPPED = (
@@ -49,7 +47,12 @@ def repo(tmp_path):
     )
     fake_bin = tmp_path / "fake-bin"
     fake_bin.mkdir()
-    executable(fake_bin / "osascript", '#!/bin/sh\nprintf "%s\\n" "$2" >> "$FAKE_NOTIFICATIONS"\n')
+    # Records the notification text: the last argument (the script passes it as argv, not code).
+    executable(
+        fake_bin / "osascript",
+        '#!/bin/bash\nfor last; do :; done\nprintf "%s\\n" "$*" >> "$FAKE_SCRIPTS"\n'
+        'printf "%s\\n" "$last" >> "$FAKE_NOTIFICATIONS"\n',
+    )
     return tmp_path
 
 
@@ -64,18 +67,14 @@ def run_script(repo: Path, code: int, output: str) -> tuple[int, list[str]]:
         FAKE_RUN_OUTPUT=str(repo / "run-output.txt"),
         FAKE_RUN_CODE=str(code),
         FAKE_NOTIFICATIONS=str(notifications),
+        FAKE_SCRIPTS=str(repo / "scripts-run.txt"),
         ARCHIVE_SKIP_DB_START="1",  # never start the real database from a test
     )
     done = subprocess.run(
         ["bash", str(repo / "scripts" / "scheduled-run.sh")], env=env, capture_output=True, text=True
     )
     sent = notifications.read_text(encoding="utf-8").splitlines() if notifications.exists() else []
-    texts = []
-    for line in sent:
-        m = re.fullmatch(r'display notification "(.*)"' + re.escape(TITLE), line)
-        assert m, line
-        texts.append(m.group(1))
-    return done.returncode, texts
+    return done.returncode, sent
 
 
 # spec: newsletter-sources / Weekly run covers every source (Both sources updated)
@@ -132,3 +131,20 @@ def test_index_failure_and_other_failures(repo):
     assert code == 3 and texts[0].startswith("New posts were archived, but updating the search index failed")
     code, texts = run_script(repo, 1, "Error: bad config\n")
     assert (code, texts) == (1, ["Update failed (exit 1). See the latest log in the archive's logs folder."])
+
+
+def test_index_failure_still_names_the_stopped_newsletter(repo):
+    code, texts = run_script(repo, 3, TWO_SOURCES + "Summary: fetched=2\n" + PE_STOPPED)
+    assert code == 3 and texts[0].startswith(PE_NOTICE + " Others updated. New posts were archived")
+
+
+def test_quotes_in_a_name_reach_the_notification_as_text(repo):
+    stopped = 'Stopped: Bob\'s "Weekly" \\ x (BOB_COOKIE): your cookie looks expired. Paste a fresh Cookie header into .env\n'
+    code, texts = run_script(repo, 2, '== Bob\'s "Weekly" \\ x: fetch\n' + stopped)
+    assert code == 2
+    assert texts == [
+        'Bob\'s "Weekly" \\ x: your cookie looks expired. Paste a fresh Cookie header into .env (BOB_COOKIE).'
+    ]
+    # The text is never part of the AppleScript source itself.
+    scripts = (repo / "scripts-run.txt").read_text(encoding="utf-8")
+    assert "item 1 of argv" in scripts and scripts.count("Weekly") == 1  # only as the argument

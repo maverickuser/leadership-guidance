@@ -147,21 +147,22 @@ def _execute(
         _refuse_old_layout(config)
         sources = config.select(source_ids)  # an unknown id fails here, before any request
         with run_lock(config.lock_path):
-            limiter: RateLimiter | None = None  # one for the whole run, shared by every newsletter
+            # One limiter for the whole run, shared by every newsletter. It is held here as soon
+            # as the first client makes it, so a newsletter that stops still passes it on.
+            shared: list[RateLimiter | None] = [None]
             for source in sources:
-                manifest = load_manifest(source.manifest_path)
+                manifest: Manifest | None = None
                 try:
-                    limiter = _source_stages(
-                        config, source, manifest, stages, limit, refresh, dry_run, summary, limiter
-                    )
+                    manifest = load_manifest(source.manifest_path)
+                    _source_stages(config, source, manifest, stages, limit, refresh, dry_run, summary, shared)
                 except ArchiveError as e:  # this newsletter stops; the others still run
                     log.error(str(e))
                     stopped.append(Stopped.from_error(source, e))
-                summary.discovered += len(manifest)
+                finally:
+                    summary.discovered += len(manifest) if manifest is not None else 0
             if "index" in stages:
                 log.info("== index%s", " (dry run)" if dry_run else "")
                 code = max(code, _index_stage(config, index_options or IndexOptions(), stages))
-        code = max([code, *(s.exit_code for s in stopped)])
     except ArchiveError as e:
         log.error("Error: %s", e)
         code = e.exit_code
@@ -172,6 +173,8 @@ def _execute(
         log.exception("Unexpected error")
         code = 1
     finally:
+        # A stopped newsletter's code counts however the rest of the run ended.
+        code = max([code, *(s.exit_code for s in stopped)])
         log.info(summary.line())
         for s in stopped:
             log.error(s.line())
@@ -189,10 +192,11 @@ def _source_stages(
     refresh: bool,
     dry_run: bool,
     summary: RunSummary,
-    limiter: RateLimiter | None,
-) -> RateLimiter | None:
+    shared: list[RateLimiter | None],
+) -> None:
     """Run the discover, fetch and extract stages asked for over one newsletter, adding to the
-    summary. Returns the run's rate limiter so the next newsletter shares it.
+    summary. `shared[0]` is the run's rate limiter: set as soon as the first client exists, so
+    the next newsletter shares it even if this one stops.
 
     Raises:
         MissingCookieError: before any request, when a stage needs the cookie and it isn't set.
@@ -205,8 +209,8 @@ def _source_stages(
     for stage in [s for s in stages if s != "index"]:
         log.info("== %s: %s%s", source.display_name, stage, " (dry run)" if dry_run else "")
         if stage in ("discover", "fetch") and client is None:
-            client = make_client(config, source, limiter)
-            limiter = client.limiter
+            client = make_client(config, source, shared[0])
+            shared[0] = client.limiter
         if stage == "discover":
             assert client is not None
             # `run` never limits discovery; `discover --limit N` caps new posts added
@@ -231,7 +235,6 @@ def _source_stages(
             summary.partial += er.partial
             summary.failed += er.failed
             summary.unchanged += er.unchanged
-    return limiter
 
 
 @app.callback(invoke_without_command=True)
