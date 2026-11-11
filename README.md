@@ -47,7 +47,7 @@ Each newsletter's cookie goes in the `.env` variable its `cookie_env` names.
    NEWSLETTER_COOKIE=ghost-members-ssr=<value>; ghost-members-ssr.sig=<value>
    ```
 
-For a Ghost site, only the two `ghost-members-ssr` cookies matter. For a Substack site, the one that matters is `connect.sid` on a custom domain (such as `newsletter.pragmaticengineer.com`) or `substack.sid` on a `*.substack.com` address. Both kinds last several months. Copy them from the request header as above. A browser's "export cookies" file often leaves out these sign-in cookies, because they are HttpOnly.
+Paste the whole header: it is sent only to that newsletter's own site. On a Ghost site, the sign-in cookies are the two `ghost-members-ssr` ones. On a Substack custom domain (such as `newsletter.pragmaticengineer.com`), `connect.sid` alone was enough when we checked; on a `*.substack.com` address it is usually `substack.sid`. Copy from the request header as above: a browser's "export cookies" file often leaves these sign-in cookies out, because they are HttpOnly.
 
 If a run says *"your cookie looks expired"*, it names the newsletter and the `.env` variable to refresh. Copy a fresh value the same way. With several newsletters, the others still run.
 
@@ -65,9 +65,17 @@ If a run says *"your cookie looks expired"*, it names the newsletter and the `.e
        cookie_env: PRAGMATIC_ENGINEER_COOKIE
    ```
 
-4. **Try 5 posts first:** `archive run --source pragmatic-engineer --limit 5`, then open a few files in `<data folder>/pragmatic-engineer/posts/` and check that the text is complete.
-5. **Load the rest without indexing yet:** `archive fetch --source pragmatic-engineer`, then `archive extract --source pragmatic-engineer`. At one request every 2 seconds, about 600 posts take roughly 25 minutes. (`archive run` would also index straight away, before you've seen the cost.)
-6. **See the indexing cost, then index:** `archive index --dry-run` shows the estimated Gemini cost; then run `archive index`.
+4. **Try 5 posts first, without indexing:**
+
+   ```bash
+   archive discover --source pragmatic-engineer          # finds every post (sitemap only)
+   archive fetch --source pragmatic-engineer --limit 5
+   archive extract --source pragmatic-engineer --limit 5
+   ```
+
+   Open a few files in `<data folder>/pragmatic-engineer/posts/` and check that the text is complete. (Don't use `archive run` for this: it also indexes, before you've seen the cost.)
+5. **Load the rest:** `archive fetch --source pragmatic-engineer`, then `archive extract --source pragmatic-engineer`. At one request every 2 seconds, about 600 posts take roughly 25 minutes.
+6. **See the indexing cost, then index:** `archive index --dry-run` shows the estimated Gemini cost. Then run `archive index`, adding `--yes` if the estimate is over your per-run limit (`search.max_embed_tokens_per_run`, 1.5M tokens by default; about 600 long posts are well over it). The run stops and says so if you leave it out.
 7. **Nothing else to set up.** The weekly job already covers every newsletter in `config.yaml`, and searches cover all of them unless you pass `source`.
 
 ## Commands
@@ -226,7 +234,7 @@ Claude Code, Claude Desktop or any MCP client can search your archive through a 
    ```
 
    Without it, search still works but isn't re-ranked.
-4. Build the index: `archive index --dry-run` shows the cost, then run `archive index`. For about 250 posts, the first build takes ~20 minutes and costs about $1.30. Later runs only process new or changed posts, and the weekly `archive run` keeps the index up to date.
+4. Build the index: `archive index --dry-run` shows the cost, then run `archive index` (add `--yes` if it says the estimate is over the per-run limit). For about 250 posts, the first build takes ~20 minutes and costs about $1.30. Later runs only process new or changed posts, and the weekly `archive run` keeps the index up to date.
 
 ### Connect your agent
 
