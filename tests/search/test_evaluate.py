@@ -157,3 +157,44 @@ def test_contextual_rule_passes_and_handles_no_local_questions():
     assert Report([outcome("a", "global", True, good)]).needs_contextual_retrieval() is None
     assert "contextual retrieval" not in "\n".join(Report([outcome("a", "global", True, good)]).lines())
     assert Report().best_stage() == "keyword"
+
+
+def cross(qid, expected, returned, expected_scores=(), summaries=True):
+    from newsletter_archive.search.evaluate import RETURNED
+
+    return Outcome(
+        Question(qid, "global", "q", tuple(expected)),
+        summaries,
+        1.0,
+        True,
+        True,
+        {},
+        (),
+        {RETURNED: tuple(returned)},
+        (),
+        tuple(expected_scores),
+    )
+
+
+# lld §9.4: the eval reports source coverage and suggests source_min_score
+def test_source_coverage_and_suggested_threshold():
+    report = Report(
+        [
+            cross("both-shown", ["main/a", "pe/b"], ["main/a", "pe/b"], [0.91, 0.42]),
+            cross("pe-missing", ["main/a", "pe/c"], ["main/a", "main/x"], [0.88]),
+            cross("one-newsletter", ["main/a"], ["main/a"], [0.97]),  # not a cross-newsletter question
+            cross("passages-only", ["main/a", "pe/b"], [], summaries=False),  # summaries variant only
+        ]
+    )
+    assert report.source_coverage() == (0.5, 2)
+    assert report.suggested_source_min_score() == 0.40  # 0.42 rounded down to 0.05
+    text = "\n".join(report.lines())
+    assert "source coverage: 0.50 of 2 cross-newsletter questions" in text
+    assert "source_min_score suggested by this run: 0.40" in text
+
+
+def test_no_cross_newsletter_questions_or_reranking_reports_nothing():
+    report = Report([cross("q", ["main/a"], ["main/a"])])
+    assert report.source_coverage() is None and report.suggested_source_min_score() is None
+    text = "\n".join(report.lines())
+    assert "source coverage" not in text and "suggested" not in text

@@ -321,6 +321,7 @@ A run costs a fraction of a cent (query embeddings only). While the file exists,
 | `bm25_boosts` | heading `2`, title `1.5`, body `1` | |
 | `fusion_weights` | keyword `1`, semantic `2` | how much each list counts when combining (semantic 2 scored best) |
 | `max_per_post` | `3` | passages per post in one result list (plus one summary) |
+| `source_min_score` | `0.5` | when you search every newsletter, one that's missing from the top results gets its best result in if the re-ranker scores it at least this (0-1); provisional until measured on your two-newsletter index |
 | `db_host` / `db_port` / `db_name` | `127.0.0.1` / `5433` / `archive` | |
 
 ## Development

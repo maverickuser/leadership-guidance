@@ -197,3 +197,69 @@ def test_every_row_carries_its_source(cfg):
         ).fetchall()
     assert [s for _, s in posts] == ["main", "main", PE, PE]
     assert passages == [(True,)]
+
+
+# -- every newsletter represented (spec hybrid-search / Result content) ----------------------
+
+
+class ScriptedReranker:
+    """Scores 0.9 for the main newsletter's passages and `pe_score` for the other's (its post is
+    titled "Post pe-1", and every passage's re-rank text starts with the title)."""
+
+    def __init__(self, pe_score):
+        self.pe_score = pe_score
+
+    def score(self, query, documents):
+        return [self.pe_score if d.startswith("Post pe-1") else 0.9 for d in documents]
+
+
+def lopsided():
+    """Eight posts in one newsletter and one in the other, all about delegating outcomes."""
+    main = [distinct(f"m{i}", i, [f"Delegate outcomes, part {i}."]) for i in range(8)]
+    pe = [distinct("pe-1", 20, ["Delegate outcomes omega."], PE, 2)]
+    return {"main": main, PE: pe}
+
+
+def sources_of(resp):
+    return [r.post.source for r in resp.results]
+
+
+# spec: hybrid-search / Result content (Both newsletters relevant)
+def test_both_newsletters_shown_when_both_are_relevant(cfg):
+    build(cfg, lopsided())
+    resp = ask(service(cfg, reranker=ScriptedReranker(0.6)), "delegate outcomes", limit=5, kind="passages")
+    assert len(resp.results) == 5 and sources_of(resp).count(PE) == 1
+    pe_hit = next(r for r in resp.results if r.post.source == PE)
+    assert pe_hit.score == 0.6 and pe_hit.rank == 5  # its own score, placed by rank: nothing disguised
+
+
+# spec: hybrid-search / Result content (Only one newsletter relevant)
+def test_a_weak_result_is_not_forced_in(cfg):
+    build(cfg, lopsided())
+    resp = ask(service(cfg, reranker=ScriptedReranker(0.1)), "delegate outcomes", limit=5, kind="passages")
+    assert sources_of(resp) == ["main"] * 5
+
+
+# spec: hybrid-search / Result content (Filtered search)
+def test_a_source_filter_turns_the_rule_off(cfg):
+    build(cfg, lopsided())
+    resp = ask(
+        service(cfg, reranker=ScriptedReranker(0.6)),
+        "delegate outcomes",
+        limit=5,
+        kind="passages",
+        source="main",
+    )
+    assert sources_of(resp) == ["main"] * 5
+
+
+def test_without_the_reranker_a_strong_fused_match_qualifies(cfg):
+    build(cfg, lopsided())
+    resp = ask(service(cfg), "delegate outcomes", limit=3, kind="passages")
+    assert not resp.reranked and PE in sources_of(resp) and len(resp.results) == 3
+
+
+def test_one_newsletter_only_is_unchanged(cfg):
+    build(cfg, {"main": lopsided()["main"]})
+    resp = ask(service(cfg, reranker=ScriptedReranker(0.6)), "delegate outcomes", limit=5, kind="passages")
+    assert sources_of(resp) == ["main"] * 5

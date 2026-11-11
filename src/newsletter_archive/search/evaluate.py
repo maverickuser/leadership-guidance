@@ -131,6 +131,12 @@ class Outcome:
     missing: tuple[str, ...]  # expected posts not in the final top 10
     rankings: dict[str, tuple[str, ...]] = field(default_factory=dict)  # stage -> posts, best first
     hits: tuple[str, ...] = ()  # passage and summary ids search found, best first
+    expected_scores: tuple[float, ...] = ()  # re-ranker scores of returned results from expected posts
+
+
+def source_of(post_id: str) -> str:
+    """The newsletter of a post id (`<source>/<slug>`); "" for ids from before the move."""
+    return post_id.split("/", 1)[0] if "/" in post_id else ""
 
 
 @dataclass
@@ -154,6 +160,25 @@ class Report:
         if not rows:
             return None
         return statistics.fmean(r for r, _ in rows), statistics.fmean(m for _, m in rows), len(rows)
+
+    def source_coverage(self) -> tuple[float, int] | None:
+        """(share, questions) over questions whose expected posts span several newsletters: the
+        share where every one of those newsletters appears in the returned top 10 (with
+        summaries). None when there are no such questions."""
+        cross = [o for o in self.outcomes_for(True) if len({source_of(e) for e in o.question.expected}) > 1]
+        if not cross:
+            return None
+        covered = [
+            {source_of(e) for e in o.question.expected} <= {source_of(p) for p in o.rankings[RETURNED][:K]}
+            for o in cross
+        ]
+        return sum(covered) / len(cross), len(cross)
+
+    def suggested_source_min_score(self) -> float | None:
+        """lld §9.3: the lowest re-ranker score among returned results from expected posts,
+        rounded down to 0.05; None when nothing was re-ranked."""
+        scores = [s for o in self.outcomes for s in o.expected_scores]
+        return math.floor(min(scores) * 20) / 20 if scores else None
 
     def best_stage(self) -> str:
         return next((s for s in reversed(STAGES) if self.score(s, True) is not None), "keyword")
@@ -208,6 +233,17 @@ class Report:
                     if verdict
                     else "not needed (local and intent ≥ 0.8)"
                 )
+            )
+        coverage = self.source_coverage()
+        if coverage is not None:
+            out.append(
+                f"source coverage: {coverage[0]:.2f} of {coverage[1]} cross-newsletter questions "
+                "show every expected newsletter in the top 10"
+            )
+        suggested = self.suggested_source_min_score()
+        if suggested is not None:
+            out.append(
+                f"source_min_score suggested by this run: {suggested:.2f} (lowest expected-result score)"
             )
         for qid, ids in self.unknown_expected.items():
             out.append(f"warning: {qid} expects posts that aren't in the index: {', '.join(ids)}")
@@ -294,8 +330,20 @@ def evaluate(
                 h for st in reversed(STAGES) if ran[st] for h in trace[st]
             ]
             hits = tuple(dict.fromkeys(order))
+            expected_scores = (
+                tuple(r.score for r in resp.results if r.post.id in q.expected) if resp.reranked else ()
+            )
             outcome = Outcome(
-                q, summaries, seconds, resp.semantic, resp.reranked, scores, missing, rankings, hits
+                q,
+                summaries,
+                seconds,
+                resp.semantic,
+                resp.reranked,
+                scores,
+                missing,
+                rankings,
+                hits,
+                expected_scores,
             )
             report.outcomes.append(outcome)
             if on_question:
