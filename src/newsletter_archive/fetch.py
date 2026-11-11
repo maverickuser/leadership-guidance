@@ -74,7 +74,9 @@ def run_fetch(
         MissingCookieError: no cookie is configured.
         NotSignedInError: a page came back without the signed-in marker (cookie expired).
     """
-    if not config.cookie:
+    # The client knows its own site and cookie; a dry run may have no client.
+    base_url = client.base_url if client is not None else config.base_url
+    if not (client.has_cookie if client is not None else config.cookie):
         raise MissingCookieError()
     platform = platform or get_platform("ghost")
     result = FetchResult()
@@ -86,12 +88,12 @@ def run_fetch(
     if dry_run:
         for entry in todo:
             result.would_fetch.append(entry.slug)
-            on_post(entry.slug, "fetch", "would-fetch", platform.request_url(entry.url, config.base_url))
+            on_post(entry.slug, "fetch", "would-fetch", platform.request_url(entry.url, base_url))
         return result
 
     for entry in todo:
         try:
-            resp = client.get(platform.request_url(entry.url, config.base_url))
+            resp = client.get(platform.request_url(entry.url, base_url))
             if resp.status != 200:
                 raise FetchError(resp.url, f"HTTP {resp.status}", status=resp.status)
         except FetchError as e:

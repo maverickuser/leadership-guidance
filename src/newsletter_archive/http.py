@@ -1,8 +1,8 @@
 """The only way the archive talks to the network.
 
-One Client per run. It owns politeness (one request at a time, a minimum gap
-between requests), retries, redirects and the Cookie header. It never logs
-request or response headers.
+One Client per site. Clients share a RateLimiter, which owns politeness (a minimum gap
+between requests, which the archive makes one after another); each Client owns its
+retries, redirects and Cookie header. It never logs request or response headers.
 """
 
 from __future__ import annotations
@@ -17,7 +17,7 @@ from urllib.parse import urljoin, urlsplit, urlunsplit
 
 import requests
 
-from .config import BACKOFF_SECONDS, Config
+from .config import BACKOFF_SECONDS, Config, Secret
 from .errors import FetchError
 
 log = logging.getLogger("newsletter_archive.http")
@@ -112,10 +112,43 @@ def to_base_host(url: str, base_url: str) -> str:
     return urlunsplit((base.scheme, base.netloc, parts.path, parts.query, ""))
 
 
-class Client:
-    """The run's only HTTP client: one request at a time, retries, same-site redirects.
+class RateLimiter:
+    """Keeps requests at least `delay` seconds apart, measured from the end of the previous one.
 
-    The Cookie header is sent only to base_url's exact origin.
+    Every client that shares one limiter shares that spacing, so a run over several sites
+    keeps the gap between all of its requests. It spaces requests made one after another,
+    as the archive makes them; it is not a lock for concurrent callers.
+    """
+
+    def __init__(
+        self,
+        delay: float,
+        sleep: Callable[[float], None] = time.sleep,
+        clock: Callable[[], float] = time.monotonic,
+    ) -> None:
+        self.delay = delay
+        self._sleep = sleep
+        self._clock = clock
+        self._last_end: float | None = None
+
+    def wait(self) -> None:
+        """Sleep until the next request may start. The first request doesn't wait."""
+        if self._last_end is None:
+            return
+        remaining = self._last_end + self.delay - self._clock()
+        if remaining > 0:
+            self._sleep(remaining)
+
+    def done(self) -> None:
+        """Record that a request (or a failed attempt) just ended."""
+        self._last_end = self._clock()
+
+
+class Client:
+    """An HTTP client for one site: polite pacing, retries, same-site redirects.
+
+    The Cookie header is sent only to base_url's exact origin. Clients for different sites
+    share one RateLimiter, so requests stay one at a time and `delay_seconds` apart overall.
     """
 
     def __init__(
@@ -124,14 +157,31 @@ class Client:
         transport: Transport | None = None,
         sleep: Callable[[float], None] = time.sleep,
         clock: Callable[[], float] = time.monotonic,
+        *,
+        limiter: RateLimiter | None = None,
+        base_url: str | None = None,
+        cookie: Secret | None = None,
     ) -> None:
+        """Without base_url the client is for the config's site and uses its cookie. With
+        base_url it sends only the cookie passed here (none if omitted), so one site's cookie
+        never reaches another. The limiter defaults to a new one of its own."""
         self.config = config
         self._transport = transport or RequestsTransport()
         self._sleep = sleep
         self._clock = clock
-        self._last_end: float | None = None
-        self._base_origin = origin(config.base_url)
+        self.limiter = limiter or RateLimiter(config.delay_seconds, sleep, clock)
+        self.base_url = base_url or config.base_url
+        if cookie is not None:
+            self._cookie = cookie
+        else:
+            self._cookie = config.cookie if base_url is None else Secret(None)
+        self._base_origin = origin(self.base_url)
         self.request_count = 0  # HTTP exchanges, including redirect hops and retries
+
+    @property
+    def has_cookie(self) -> bool:
+        """Whether this client has a cookie to send to its site."""
+        return bool(self._cookie)
 
     # -- public -------------------------------------------------------------
 
@@ -141,29 +191,30 @@ class Client:
         status: int | None = None
         reason = ""
         for attempt in range(attempts):
-            self._wait_for_slot()
+            self.limiter.wait()
             started = self._clock()
             try:
                 resp = self._follow(url)
             except ResponseTooLarge as e:
-                self._last_end = self._clock()
+                self.limiter.done()
                 raise FetchError(url, f"response too large ({e})") from None
             except FetchError:
-                self._last_end = self._clock()
+                self.limiter.done()
                 raise
             except TransportTimeout:
+                self.limiter.done()
                 reason, status = "timeout", None
             except TransportConnectionError as e:
+                self.limiter.done()
                 reason, status = f"connection error ({e})", None
             else:
-                self._last_end = self._clock()
-                log.debug("GET %s -> %s (%d ms)", url, resp.status, (self._last_end - started) * 1000)
+                self.limiter.done()
+                log.debug("GET %s -> %s (%d ms)", url, resp.status, (self._clock() - started) * 1000)
                 if resp.status < 400:
                     return resp
                 if resp.status < 500:
                     raise FetchError(url, f"HTTP {resp.status}", status=resp.status, attempts=attempt + 1)
                 reason, status = f"HTTP {resp.status}", resp.status
-            self._last_end = self._clock()
             if attempt == attempts - 1:
                 break
             wait = BACKOFF_SECONDS[attempt]
@@ -173,17 +224,10 @@ class Client:
 
     # -- internals ----------------------------------------------------------
 
-    def _wait_for_slot(self) -> None:
-        if self._last_end is None:
-            return
-        remaining = self._last_end + self.config.delay_seconds - self._clock()
-        if remaining > 0:
-            self._sleep(remaining)
-
     def _headers_for(self, url: str) -> dict[str, str]:
         headers = {"User-Agent": self.config.user_agent, "Accept": ACCEPT}
-        if self.config.cookie and origin(url) == self._base_origin:
-            headers["Cookie"] = self.config.cookie.reveal()
+        if self._cookie and origin(url) == self._base_origin:
+            headers["Cookie"] = self._cookie.reveal()
         return headers
 
     def _follow(self, url: str) -> Response:

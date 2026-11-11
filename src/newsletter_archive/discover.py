@@ -313,7 +313,7 @@ def run_discover(
     The platform (default Ghost) picks the posts among the sitemap's URLs and finds categories;
     a platform whose categories come from post pages leaves them empty here."""
     platform = platform or get_platform("ghost")
-    base = config.base_url
+    base = client.base_url
     post_urls = platform.post_urls(collect_sitemap_urls(client, f"{base}/sitemap.xml", base), base)
     log.info("sitemap: %d posts", len(post_urls))
     found = platform.discover_categories(client, base)
