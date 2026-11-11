@@ -47,7 +47,7 @@ Each newsletter's cookie goes in the `.env` variable its `cookie_env` names.
    NEWSLETTER_COOKIE=ghost-members-ssr=<value>; ghost-members-ssr.sig=<value>
    ```
 
-Only the two `ghost-members-ssr` cookies matter, and they last several months. If a run says *"Your cookie looks expired"*, copy a fresh value the same way.
+Only the two `ghost-members-ssr` cookies matter, and they last several months. If a run says *"your cookie looks expired"*, it names the newsletter and the `.env` variable to refresh; copy a fresh value the same way. With several newsletters, the others still run.
 
 ## Commands
 
@@ -65,7 +65,8 @@ Options:
 
 | Option | Meaning |
 |---|---|
-| `--limit N` | Process at most N posts: the first N in the manifest (newest first). Repeating the same limit downloads nothing new. |
+| `--source ID` | Only this newsletter (an `id` from `sources:`); repeat for several. Default: every newsletter, in config order (`discover`, `fetch`, `extract`, `run`). |
+| `--limit N` | Process at most N posts per newsletter: the first N in its manifest (newest first). Repeating the same limit downloads nothing new. |
 | `--refresh` | Download or rewrite again even if cached (`fetch`, `extract`, `run`). |
 | `--dry-run` | Show what would be fetched or written. Makes no post requests and writes no post files. |
 | `--verbose`, `-v` | Show debug output. |
@@ -75,13 +76,13 @@ Start small: `archive run --limit 5`, check the output, then run `archive run` f
 
 `archive index` options: `--dry-run` (what would change and the estimated cost; nothing is written), `--retry-failed` (retry posts that failed 3 times), `--allow-mass-delete` (allow removing many posts at once), `--yes` (go ahead over the spending ceiling), `--limit N`. It re-indexes only posts whose content, metadata or settings changed, and never pays twice for the same text.
 
-Exit codes: `0` done (individual post failures are listed in the summary), `1` config, cookie or API key missing (for `archive index`), or another run is already using the archive folder, `2` cookie expired, `3` (`archive run` only) posts were archived but updating the search index failed (database down, API key missing, Gemini outage, or a post stuck for 2 runs), `130` interrupted (progress is saved). To archive without search, set `search: {enabled: false}` in `config.yaml`.
+Exit codes: `0` done (individual post failures are listed in the summary), `1` config, cookie or API key missing (for `archive index`), or another run is already using the archive folder, `2` a newsletter's cookie expired (the other newsletters still ran; each stopped one is listed as `Stopped: <name> (<ENV>): <reason>`), `3` (`archive run` only) posts were archived but updating the search index failed (database down, API key missing, Gemini outage, or a post stuck for 2 runs), `130` interrupted (progress is saved). To archive without search, set `search: {enabled: false}` in `config.yaml`.
 
 Only one command runs at a time per archive folder; a second one exits with a message instead of overwriting progress.
 
 ## Weekly updates (macOS)
 
-`scripts/scheduled-run.sh` runs `archive run` unattended. It sends a macOS notification when new posts are archived, when the cookie has expired, or when a run fails. A second run can't overlap a running one (the archive folder is locked).
+`scripts/scheduled-run.sh` runs `archive run` unattended. It sends a macOS notification when new posts are archived (counted across all newsletters), when a newsletter's cookie has expired (naming it and its `.env` variable), or when a run fails. A second run can't overlap a running one (the archive folder is locked).
 
 To run it every Monday at 09:00, save this as `~/Library/LaunchAgents/com.<you>.newsletter-archive.plist`, replacing `/path/to` with your paths:
 

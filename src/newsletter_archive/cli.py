@@ -1,8 +1,9 @@
-"""Command-line entry point: archive discover | fetch | extract | index | run."""
+"""Command-line entry point: archive discover | fetch | extract | index | run | migrate | mcp."""
 
 from __future__ import annotations
 
 import logging
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Annotated, Optional
 
@@ -12,9 +13,10 @@ import typer
 from . import __version__
 from .config import Config, SourceConfig, load_config
 from .discover import run_discover
-from .errors import ArchiveError, ConfigError, MissingCookieError, NotSignedInError
+from .errors import ArchiveError, ConfigError, MissingCookieError, SourceStopError
 from .fetch import run_fetch
 from .http import Client, RateLimiter
+from .models import Manifest
 from .runlog import RunSummary, close_logging, log_post, setup_logging
 from .search.indexer import IndexOptions, index_archive
 from .store import load_manifest, run_extract, run_lock
@@ -35,6 +37,13 @@ DryRun = Annotated[
 Verbose = Annotated[bool, typer.Option("--verbose", "-v", help="Show debug output on the console.")]
 ConfigPath = Annotated[
     Path, typer.Option("--config", help="Path to config.yaml (.env is read from the same folder).")
+]
+Sources = Annotated[
+    Optional[list[str]],
+    typer.Option(
+        "--source",
+        help="Only this newsletter (an id from config.yaml `sources:`); repeat for several. Default: all.",
+    ),
 ]
 
 
@@ -58,6 +67,25 @@ def _refuse_old_layout(config: Config) -> None:
 
 
 INDEX_FAILED_IN_RUN = 3  # `archive run`: indexing failed or a post is stuck (the weekly job notifies)
+
+
+@dataclass
+class Stopped:
+    """One newsletter that could not finish its stages; the run went on with the others."""
+
+    source: SourceConfig
+    reason: str  # e.g. "your cookie looks expired. Paste a fresh Cookie header into .env"
+    exit_code: int
+
+    @classmethod
+    def from_error(cls, source: SourceConfig, error: ArchiveError) -> Stopped:
+        reason = error.reason if isinstance(error, SourceStopError) else str(error)
+        return cls(source, reason, error.exit_code)
+
+    def line(self) -> str:
+        """`Stopped: {name} ({cookie_env}): {reason}`, which scripts/scheduled-run.sh turns
+        into the notification text."""
+        return f"Stopped: {self.source.display_name} ({self.source.cookie_env}): {self.reason}"
 
 
 def _index_stage(config: Config, options: IndexOptions, stages: list[str]) -> int:
@@ -108,73 +136,32 @@ def _execute(
     verbose: bool,
     config_path: Path,
     index_options: IndexOptions | None = None,
+    source_ids: list[str] | None = None,
 ) -> None:
     config = _load_config(config_path)
     log_path = setup_logging(config, verbose)
     summary = RunSummary()
+    stopped: list[Stopped] = []
     code = 0
     try:
         _refuse_old_layout(config)
-        sources = config.sources
-        if "fetch" in stages:
-            without_cookie = [s for s in sources if not s.cookie]
-            if without_cookie:
-                raise MissingCookieError(without_cookie[0].cookie_env)
+        sources = config.select(source_ids)  # an unknown id fails here, before any request
         with run_lock(config.lock_path):
             limiter: RateLimiter | None = None  # one for the whole run, shared by every newsletter
             for source in sources:
                 manifest = load_manifest(source.manifest_path)
-                client: Client | None = None
                 try:
-                    for stage in [s for s in stages if s != "index"]:
-                        log.info("== %s: %s%s", source.display_name, stage, " (dry run)" if dry_run else "")
-                        if stage in ("discover", "fetch") and client is None:
-                            client = make_client(config, source, limiter)
-                            limiter = client.limiter
-                        if stage == "discover":
-                            assert client is not None
-                            # `run` never limits discovery; `discover --limit N` caps new posts added
-                            result = run_discover(
-                                client,
-                                config,
-                                manifest,
-                                limit=limit if stages == ["discover"] else None,
-                                dry_run=dry_run,
-                                source=source,
-                            )
-                            summary.categories_incomplete |= bool(result.failed_categories)
-                        elif stage == "fetch":
-                            assert client is not None
-                            fr = run_fetch(
-                                client,
-                                config,
-                                manifest,
-                                limit,
-                                refresh,
-                                dry_run,
-                                on_post=log_post,
-                                source=source,
-                            )
-                            summary.fetched += fr.fetched
-                            summary.failed += fr.failed
-                            summary.skipped += fr.skipped
-                        elif stage == "extract":
-                            er = run_extract(
-                                config, manifest, limit, refresh, dry_run, on_post=log_post, source=source
-                            )
-                            summary.ok += er.ok
-                            summary.partial += er.partial
-                            summary.failed += er.failed
-                            summary.unchanged += er.unchanged
-                finally:
-                    # Counted even when a newsletter fails part-way, so the summary stays honest.
-                    summary.discovered += len(manifest)
+                    limiter = _source_stages(
+                        config, source, manifest, stages, limit, refresh, dry_run, summary, limiter
+                    )
+                except ArchiveError as e:  # this newsletter stops; the others still run
+                    log.error(str(e))
+                    stopped.append(Stopped.from_error(source, e))
+                summary.discovered += len(manifest)
             if "index" in stages:
                 log.info("== index%s", " (dry run)" if dry_run else "")
                 code = max(code, _index_stage(config, index_options or IndexOptions(), stages))
-    except NotSignedInError as e:
-        log.error(str(e))
-        code = e.exit_code
+        code = max([code, *(s.exit_code for s in stopped)])
     except ArchiveError as e:
         log.error("Error: %s", e)
         code = e.exit_code
@@ -186,9 +173,65 @@ def _execute(
         code = 1
     finally:
         log.info(summary.line())
+        for s in stopped:
+            log.error(s.line())
         log.info("Log file: %s", log_path)
         close_logging()
     raise typer.Exit(code)
+
+
+def _source_stages(
+    config: Config,
+    source: SourceConfig,
+    manifest: Manifest,
+    stages: list[str],
+    limit: int | None,
+    refresh: bool,
+    dry_run: bool,
+    summary: RunSummary,
+    limiter: RateLimiter | None,
+) -> RateLimiter | None:
+    """Run the discover, fetch and extract stages asked for over one newsletter, adding to the
+    summary. Returns the run's rate limiter so the next newsletter shares it.
+
+    Raises:
+        MissingCookieError: before any request, when a stage needs the cookie and it isn't set.
+        NotSignedInError: the cookie has expired (fetch stops at that post).
+        ArchiveError: discovery failed (e.g. the sitemap couldn't be read).
+    """
+    if "fetch" in stages and not source.cookie:
+        raise MissingCookieError(source.display_name, source.cookie_env)
+    client: Client | None = None
+    for stage in [s for s in stages if s != "index"]:
+        log.info("== %s: %s%s", source.display_name, stage, " (dry run)" if dry_run else "")
+        if stage in ("discover", "fetch") and client is None:
+            client = make_client(config, source, limiter)
+            limiter = client.limiter
+        if stage == "discover":
+            assert client is not None
+            # `run` never limits discovery; `discover --limit N` caps new posts added
+            result = run_discover(
+                client,
+                config,
+                manifest,
+                limit=limit if stages == ["discover"] else None,
+                dry_run=dry_run,
+                source=source,
+            )
+            summary.categories_incomplete |= bool(result.failed_categories)
+        elif stage == "fetch":
+            assert client is not None
+            fr = run_fetch(client, config, manifest, limit, refresh, dry_run, on_post=log_post, source=source)
+            summary.fetched += fr.fetched
+            summary.failed += fr.failed
+            summary.skipped += fr.skipped
+        elif stage == "extract":
+            er = run_extract(config, manifest, limit, refresh, dry_run, on_post=log_post, source=source)
+            summary.ok += er.ok
+            summary.partial += er.partial
+            summary.failed += er.failed
+            summary.unchanged += er.unchanged
+    return limiter
 
 
 @app.callback(invoke_without_command=True)
@@ -202,37 +245,40 @@ def main(
 
 @app.command()
 def discover(
+    source: Sources = None,
     limit: Limit = None,
     dry_run: DryRun = False,
     verbose: Verbose = False,
     config: ConfigPath = Path("config.yaml"),
 ) -> None:
-    """Stage 1: read the sitemap and category pages into data/manifest.json."""
-    _execute(["discover"], limit, False, dry_run, verbose, config)
+    """Stage 1: read each newsletter's sitemap and category pages into its manifest.json."""
+    _execute(["discover"], limit, False, dry_run, verbose, config, source_ids=source)
 
 
 @app.command()
 def fetch(
+    source: Sources = None,
     limit: Limit = None,
     refresh: Refresh = False,
     dry_run: DryRun = False,
     verbose: Verbose = False,
     config: ConfigPath = Path("config.yaml"),
 ) -> None:
-    """Stage 2: download post pages with your cookie into data/raw/."""
-    _execute(["fetch"], limit, refresh, dry_run, verbose, config)
+    """Stage 2: download post pages with each newsletter's cookie into its raw/ folder."""
+    _execute(["fetch"], limit, refresh, dry_run, verbose, config, source_ids=source)
 
 
 @app.command()
 def extract(
+    source: Sources = None,
     limit: Limit = None,
     refresh: Refresh = False,
     dry_run: DryRun = False,
     verbose: Verbose = False,
     config: ConfigPath = Path("config.yaml"),
 ) -> None:
-    """Stages 3-4: turn cached pages into data/posts/{slug}.json (no network)."""
-    _execute(["extract"], limit, refresh, dry_run, verbose, config)
+    """Stages 3-4: turn cached pages into each newsletter's posts/{slug}.json (no network)."""
+    _execute(["extract"], limit, refresh, dry_run, verbose, config, source_ids=source)
 
 
 def _index_flag_problem(
@@ -301,15 +347,19 @@ def index(
 
 @app.command()
 def run(
+    source: Sources = None,
     limit: Limit = None,
     refresh: Refresh = False,
     dry_run: DryRun = False,
     verbose: Verbose = False,
     config: ConfigPath = Path("config.yaml"),
 ) -> None:
-    """All stages in order: discover, fetch, extract, index. Exit 3 if indexing failed."""
+    """All stages in order for every newsletter (discover, fetch, extract), then index once.
+    Exit 2 if a newsletter stopped (cookie missing or expired), 3 if indexing failed."""
     options = IndexOptions(limit=limit, dry_run=dry_run)
-    _execute(["discover", "fetch", "extract", "index"], limit, refresh, dry_run, verbose, config, options)
+    _execute(
+        ["discover", "fetch", "extract", "index"], limit, refresh, dry_run, verbose, config, options, source
+    )
 
 
 @app.command()

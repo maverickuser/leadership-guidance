@@ -45,11 +45,11 @@
 
 ## 4. Runs over several newsletters (PR 4)
 
-- [ ] 4.1 `--source` (repeatable) on `discover`, `fetch`, `extract`, `run`; unknown id rejected before any request; `--limit` per source
-- [ ] 4.2 Per-source loop; a missing or expired cookie or a discovery failure stops only that source; `Stopped: {name} ({cookie_env}): {reason}` lines; exit 2 at the end; index once
-- [ ] 4.3 Expired-cookie message names the newsletter and its `.env` variable
-- [ ] 4.4 `scripts/scheduled-run.sh`: notification built from the `Stopped:` lines; new-post count totalled across sources
-- [ ] 4.5 End-to-end tests with two fake Ghost sites: both run; `--source`; one expired cookie stops only its source; script notification texts for exit 0, 2 (one and two stopped) and 3
+- [x] 4.1 `--source` (repeatable) on `discover`, `fetch`, `extract`, `run`; unknown id rejected before any request; `--limit` per source
+- [x] 4.2 Per-source loop; a missing or expired cookie or a discovery failure stops only that source; `Stopped: {name} ({cookie_env}): {reason}` lines; exit 2 at the end; index once
+- [x] 4.3 Expired-cookie message names the newsletter and its `.env` variable
+- [x] 4.4 `scripts/scheduled-run.sh`: notification built from the `Stopped:` lines; new-post count totalled across sources
+- [x] 4.5 End-to-end tests with two fake Ghost sites: both run; `--source`; one expired cookie stops only its source; script notification texts for exit 0, 2 (one and two stopped) and 3
 
 ## 5. Substack platform (PR 5)
 

@@ -80,7 +80,7 @@ def run_fetch(
     # The client knows its own site and cookie; a dry run may have no client.
     base_url = client.base_url if client is not None else source.base_url
     if not (client.has_cookie if client is not None else source.cookie):
-        raise MissingCookieError(source.cookie_env)
+        raise MissingCookieError(source.display_name, source.cookie_env)
     platform = platform or get_platform(source.platform)
     result = FetchResult()
     todo, skipped = select_for_fetch(manifest, source, limit, refresh)
@@ -110,7 +110,7 @@ def run_fetch(
             # Don't cache a signed-out page and don't touch the entry: stop right here.
             save_manifest(manifest, source.manifest_path)
             on_post(entry.slug, "fetch", "not-signed-in", None)
-            raise NotSignedInError(entry.slug)
+            raise NotSignedInError(entry.slug, source.display_name, source.cookie_env)
 
         write_text_atomic(source.raw_path(entry.slug), resp.text)
         entry.status, entry.error, entry.last_attempt = "fetched", None, utc_now_iso()
