@@ -123,8 +123,10 @@ class SearchConfig:
     max_per_post: int = 3
     # Searches over every newsletter show each one that has a relevant result: a newsletter
     # missing from the top gets its best result in if its re-ranker score is at least this
-    # (a probability, 0-1). 0.5 = "the re-ranker judges it relevant"; provisional until it is
-    # measured on the real two-newsletter index (tasks.md 7.4).
+    # (a probability, 0-1). Measured 2026-11-11 on the two-newsletter index (837 posts, 36 eval
+    # questions, 6 cross-newsletter): coverage 0.50 with the rule off, 0.83 at 0.5, 0.67 at
+    # 0.95, 1.00 at 0 (forces anything in); recall@10 0.70-0.71 at every value. 0.5 = "the
+    # re-ranker judges it relevant". Its scores are nearly binary, so higher values cost coverage.
     source_min_score: float = 0.5
     default_limit: int = 10
     max_limit: int = 30
