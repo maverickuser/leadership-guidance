@@ -228,12 +228,12 @@ def test_bad_json_and_empty_posts_dont_block_refresh_or_swap(cfg, conn):
     empty = record("post-empty", 9)
     empty["sections"] = [{"heading": None, "level": 0, "text": INTRO}]
     write_archive(cfg, [*recs, empty], extra_manifest=["broken"])
-    cfg.post_path("broken").write_text("{not json", encoding="utf-8")
+    cfg.only_source().post_path("broken").write_text("{not json", encoding="utf-8")
     Indexer(cfg, conn, lambda *_: FakeEmbedder(dim=8), lambda: FakeSummarizer()).run(IndexOptions())
     assert statuses(conn) == {1: "active"}
     new = other_model(cfg)
     built = gens(new, conn)[0].refresh(IndexOptions(), swap=False)
-    assert built.action == "built" and {"broken", "post-empty"} <= set(built.report.failed)
+    assert built.action == "built" and {"main/broken", "main/post-empty"} <= set(built.report.failed)
     assert gens(new, conn)[0].swap(IndexOptions()).action == "swapped"
 
 
@@ -248,17 +248,17 @@ def test_rollback_restores_the_most_recently_live_generation(cfg, conn):
 
 def test_building_a_version_ignores_and_never_touches_live_failure_counters(cfg, conn):
     first_build(cfg, conn)
-    fp = conn.execute("SELECT fingerprint FROM idx_g1.posts WHERE post_id = 'post-1'").fetchone()[0]
+    fp = conn.execute("SELECT fingerprint FROM idx_g1.posts WHERE post_id = 'main/post-1'").fetchone()[0]
     conn.execute(
         "INSERT INTO index_failures (post_id, stage, error, fingerprint, attempts) "
-        "VALUES ('post-1', 'embed', 'old trouble', %s, 3)",
+        "VALUES ('main/post-1', 'embed', 'old trouble', %s, 3)",
         (fp,),
     )
     new = other_model(cfg)
     flaky = FlakyEmbedder("Post post-2", GeminiUnavailableError("down"), model="other-model", dim=4)
     with pytest.raises(GenerationError, match="incomplete"):
         gens(new, conn, embedder=flaky)[0].refresh(IndexOptions())
-    assert conn.execute("SELECT post_id, attempts FROM index_failures").fetchall() == [("post-1", 3)]
+    assert conn.execute("SELECT post_id, attempts FROM index_failures").fetchall() == [("main/post-1", 3)]
     gens(new, conn)[0].refresh(IndexOptions())
     assert count(conn, "idx_g2") == 4  # post-1 was built despite the live index giving up on it
 

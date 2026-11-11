@@ -292,7 +292,7 @@ def test_search_returns_structured_and_readable_results(cfg):
     assert not result.is_error
     data = result.structured_content
     assert data["query"] == '"bar raiser"' and data["semantic"] and data["reranked"]
-    assert len(data["results"]) == 3 and data["results"][0]["post"]["id"] == "hiring"
+    assert len(data["results"]) == 3 and data["results"][0]["post"]["id"] == "main/hiring"
     first = data["results"][0]
     assert {"rank", "score", "found_by", "kind", "id", "heading", "text", "post"} <= set(first)
     assert {"id", "title", "url", "published_date", "categories"} == set(first["post"])
@@ -305,7 +305,7 @@ def test_search_returns_structured_and_readable_results(cfg):
 def test_filters_and_summaries(cfg):
     server = mcp_server.build_server(make_service(cfg), None)[0]
     data = call(server, {"query": "team", "since": "2025-02-01", "limit": 30}).structured_content
-    assert {r["post"]["id"] for r in data["results"]} == {"hiring", "career"}
+    assert {r["post"]["id"] for r in data["results"]} == {"main/hiring", "main/career"}
     data = call(server, {"query": "team", "kind": "summaries", "category": "hiring"}).structured_content
     assert [r["kind"] for r in data["results"]] == ["summary"] and data["filters"]["category"] == ["Hiring"]
 
@@ -345,10 +345,12 @@ def test_gemini_outage_gives_keyword_only_results(cfg):
 @db_only
 def test_new_posts_appear_without_a_restart(cfg):
     server = mcp_server.build_server(make_service(cfg), None)[0]
-    assert "fresh-post" not in json.dumps(call(server, {"query": "team", "limit": 30}).structured_content)
+    assert "main/fresh-post" not in json.dumps(
+        call(server, {"query": "team", "limit": 30}).structured_content
+    )
     index(cfg, [*records(), post("fresh-post", 9, [(None, FILLER + " A brand new weekly post.")], day=7)])
     data = call(server, {"query": "brand new weekly", "limit": 30}).structured_content
-    assert "fresh-post" in {r["post"]["id"] for r in data["results"]}
+    assert "main/fresh-post" in {r["post"]["id"] for r in data["results"]}
 
 
 @db_only
@@ -386,7 +388,8 @@ def test_archive_mcp_over_stdio_keeps_stdout_for_the_protocol(cfg, tmp_path, pg_
 
     s = cfg.search
     (tmp_path / "config.yaml").write_text(
-        f"base_url: https://www.example.com\noutput_dir: {cfg.output_dir}\n"
+        f"output_dir: {cfg.output_dir}\nsources:\n  - id: main\n    platform: ghost\n"
+        "    base_url: https://www.example.com\n    cookie_env: NEWSLETTER_COOKIE\n"
         f"search:\n  embedding_model: {s.embedding_model}\n  embedding_dimension: {s.embedding_dimension}\n"
         f"  db_port: {s.db_port}\n  db_name: {s.db_name}\n",
         encoding="utf-8",

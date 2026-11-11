@@ -7,7 +7,7 @@ from pathlib import Path
 
 import pytest
 
-from newsletter_archive.config import Config, Secret
+from newsletter_archive.config import Config, Secret, SourceConfig
 
 FIXTURES = Path(__file__).parent / "fixtures"
 
@@ -59,16 +59,35 @@ def _block_network(monkeypatch):
         monkeypatch.delenv(name, raising=False)
 
 
-def make_config(tmp_path: Path, **overrides) -> Config:
+def make_source(output_dir: Path, **fields) -> SourceConfig:
+    """The test newsletter `main` (a Ghost site at www.example.com with the fake cookie)."""
     values = dict(
+        id="main",
+        platform="ghost",
         base_url="https://www.example.com",
+        cookie_env="NEWSLETTER_COOKIE",
+        cookie=Secret(TEST_COOKIE),
+        root=output_dir / fields.get("id", "main"),
+    )
+    values.update(fields)
+    return SourceConfig(**values)
+
+
+SOURCE_KEYS = {"base_url", "cookie", "boilerplate_prefixes", "platform", "name", "cookie_env"}
+
+
+def make_config(tmp_path: Path, **overrides) -> Config:
+    """A config with one source, `main`. Per-source keys (base_url, cookie, ...) set that source."""
+    output_dir = overrides.pop("output_dir", tmp_path / "data")
+    source_fields = {k: overrides.pop(k) for k in list(overrides) if k in SOURCE_KEYS}
+    values = dict(
+        sources=(make_source(output_dir, **source_fields),),
         delay_seconds=2.0,
         max_retries=3,
         timeout_seconds=30.0,
         min_word_count=300,
-        output_dir=tmp_path / "data",
+        output_dir=output_dir,
         user_agent="test-agent/1.0",
-        cookie=Secret(TEST_COOKIE),
     )
     values.update(overrides)
     return Config(**values)

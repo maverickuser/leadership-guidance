@@ -17,16 +17,16 @@ from .site import FixtureSite
 
 
 def posts(h):
-    return {p.stem: json.loads(p.read_text()) for p in (h.data / "posts").glob("*.json")}
+    return {p.stem: json.loads(p.read_text()) for p in (h.main / "posts").glob("*.json")}
 
 
 # I1
 def test_first_run_limit_5(harness):
     r = harness.run("run", "--limit", "5")
     assert r.exit_code == 0, r.output
-    manifest = json.loads((harness.data / "manifest.json").read_text())
+    manifest = json.loads((harness.main / "manifest.json").read_text())
     assert [p["slug"] for p in manifest["posts"]] == SLUGS
-    assert len(list((harness.data / "raw").iterdir())) == 5
+    assert len(list((harness.main / "raw").iterdir())) == 5
     assert len(list((harness.data / "logs").iterdir())) == 1
     out = posts(harness)
     assert sorted(out) == SLUGS[:5]
@@ -44,11 +44,11 @@ def test_first_run_limit_5(harness):
 def test_second_run_is_idempotent(harness):
     harness.run("run", "--limit", "5")
     first_posts = list(harness.site.post_requests())
-    mtimes = {p.name: p.stat().st_mtime_ns for p in (harness.data / "posts").iterdir()}
+    mtimes = {p.name: p.stat().st_mtime_ns for p in (harness.main / "posts").iterdir()}
     r = harness.run("run", "--limit", "5")
     assert r.exit_code == 0
     assert harness.site.post_requests() == first_posts  # no new post requests
-    assert {p.name: p.stat().st_mtime_ns for p in (harness.data / "posts").iterdir()} == mtimes
+    assert {p.name: p.stat().st_mtime_ns for p in (harness.main / "posts").iterdir()} == mtimes
 
 
 # I3
@@ -56,8 +56,8 @@ def test_cookie_expires_mid_run(harness):
     harness.site.expire_after = 2
     r = harness.run("run")
     assert r.exit_code == 2 and NOT_SIGNED_IN_MESSAGE in r.output
-    assert sorted(p.stem for p in (harness.data / "raw").iterdir()) == ["post-1", "post-2"]
-    manifest = {p["slug"]: p for p in json.loads((harness.data / "manifest.json").read_text())["posts"]}
+    assert sorted(p.stem for p in (harness.main / "raw").iterdir()) == ["post-1", "post-2"]
+    manifest = {p["slug"]: p for p in json.loads((harness.main / "manifest.json").read_text())["posts"]}
     assert manifest["post-3"]["status"] == "discovered" and manifest["post-3"]["last_attempt"] is None
 
 
@@ -74,7 +74,7 @@ def test_404_post_fails_others_succeed(harness):
     harness.site.missing.add("post-2")
     r = harness.run("run", "--limit", "3")
     assert r.exit_code == 0 and "failed=1" in r.output and "ok=2" in r.output
-    manifest = {p["slug"]: p for p in json.loads((harness.data / "manifest.json").read_text())["posts"]}
+    manifest = {p["slug"]: p for p in json.loads((harness.main / "manifest.json").read_text())["posts"]}
     assert manifest["post-2"]["status"] == "failed" and manifest["post-2"]["error"] == "HTTP 404"
 
 
@@ -85,7 +85,7 @@ def test_offsite_redirect_never_sends_cookie(harness):
         r = harness.run("run", "--limit", "1")
         assert r.exit_code == 0
         assert other.requests == []
-    manifest = json.loads((harness.data / "manifest.json").read_text())["posts"]
+    manifest = json.loads((harness.main / "manifest.json").read_text())["posts"]
     assert manifest[0]["status"] == "failed" and "another site" in manifest[0]["error"]
 
 
@@ -147,4 +147,4 @@ def test_fetch_dry_run_makes_no_post_requests(harness):
     r = harness.run("fetch", "--dry-run")
     assert r.exit_code == 0 and "post-1  fetch  would-fetch" in r.output
     assert harness.site.post_requests() == []
-    assert not (harness.data / "raw").exists()
+    assert not (harness.main / "raw").exists()

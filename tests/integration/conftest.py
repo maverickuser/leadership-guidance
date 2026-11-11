@@ -25,15 +25,29 @@ class Harness:
     def __init__(self, tmp_path: Path, monkeypatch, site: FixtureSite, real_clock: bool = False):
         self.site = site
         self.data = tmp_path / "data"
+        self.main = self.data / "main"  # the newsletter's own folder
         self.config = tmp_path / "config.yaml"
-        self.config.write_text(f"base_url: {site.base}\noutput_dir: data\n", encoding="utf-8")
+        self.config.write_text(
+            "output_dir: data\nsources:\n  - id: main\n    platform: ghost\n"
+            f"    base_url: {site.base}\n    cookie_env: NEWSLETTER_COOKIE\n",
+            encoding="utf-8",
+        )
         (tmp_path / ".env").write_text(f"NEWSLETTER_COOKIE={TEST_COOKIE}\n", encoding="utf-8")
         self.clock = FakeClock()
 
-        def make_client(cfg):
-            if real_clock:
-                return Client(cfg, transport=RequestsTransport(), sleep=time.sleep, clock=time.monotonic)
-            return Client(cfg, transport=RequestsTransport(), sleep=self.clock.sleep, clock=self.clock.clock)
+        def make_client(cfg, source, limiter):
+            sleep, clock = (
+                (time.sleep, time.monotonic) if real_clock else (self.clock.sleep, self.clock.clock)
+            )
+            return Client(
+                cfg,
+                transport=RequestsTransport(),
+                sleep=sleep,
+                clock=clock,
+                limiter=limiter,
+                base_url=source.base_url,
+                cookie=source.cookie,
+            )
 
         monkeypatch.setattr(cli, "make_client", make_client)
         # These tests cover the scraping stack; the index stage has its own tests in tests/search.

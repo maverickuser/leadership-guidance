@@ -5,42 +5,66 @@ from newsletter_archive.errors import ConfigError
 
 from .conftest import TEST_COOKIE
 
-SITE = {"base_url": "https://www.example.com"}
+MAIN = {
+    "id": "main",
+    "platform": "ghost",
+    "base_url": "https://www.example.com",
+    "cookie_env": "NEWSLETTER_COOKIE",
+}
+SITE = {"sources": [MAIN]}
+SOURCES_YAML = """sources:
+  - id: main
+    platform: ghost
+    base_url: https://www.example.com
+    cookie_env: NEWSLETTER_COOKIE
+"""
 
 
 def write(path, text):
-    """Write a config file; every config needs base_url, so add it unless the test sets one."""
-    if path.suffix == ".yaml" and "base_url" not in text:
-        text = "base_url: https://www.example.com\n" + text
+    """Write a config file; every config needs sources, so add one unless the test sets them."""
+    if path.suffix == ".yaml" and "sources" not in text and "base_url" not in text:
+        text = SOURCES_YAML + text
     path.write_text(text, encoding="utf-8")
     return path
 
 
-def test_base_url_is_required(tmp_path):
-    assert DEFAULTS["base_url"] is None
-    with pytest.raises(ConfigError, match="base_url is not set"):
+# spec: archive-cli / Configuration (a missing sources list is a config error)
+def test_sources_are_required(tmp_path):
+    assert DEFAULTS["sources"] is None
+    with pytest.raises(ConfigError, match="sources is not set"):
         load_config(tmp_path / "missing.yaml", tmp_path / ".env")
 
 
 def test_defaults_when_no_config_file(tmp_path):
     cfg = load_config(tmp_path / "missing.yaml", tmp_path / ".env", overrides=SITE)
-    assert cfg.base_url == "https://www.example.com"
+    main = cfg.only_source()
+    assert (main.id, main.platform, main.base_url) == ("main", "ghost", "https://www.example.com")
     assert cfg.delay_seconds == 2
     assert cfg.max_retries == 3
     assert cfg.timeout_seconds == 30
     assert cfg.min_word_count == 300
-    assert cfg.output_dir.name == "newsletter-archive-data"
-    assert not cfg.cookie
+    assert cfg.output_dir.name == "leadership-coach-datasets"
+    assert not main.cookie
 
 
+# spec: newsletter-sources / One folder per newsletter
 def test_yaml_overrides_defaults_and_relative_output_dir(tmp_path):
-    p = write(tmp_path / "config.yaml", "delay_seconds: 5\noutput_dir: out\nbase_url: https://x.test/\n")
+    p = write(
+        tmp_path / "config.yaml",
+        "delay_seconds: 5\noutput_dir: out\n"
+        + SOURCES_YAML.replace("https://www.example.com", "https://x.test/"),
+    )
     cfg = load_config(p, tmp_path / ".env")
+    main = cfg.only_source()
     assert cfg.delay_seconds == 5
     assert cfg.output_dir == (tmp_path / "out").resolve()
-    assert cfg.base_url == "https://x.test"
-    assert cfg.manifest_path == cfg.output_dir / "manifest.json"
-    assert cfg.raw_dir.name == "raw" and cfg.posts_dir.name == "posts" and cfg.logs_dir.name == "logs"
+    assert main.base_url == "https://x.test"
+    assert main.manifest_path == cfg.output_dir / "main" / "manifest.json"
+    assert (
+        main.raw_dir == cfg.output_dir / "main" / "raw"
+        and main.posts_dir == cfg.output_dir / "main" / "posts"
+    )
+    assert cfg.logs_dir == cfg.output_dir / "logs" and main.post_id("a-post") == "main/a-post"
 
 
 def test_absolute_and_home_output_dir(tmp_path):
@@ -68,7 +92,6 @@ def test_unknown_key_rejected(tmp_path):
         ("delay_seconds: 1\n", "delay_seconds"),
         ("max_retries: 4\n", "max_retries"),
         ("timeout_seconds: 0\n", "timeout_seconds"),
-        ("base_url: ftp://x\n", "base_url"),
         ("delay_seconds: abc\n", "invalid setting"),
     ],
 )
@@ -85,13 +108,17 @@ def test_with_overrides_revalidates(cfg):
 
 def test_cookie_from_env_file(tmp_path):
     env = write(tmp_path / ".env", f"NEWSLETTER_COOKIE={TEST_COOKIE}\n")
-    assert load_config(tmp_path / "none.yaml", env, overrides=SITE).cookie.reveal() == TEST_COOKIE
+    assert (
+        load_config(tmp_path / "none.yaml", env, overrides=SITE).only_source().cookie.reveal() == TEST_COOKIE
+    )
 
 
 def test_environment_variable_beats_env_file(tmp_path, monkeypatch):
     env = write(tmp_path / ".env", "NEWSLETTER_COOKIE=from-file\n")
     monkeypatch.setenv("NEWSLETTER_COOKIE", "from-env")
-    assert load_config(tmp_path / "none.yaml", env, overrides=SITE).cookie.reveal() == "from-env"
+    assert (
+        load_config(tmp_path / "none.yaml", env, overrides=SITE).only_source().cookie.reveal() == "from-env"
+    )
 
 
 @pytest.mark.parametrize(
@@ -110,7 +137,7 @@ def test_clean_cookie(raw, expected):
 
 def test_secret_never_shows_value(cfg):
     assert "TESTSECRET123" not in repr(cfg)
-    assert "TESTSECRET123" not in str(cfg.cookie)
+    assert "TESTSECRET123" not in str(cfg.only_source().cookie)
     assert repr(Secret("")) == "Secret(<empty>)"
     assert not Secret("   ")
     assert Secret("x") == Secret("x")
@@ -217,19 +244,16 @@ def test_search_secrets_from_env_file_and_environment(tmp_path, monkeypatch):
     assert len(cfg.secrets) == 4
 
 
-def test_boilerplate_prefixes(tmp_path):
-    p = write(tmp_path / "config.yaml", "boilerplate_prefixes:\n  - '  Hello   there '\n")
-    assert load_config(p, tmp_path / ".env").boilerplate_prefixes == ("Hello there",)
-    assert (
-        load_config(tmp_path / "missing.yaml", tmp_path / ".env", overrides=SITE).boilerplate_prefixes == ()
+def test_boilerplate_prefixes_per_source(tmp_path):
+    p = write(
+        tmp_path / "config.yaml", SOURCES_YAML + "    boilerplate_prefixes:\n      - '  Hello   there '\n"
     )
-    for bad in (
-        "boilerplate_prefixes: hello\n",
-        "boilerplate_prefixes: ['']\n",
-        "boilerplate_prefixes: [3]\n",
-    ):
-        p = write(tmp_path / "config.yaml", bad)
-        with pytest.raises(ConfigError, match="boilerplate_prefixes"):
+    assert load_config(p, tmp_path / ".env").only_source().boilerplate_prefixes == ("Hello there",)
+    no_prefixes = load_config(tmp_path / "missing.yaml", tmp_path / ".env", overrides=SITE)
+    assert no_prefixes.only_source().boilerplate_prefixes == ()
+    for bad in ("hello", "['']", "[3]"):
+        p = write(tmp_path / "config.yaml", SOURCES_YAML + f"    boilerplate_prefixes: {bad}\n")
+        with pytest.raises(ConfigError, match="source 'main': boilerplate_prefixes"):
             load_config(p, tmp_path / ".env")
 
 
@@ -242,7 +266,7 @@ def test_fusion_weights(tmp_path):
     from newsletter_archive.config import ConfigError, load_config
 
     path = tmp_path / "config.yaml"
-    path.write_text("base_url: https://www.example.com\nsearch:\n  fusion_weights: {semantic: 3}\n")
+    path.write_text(SOURCES_YAML + "search:\n  fusion_weights: {semantic: 3}\n")
     assert load_config(path).search.fusion_weights == {"keyword": 1.0, "semantic": 3.0}
     for bad, message in (
         ("{semantic: 0}", "must be positive numbers"),
@@ -250,6 +274,6 @@ def test_fusion_weights(tmp_path):
         ("{vibes: 1}", "map keyword and semantic"),
         ("[1]", "map keyword"),
     ):
-        path.write_text(f"base_url: https://www.example.com\nsearch:\n  fusion_weights: {bad}\n")
+        path.write_text(SOURCES_YAML + f"search:\n  fusion_weights: {bad}\n")
         with pytest.raises(ConfigError, match=message):
             load_config(path)

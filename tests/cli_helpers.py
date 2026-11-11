@@ -15,6 +15,13 @@ from .conftest import TEST_COOKIE
 from .fakes import FakeClock, FakeTransport
 
 BASE = "https://www.example.com"
+SINGLE_SOURCE_CONFIG = f"""output_dir: data
+sources:
+  - id: main
+    platform: ghost
+    base_url: {BASE}
+    cookie_env: NEWSLETTER_COOKIE
+"""
 
 
 class CliEnv:
@@ -22,14 +29,23 @@ class CliEnv:
         self.root = tmp_path
         self.data = tmp_path / "data"
         self.config = tmp_path / "config.yaml"
-        self.config.write_text(f"base_url: {BASE}\noutput_dir: data\n", encoding="utf-8")
+        self.config.write_text(SINGLE_SOURCE_CONFIG, encoding="utf-8")
+        self.main = self.data / "main"  # the newsletter's own folder
         (tmp_path / ".env").write_text(f"NEWSLETTER_COOKIE={cookie}\n", encoding="utf-8")
         self.clock = FakeClock()
         self.transport = FakeTransport(clock=self.clock)
         monkeypatch.setattr(
             cli,
             "make_client",
-            lambda cfg: Client(cfg, transport=self.transport, sleep=self.clock.sleep, clock=self.clock.clock),
+            lambda cfg, source, limiter: Client(
+                cfg,
+                transport=self.transport,
+                sleep=self.clock.sleep,
+                clock=self.clock.clock,
+                limiter=limiter,
+                base_url=source.base_url,
+                cookie=source.cookie,
+            ),
         )
         # The index stage is stubbed here (it needs the database); see tests/search for it.
         self.index_calls: list = []

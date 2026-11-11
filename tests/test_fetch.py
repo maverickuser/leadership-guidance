@@ -50,8 +50,8 @@ def test_fetch_saves_raw_and_updates_manifest(cfg, clock):
     assert result.fetched == 2
     assert t.urls() == [f"{BASE}/a/", f"{BASE}/b/"]
     assert all("TESTSECRET123" in call.headers["Cookie"] for call in t.calls)
-    assert (cfg.raw_dir / "a.html").read_text().count('data-portal="account"') == 1
-    saved = load_manifest(cfg.manifest_path)
+    assert (cfg.only_source().raw_dir / "a.html").read_text().count('data-portal="account"') == 1
+    saved = load_manifest(cfg.only_source().manifest_path)
     assert saved.entries["a"].status == "fetched" and saved.entries["a"].last_attempt.endswith("Z")
     assert calls == [("a", "fetch", "fetched", None), ("b", "fetch", "fetched", None)]
 
@@ -93,7 +93,7 @@ def test_signed_out_first_post_stops_without_writing(cfg, clock):
     with pytest.raises(NotSignedInError) as e:
         run_fetch(c, cfg, m)
     assert e.value.slug == "a" and "cookie looks expired" in str(e.value)
-    assert not (cfg.raw_dir / "a.html").exists()
+    assert not (cfg.only_source().raw_dir / "a.html").exists()
     assert m.entries["a"].status == "discovered" and m.entries["a"].last_attempt is None
     assert t.urls() == [f"{BASE}/a/"]
 
@@ -105,8 +105,8 @@ def test_cookie_expires_mid_run(cfg, clock):
     _t, c = setup(cfg, clock, slugs, signed_in={"p3": False, "p4": False, "p5": False})
     with pytest.raises(NotSignedInError):
         run_fetch(c, cfg, m)
-    assert sorted(p.name for p in cfg.raw_dir.iterdir()) == ["p1.html", "p2.html"]
-    saved = load_manifest(cfg.manifest_path)
+    assert sorted(p.name for p in cfg.only_source().raw_dir.iterdir()) == ["p1.html", "p2.html"]
+    saved = load_manifest(cfg.only_source().manifest_path)
     assert [saved.entries[s].status for s in slugs] == [
         "fetched",
         "fetched",
@@ -140,7 +140,7 @@ def test_404_marks_failed_and_continues(cfg, clock):
     _t, c = setup(cfg, clock, ["b"], overrides={f"{BASE}/a/": [404]})
     result = run_fetch(c, cfg, m)
     assert (result.failed, result.fetched) == (1, 1)
-    saved = load_manifest(cfg.manifest_path).entries["a"]
+    saved = load_manifest(cfg.only_source().manifest_path).entries["a"]
     assert saved.status == "failed" and saved.error == "HTTP 404" and saved.last_attempt
 
 
@@ -179,7 +179,11 @@ def test_dry_run_makes_no_requests_and_writes_nothing(cfg, clock):
     t, c = setup(cfg, clock, ["a", "b"])
     result = run_fetch(c, cfg, m, dry_run=True)
     assert result.would_fetch == ["a", "b"]
-    assert t.calls == [] and not cfg.raw_dir.exists() and not cfg.manifest_path.exists()
+    assert (
+        t.calls == []
+        and not cfg.only_source().raw_dir.exists()
+        and not cfg.only_source().manifest_path.exists()
+    )
 
 
 def test_fetch_goes_through_base_host_for_non_www_urls(cfg, clock):

@@ -146,7 +146,7 @@ def test_fetch_uses_the_platform_url_and_sign_in_check(cfg, clock):
     t.add(f"{BASE}/b?fake=1", (200, "<html>page</html>"))
     with pytest.raises(NotSignedInError):
         run_fetch(client(cfg, t, clock), cfg, m2, platform=FakePlatform(signed_in=False))
-    assert not cfg.raw_path("b").exists()
+    assert not cfg.only_source().raw_path("b").exists()
 
 
 def test_dry_run_fetch_reports_the_platform_url(cfg):
@@ -158,23 +158,27 @@ def test_dry_run_fetch_reports_the_platform_url(cfg):
 
 def seed(cfg, slug, categories):
     m = Manifest(entries={slug: ManifestEntry(url=f"{BASE}/{slug}", slug=slug, categories=categories)})
-    write_text_atomic(cfg.raw_path(slug), "<html>saved page</html>")
+    write_text_atomic(cfg.only_source().raw_path(slug), "<html>saved page</html>")
     return m
 
 
 def test_page_categories_replace_the_manifests(cfg):
     m = seed(cfg, "a", ["Old"])
     run_extract(cfg, m, platform=FakePlatform(categories=["The Pulse"]))
-    assert json.loads(cfg.post_path("a").read_text(encoding="utf-8"))["categories"] == ["The Pulse"]
+    assert json.loads(cfg.only_source().post_path("a").read_text(encoding="utf-8"))["categories"] == [
+        "The Pulse"
+    ]
     assert m.entries["a"].categories == ["The Pulse"]
-    assert load_manifest(cfg.manifest_path).entries["a"].categories == ["The Pulse"]
+    assert load_manifest(cfg.only_source().manifest_path).entries["a"].categories == ["The Pulse"]
 
 
 def test_no_page_categories_keeps_the_manifests(cfg):
     m = seed(cfg, "a", ["Career Growth"])
     run_extract(cfg, m, platform=FakePlatform(categories=None))
     assert m.entries["a"].categories == ["Career Growth"]
-    assert json.loads(cfg.post_path("a").read_text(encoding="utf-8"))["categories"] == ["Career Growth"]
+    assert json.loads(cfg.only_source().post_path("a").read_text(encoding="utf-8"))["categories"] == [
+        "Career Growth"
+    ]
 
 
 def test_rediscovery_keeps_categories_read_from_pages(cfg, clock):
@@ -185,14 +189,14 @@ def test_rediscovery_keeps_categories_read_from_pages(cfg, clock):
     t.routes[f"{BASE}/sitemap.xml"] = [(200, sitemap_urlset(BASE, ["a", "b", "c"]))]  # the next sitemap
     run_discover(client(cfg, t, clock), cfg, m, platform=FakePlatform())
     assert [(e.slug, e.categories) for e in m.ordered()] == [("a", ["The Pulse"]), ("b", []), ("c", [])]
-    assert load_manifest(cfg.manifest_path).entries["a"].categories == ["The Pulse"]
+    assert load_manifest(cfg.only_source().manifest_path).entries["a"].categories == ["The Pulse"]
 
 
 def test_status_change_alone_rewrites_the_post(cfg):
     m = seed(cfg, "a", [])
     run_extract(cfg, m, platform=FakePlatform())
-    assert json.loads(cfg.post_path("a").read_text(encoding="utf-8"))["status"] == "ok"
+    assert json.loads(cfg.only_source().post_path("a").read_text(encoding="utf-8"))["status"] == "ok"
     result = run_extract(cfg, m, platform=FakePlatform(paywalled=True))
     assert result.written == 1
-    assert json.loads(cfg.post_path("a").read_text(encoding="utf-8"))["status"] == "partial"
+    assert json.loads(cfg.only_source().post_path("a").read_text(encoding="utf-8"))["status"] == "partial"
     assert m.entries["a"].status == "partial"

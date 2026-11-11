@@ -76,18 +76,22 @@ def ids(results):
 def test_stemming_and_heading_boost(store):
     _, conn, schema = store
     hits = keyword_search(conn, schema, build_keyword_query("delegate"), Filters(kind="passages"), BOOSTS, 10)
-    assert ids(hits)[:2] == ["heading-hit", "body-hit"]
+    assert ids(hits)[:2] == ["main/heading-hit", "main/body-hit"]
 
 
 # spec: hybrid-search / Hybrid retrieval / Exact term match
 def test_phrase_and_accents(store):
     _, conn, schema = store
     hits = keyword_search(conn, schema, build_keyword_query('"bar raiser"'), Filters(), BOOSTS, 10)
-    assert ids(hits)[0] == "phrase-hit"
+    assert ids(hits)[0] == "main/phrase-hit"
     assert (
-        ids(keyword_search(conn, schema, build_keyword_query("resume"), Filters(), BOOSTS, 10))[0] == "cafe"
+        ids(keyword_search(conn, schema, build_keyword_query("resume"), Filters(), BOOSTS, 10))[0]
+        == "main/cafe"
     )
-    assert ids(keyword_search(conn, schema, build_keyword_query("cafe"), Filters(), BOOSTS, 10))[0] == "cafe"
+    assert (
+        ids(keyword_search(conn, schema, build_keyword_query("cafe"), Filters(), BOOSTS, 10))[0]
+        == "main/cafe"
+    )
 
 
 def test_odd_queries_never_error(store):
@@ -101,11 +105,11 @@ def test_filters(store):
     _, conn, schema = store
     q = build_keyword_query("teams learn")
     hiring = keyword_search(conn, schema, q, Filters(categories=("Hiring",)), BOOSTS, 20)
-    assert set(ids(hiring)) == {"phrase-hit"}
+    assert set(ids(hiring)) == {"main/phrase-hit"}
     recent = keyword_search(conn, schema, q, Filters(since=date(2025, 4, 1)), BOOSTS, 20)
-    assert set(ids(recent)) == {"cafe", "unrelated"}
+    assert set(ids(recent)) == {"main/cafe", "main/unrelated"}
     early = keyword_search(conn, schema, q, Filters(until=date(2025, 1, 31)), BOOSTS, 20)
-    assert set(ids(early)) == {"heading-hit"}
+    assert set(ids(early)) == {"main/heading-hit"}
     summaries = keyword_search(
         conn, schema, build_keyword_query("summary"), Filters(kind="summaries"), BOOSTS, 20
     )
@@ -124,13 +128,13 @@ def test_categories(store):
 def test_vector_search_nearest_first_with_filters(store):
     _cfg, conn, schema = store
     row = conn.execute(
-        f"SELECT passage_id, title, heading, body FROM {schema}.passages WHERE post_id = 'cafe' AND kind = 'passage'"
+        f"SELECT passage_id, title, heading, body FROM {schema}.passages WHERE post_id = 'main/cafe' AND kind = 'passage'"
     ).fetchone()
     v = np.asarray(fake_vector(passage_input(row[1], row[2], row[3]), 8), dtype=np.float32)
     v /= np.linalg.norm(v)
     assert vector_search(conn, schema, v, Filters(), 3)[0] == row[0]
     hiring = vector_search(conn, schema, v, Filters(categories=("Hiring",)), 10)
-    assert hiring and all(h.startswith("phrase-hit") for h in hiring)
+    assert hiring and all(h.startswith("main/phrase-hit") for h in hiring)
 
 
 def small_store(db_config, records):
@@ -159,7 +163,7 @@ def test_phrase_in_a_heading_outranks_the_same_phrase_in_a_body(db_config):
     )
     with conn:
         hits = keyword_search(conn, schema, build_keyword_query('"bar raiser"'), Filters(), BOOSTS, 10)
-        assert ids(hits)[:2] == ["in-heading", "in-body"]
+        assert ids(hits)[:2] == ["main/in-heading", "main/in-body"]
 
 
 def test_categories_differing_only_by_case_are_all_kept(db_config):
@@ -182,7 +186,7 @@ def test_categories_differing_only_by_case_are_all_kept(db_config):
             BOOSTS,
             20,
         )
-        assert set(ids(hits)) == {"upper", "lower"}
+        assert set(ids(hits)) == {"main/upper", "main/lower"}
 
 
 def test_category_list_is_cached_briefly(store):
@@ -193,7 +197,7 @@ def test_category_list_is_cached_briefly(store):
     now = [100.0]
     assert "Brand new" not in kw.all_categories(conn, schema, clock=lambda: now[0])
     conn.execute(
-        f"UPDATE {schema}.posts SET categories = categories || 'Brand new'::text WHERE post_id = 'cafe'"
+        f"UPDATE {schema}.posts SET categories = categories || 'Brand new'::text WHERE post_id = 'main/cafe'"
     )
     now[0] += 10
     assert "Brand new" not in kw.all_categories(conn, schema, clock=lambda: now[0])  # cached

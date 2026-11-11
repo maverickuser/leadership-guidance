@@ -33,15 +33,15 @@
 
 ## 3. Sources config, per-newsletter folders and the move (PR 3)
 
-- [ ] 3.1 Config: `sources` list, `SourceConfig` (paths, `post_id`), every validation rule, reserved ids, lazy cookie check, the old-`base_url` error with a ready `sources:` block (lld §3)
-- [ ] 3.2 Defaults: `output_dir` → `../leadership-coach-datasets`; `docker-compose.yml` `ARCHIVE_DB_DATA` default; `config.example.yaml`, `.env.example`
-- [ ] 3.3 Storage: post schema v2 (`source`, `id = {id}/{slug}`); `build_record` and every stage read and write `{id}/` paths
-- [ ] 3.4 Indexer `load_posts` reads every source's manifest and v2 posts; a v1 file fails with "run `archive migrate`"
-- [ ] 3.5 `archive migrate --source <id>` with `--dry-run`: copy, then write and validate, then delete; eval-file id rewrite; idempotent; refuses conflicting state (lld §8)
-- [ ] 3.6 Old-layout guard on every command except `migrate` and `mcp`
-- [ ] 3.7 README: new data-folder tree and the 7 move steps
-- [ ] 3.8 Tests: config errors; paths; migration incl. kill after each phase then rerun, dry run, second run no-op, eval rewrite; guard
-- [ ] 3.9 PR body tells the user that after merging, the weekly job refuses to run until the move steps are done, and lists them
+- [x] 3.1 Config: `sources` list, `SourceConfig` (paths, `post_id`), every validation rule, reserved ids, lazy cookie check, the old-`base_url` error with a ready `sources:` block (lld §3)
+- [x] 3.2 Defaults: `output_dir` → `../leadership-coach-datasets`; `docker-compose.yml` `ARCHIVE_DB_DATA` default; `config.example.yaml`, `.env.example`
+- [x] 3.3 Storage: post schema v2 (`source`, `id = {id}/{slug}`); `build_record` and every stage read and write `{id}/` paths
+- [x] 3.4 Indexer `load_posts` reads every source's manifest and v2 posts; a v1 file fails with "run `archive migrate`"
+- [x] 3.5 `archive migrate --source <id>` with `--dry-run`: copy, then write and validate, then delete; eval-file id rewrite; idempotent; refuses conflicting state (lld §8)
+- [x] 3.6 Old-layout guard on every command except `migrate` and `mcp`
+- [x] 3.7 README: new data-folder tree and the 7 move steps
+- [x] 3.8 Tests: config errors; paths; migration incl. kill after each phase then rerun, dry run, second run no-op, eval rewrite; guard
+- [x] 3.9 PR body tells the user that after merging, the weekly job refuses to run until the move steps are done, and lists them
 
 ## 4. Runs over several newsletters (PR 4)
 

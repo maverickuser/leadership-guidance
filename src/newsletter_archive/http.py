@@ -162,7 +162,7 @@ class Client:
         base_url: str | None = None,
         cookie: Secret | None = None,
     ) -> None:
-        """Without base_url the client is for the config's site and uses its cookie. With
+        """Without base_url the client is for the config's only newsletter and uses its cookie. With
         base_url it sends only the cookie passed here (none if omitted), so one site's cookie
         never reaches another. The limiter defaults to a new one of its own."""
         self.config = config
@@ -170,11 +170,11 @@ class Client:
         self._sleep = sleep
         self._clock = clock
         self.limiter = limiter or RateLimiter(config.delay_seconds, sleep, clock)
-        self.base_url = base_url or config.base_url
-        if cookie is not None:
-            self._cookie = cookie
-        else:
-            self._cookie = config.cookie if base_url is None else Secret(None)
+        if base_url is None:  # the config's only newsletter, with its cookie
+            only = config.only_source()
+            base_url, cookie = only.base_url, cookie if cookie is not None else only.cookie
+        self.base_url = base_url
+        self._cookie = cookie if cookie is not None else Secret(None)
         self._base_origin = origin(self.base_url)
         self.request_count = 0  # HTTP exchanges, including redirect hops and retries
 

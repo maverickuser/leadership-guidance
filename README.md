@@ -4,7 +4,7 @@ A personal command-line tool that saves the posts **you subscribe to** on a Ghos
 
 - **Personal use only.** It uses your own login cookie and reads only what your subscription can read. It never bypasses the paywall.
 - **Polite.** One request at a time, at least 2 seconds apart, with backoff on errors.
-- **Private.** Posts are stored outside this repo (`../newsletter-archive-data/` by default) and are never committed. Your cookie stays in `.env` and is never printed or logged.
+- **Private.** Posts are stored outside this repo (`../leadership-coach-datasets/` by default) and are never committed. Your cookie stays in `.env` and is never printed or logged.
 
 This repository holds code and specs only, with no newsletter content. Test fixtures keep the site's HTML structure but replace article text with filler.
 
@@ -19,14 +19,26 @@ python3.12 -m venv .venv
 source .venv/bin/activate
 pip install -e '.[dev]'
 cp .env.example .env
-cp config.example.yaml config.yaml   # then set base_url to the newsletter's address
+cp config.example.yaml config.yaml   # then add your newsletter under sources:
 ```
 
-`config.yaml` and `.env` are git-ignored, so the site address and your cookie stay on your machine.
+`config.yaml` lists your newsletters under `sources:`. Each one gets its own folder in the data folder, named by its `id`:
+
+```yaml
+sources:
+  - id: main
+    platform: ghost
+    base_url: https://www.example.com
+    cookie_env: NEWSLETTER_COOKIE   # the .env variable that holds this newsletter's cookie
+```
+
+`config.yaml` and `.env` are git-ignored, so the site addresses and your cookies stay on your machine.
 
 ### Add your cookie to `.env`
 
-1. Sign in to the newsletter site (your `base_url`) in your browser.
+Each newsletter's cookie goes in the `.env` variable its `cookie_env` names.
+
+1. Sign in to the newsletter site (its `base_url`) in your browser.
 2. Open DevTools (⌥⌘I in Chrome), go to the **Network** tab, and reload the page.
 3. Click the first request (the page itself). Under **Request Headers**, find `cookie`.
 4. Copy its whole value into `.env`:
@@ -46,6 +58,7 @@ archive extract             # stages 3-4: raw/ -> posts/{slug}.json (no network)
 archive index               # build or update the search store (needs the database and GEMINI_API_KEY)
 archive run                 # all of the above, in order
 archive mcp                 # the search server for Claude Code / Claude Desktop (see Search)
+archive migrate --source ID # one-time: move an old single-newsletter archive (see below)
 ```
 
 Options:
@@ -82,8 +95,8 @@ To run it every Monday at 09:00, save this as `~/Library/LaunchAgents/com.<you>.
   <array><string>/bin/bash</string><string>/path/to/leadership-guidance/scripts/scheduled-run.sh</string></array>
   <key>StartCalendarInterval</key>
   <dict><key>Weekday</key><integer>1</integer><key>Hour</key><integer>9</integer><key>Minute</key><integer>0</integer></dict>
-  <key>StandardOutPath</key><string>/path/to/newsletter-archive-data/logs/scheduled.log</string>
-  <key>StandardErrorPath</key><string>/path/to/newsletter-archive-data/logs/scheduled.log</string>
+  <key>StandardOutPath</key><string>/path/to/leadership-coach-datasets/logs/scheduled.log</string>
+  <key>StandardErrorPath</key><string>/path/to/leadership-coach-datasets/logs/scheduled.log</string>
 </dict>
 </plist>
 ```
@@ -100,32 +113,52 @@ launchd runs a missed job when the Mac wakes from sleep, but not if the Mac was 
 
 | Setting | Default | |
 |---|---|---|
-| `base_url` | none (required) | the Ghost newsletter site, e.g. `https://www.example.com` |
-| `delay_seconds` | `2` | minimum gap between requests; lower values are refused |
+| `sources` | none (required) | your newsletters: each has `id`, `platform` (`ghost`), `base_url`, `cookie_env`, and optional `name` and `boilerplate_prefixes` |
+| `delay_seconds` | `2` | minimum gap between requests, across all newsletters; lower values are refused |
 | `max_retries` | `3` | retries on timeouts, connection errors and 5xx (2s, 4s, 8s); never on 4xx |
 | `timeout_seconds` | `30` | |
 | `min_word_count` | `300` | posts with fewer words, or with a paywall box in the body, are `partial` |
-| `output_dir` | `../newsletter-archive-data` | relative to `config.yaml` (or the current folder if there is none), or an absolute path |
+| `output_dir` | `../leadership-coach-datasets` | relative to `config.yaml` (or the current folder if there is none), or an absolute path |
 | `user_agent` | `newsletter-archive/0.1 (...)` | |
-| `boilerplate_prefixes` | `[]` | extra intro openings to strip from the top of each post; your site's wording stays in your local `config.yaml` |
+| `sources[].boilerplate_prefixes` | `[]` | extra intro openings to strip from the top of each post; your site's wording stays in your local `config.yaml` |
 | `search` | see [Search settings](#search-settings-search-in-configyaml) | |
 
 ## Output
 
 ```
-../newsletter-archive-data/
-  manifest.json          # every post: url, slug, categories, status, last_attempt, error, content_hash
-  raw/{slug}.html        # cached pages (extraction can re-run offline)
-  posts/{slug}.json      # one clean record per post
-  logs/run-*.log         # one log per run
+../leadership-coach-datasets/
+  <id>/                  # one folder per newsletter, named by its id in config.yaml
+    manifest.json        # every post: url, slug, categories, status, last_attempt, error, content_hash
+    raw/{slug}.html      # cached pages (extraction can re-run offline)
+    posts/{slug}.json    # one clean record per post
+  postgres/              # the search database (shared)
+  models/                # the local re-ranker model (shared)
+  logs/run-*.log         # one log per run, for all newsletters
+  eval-queries.yaml      # your search test questions (optional)
+  eval-judgments.yaml    # saved LLM judge grades (optional)
 ```
 
-Each `posts/{slug}.json` (schema version 1):
+### Moving an existing archive (one-time)
+
+Archives made before newsletters had their own folders keep `manifest.json`, `raw/` and `posts/` at the top. Every command refuses that layout until you move it once:
+
+1. Back up the data folder.
+2. Stop the database: `docker compose down`.
+3. Rename `../newsletter-archive-data` to `../leadership-coach-datasets`.
+4. Update `output_dir` in `config.yaml`, `ARCHIVE_DB_DATA` in `.env` (if set) and the launchd log path (if set).
+5. Convert `config.yaml` to the `sources:` list. Any command prints the entry to paste in.
+6. Run `archive migrate --source <id> --dry-run` to see what will move, then `archive migrate --source <id>`.
+7. Start the database with `docker compose up -d --wait db`, then run `archive index --dry-run` (it should cost about $0) and `archive index`.
+
+Post ids become `<id>/<slug>`, and the ids in your eval files are updated automatically. If the move stops partway, run it again; nothing old is deleted until every new file is in place.
+
+Each `<id>/posts/{slug}.json` (schema version 2):
 
 ```json
 {
-  "schema_version": 1,
-  "id": "example-post",
+  "schema_version": 2,
+  "id": "main/example-post",
+  "source": "main",
   "url": "https://www.example.com/example-post",
   "title": "Example Post",
   "subtitle": "…",
@@ -161,7 +194,7 @@ Claude Code, Claude Desktop or any MCP client can search your archive through a 
    docker compose up -d --wait db     # ParadeDB (Postgres 17 + pg_search + pgvector) on 127.0.0.1:5433
    ```
 
-   Its data lives in `../newsletter-archive-data/postgres/`, outside the repo.
+   Its data lives in `../leadership-coach-datasets/postgres/`, outside the repo.
 
 2. In `.env`, add `GEMINI_API_KEY` (from [Google AI Studio](https://aistudio.google.com/apikey)) and three database passwords of your choice (see `.env.example`).
 3. Install the local re-ranker (optional, ~1.2 GB download on first use, Apple Silicon or CPU):
@@ -224,7 +257,7 @@ The `search` tool takes:
 - `since` and `until` (`YYYY-MM-DD`)
 - `kind` (`all`, `passages` or `summaries`)
 
-A search takes about 5 seconds. If Gemini is unreachable, results come from keywords only. If the re-ranker isn't installed or is busy, results keep their combined order. Either way, the response says so. The server listens on no network port. It logs to `../newsletter-archive-data/logs/mcp-*.log` and to stderr, never the query text, passage text or any key. It picks up index updates without a restart.
+A search takes about 5 seconds. If Gemini is unreachable, results come from keywords only. If the re-ranker isn't installed or is busy, results keep their combined order. Either way, the response says so. The server listens on no network port. It logs to `../leadership-coach-datasets/logs/mcp-*.log` and to stderr, never the query text, passage text or any key. It picks up index updates without a restart.
 
 ### What is sent to Gemini
 
@@ -242,7 +275,7 @@ Changing `search.embedding_model` needs a new index version. `archive index --re
 
 ### Check search quality
 
-Write your own test questions in `../newsletter-archive-data/eval-queries.yaml`, which is never committed. Each question has the posts it should find:
+Write your own test questions in `../leadership-coach-datasets/eval-queries.yaml`, which is never committed. Each question has the posts it should find:
 
 ```yaml
 questions:
@@ -263,7 +296,7 @@ The stages are keyword only, semantic only, combined, and re-ranked. Options:
 - `--json FILE` saves the full report.
 - `--judge` also asks Gemini (`summaries.model`) to grade the results, so you can check your `expected` lists (below).
 
-**LLM judge (`--judge`).** For each question, Gemini grades the posts that any stage put in its top 10, plus your expected ones, from 0 (not relevant) to 3 (essential). It sees each post's title, summary and the passages search found. Grades are saved in `../newsletter-archive-data/eval-judgments.yaml` (never committed) and reused, so later runs grade only new posts or reworded questions. The report adds:
+**LLM judge (`--judge`).** For each question, Gemini grades the posts that any stage put in its top 10, plus your expected ones, from 0 (not relevant) to 3 (essential). It sees each post's title, summary and the passages search found. Grades are saved in `../leadership-coach-datasets/eval-judgments.yaml` (never committed) and reused, so later runs grade only new posts or reworded questions. The report adds:
 - posts to consider adding to `expected` (graded 2–3 but not listed)
 - expected posts the judge rates weak (0–1), worth a second look
 - nDCG@10 per stage, a graded score that rewards the best posts ranking first

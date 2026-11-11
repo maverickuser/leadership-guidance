@@ -6,7 +6,7 @@ import logging
 from dataclasses import dataclass, field
 from urllib.parse import urlsplit, urlunsplit
 
-from .config import Config
+from .config import Config, SourceConfig
 from .errors import FetchError, MissingCookieError, NotSignedInError
 from .http import Client, to_base_host
 from .models import Manifest, ManifestEntry, PostCallback, no_callback, utc_now_iso
@@ -44,15 +44,15 @@ def fetch_url_for(url: str, base_url: str | None = None) -> str:
 
 
 def select_for_fetch(
-    manifest: Manifest, config: Config, limit: int | None, refresh: bool
+    manifest: Manifest, source: SourceConfig, limit: int | None, refresh: bool
 ) -> tuple[list[ManifestEntry], list[ManifestEntry]]:
     """Return (to fetch, skipped). The limit picks the first N posts before skipping,
     so repeating `--limit 5` keeps touching the same 5 posts."""
     candidates = manifest.ordered() if limit is None else manifest.ordered()[:limit]
     if refresh:
         return candidates, []
-    todo = [e for e in candidates if not config.raw_path(e.slug).exists()]
-    skipped = [e for e in candidates if config.raw_path(e.slug).exists()]
+    todo = [e for e in candidates if not source.raw_path(e.slug).exists()]
+    skipped = [e for e in candidates if source.raw_path(e.slug).exists()]
     return todo, skipped
 
 
@@ -65,22 +65,25 @@ def run_fetch(
     dry_run: bool = False,
     on_post: PostCallback = no_callback,
     platform: Platform | None = None,
+    source: SourceConfig | None = None,
 ) -> FetchResult:
     """Download each selected post's page into raw/, saving progress after every post.
 
-    The platform (default Ghost) decides the URL to request and how a signed-in page looks.
+    source defaults to the only configured one; the platform (default: the source's) decides
+    the URL to request and how a signed-in page looks.
 
     Raises:
         MissingCookieError: no cookie is configured.
         NotSignedInError: a page came back without the signed-in marker (cookie expired).
     """
+    source = source or config.only_source()
     # The client knows its own site and cookie; a dry run may have no client.
-    base_url = client.base_url if client is not None else config.base_url
-    if not (client.has_cookie if client is not None else config.cookie):
+    base_url = client.base_url if client is not None else source.base_url
+    if not (client.has_cookie if client is not None else source.cookie):
         raise MissingCookieError()
-    platform = platform or get_platform("ghost")
+    platform = platform or get_platform(source.platform)
     result = FetchResult()
-    todo, skipped = select_for_fetch(manifest, config, limit, refresh)
+    todo, skipped = select_for_fetch(manifest, source, limit, refresh)
     result.skipped = len(skipped)
     for entry in skipped:
         on_post(entry.slug, "fetch", "skipped", None)
@@ -98,20 +101,20 @@ def run_fetch(
                 raise FetchError(resp.url, f"HTTP {resp.status}", status=resp.status)
         except FetchError as e:
             entry.status, entry.error, entry.last_attempt = "failed", e.reason, utc_now_iso()
-            save_manifest(manifest, config.manifest_path)
+            save_manifest(manifest, source.manifest_path)
             result.failed += 1
             on_post(entry.slug, "fetch", "failed", e.reason)
             continue
 
         if not platform.signed_in(resp.text):
             # Don't cache a signed-out page and don't touch the entry: stop right here.
-            save_manifest(manifest, config.manifest_path)
+            save_manifest(manifest, source.manifest_path)
             on_post(entry.slug, "fetch", "not-signed-in", None)
             raise NotSignedInError(entry.slug)
 
-        write_text_atomic(config.raw_path(entry.slug), resp.text)
+        write_text_atomic(source.raw_path(entry.slug), resp.text)
         entry.status, entry.error, entry.last_attempt = "fetched", None, utc_now_iso()
-        save_manifest(manifest, config.manifest_path)
+        save_manifest(manifest, source.manifest_path)
         result.fetched += 1
         on_post(entry.slug, "fetch", "fetched", None)
     return result
