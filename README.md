@@ -66,7 +66,7 @@ If a run says *"your cookie looks expired"*, it names the newsletter and the `.e
    ```
 
 4. **Try 5 posts first:** `archive run --source pragmatic-engineer --limit 5`, then open a few files in `<data folder>/pragmatic-engineer/posts/` and check that the text is complete.
-5. **Load the rest:** `archive run --source pragmatic-engineer`. At one request every 2 seconds, about 600 posts take roughly 20 minutes.
+5. **Load the rest without indexing yet:** `archive fetch --source pragmatic-engineer`, then `archive extract --source pragmatic-engineer`. At one request every 2 seconds, about 600 posts take roughly 25 minutes. (`archive run` would also index straight away, before you've seen the cost.)
 6. **See the indexing cost, then index:** `archive index --dry-run` shows the estimated Gemini cost; then run `archive index`.
 7. **Nothing else to set up.** The weekly job already covers every newsletter in `config.yaml`, and searches cover all of them unless you pass `source`.
 
