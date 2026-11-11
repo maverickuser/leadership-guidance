@@ -17,7 +17,7 @@ from newsletter_archive.search.service import SearchError, SearchRequest
 from newsletter_archive.store import save_manifest
 
 from ..conftest import make_source
-from .archive import small_config
+from .archive import record, small_config
 from .fakes import FakeEmbedder
 from .test_indexer_integration import FakeSummarizer
 from .test_retrieval_integration import FILLER, post
@@ -138,28 +138,53 @@ def test_overview_and_tool_description_list_each_newsletter(cfg):
 
 
 # spec: search-indexing / Boilerplate removal, per newsletter
+def distinct(slug, seed, extra, source="main", day=1):
+    """A post whose own text is unique (random filler), with `extra` paragraphs appended."""
+    r = record(slug, seed, intro=False, sizes=(80,))
+    r["sections"][-1]["text"] += "".join(f"\n\n{p}" for p in extra)
+    r["text"] = "\n\n".join(s["text"] for s in r["sections"])
+    r["published_date"] = f"2025-0{day}-01"
+    return as_source(r, source) if source != "main" else r
+
+
 def test_boilerplate_is_found_per_newsletter(cfg):
     cfg = replace(cfg, search=replace(cfg.search, boilerplate_min_posts=3))
-    main = [
-        post(f"m{i}", i, [(None, FILLER + f" Point {i} about teams.\n\n{REPEATED}")], day=1) for i in range(3)
-    ]
-    pe = [
-        as_source(post(f"p{i}", 10 + i, [(None, FILLER + f" Note {i}.\n\n{REPEATED}")], day=2), PE)
-        for i in range(2)
-    ]
+    shared, pe_twice = (
+        REPEATED,
+        "Paid subscribers get the full deep dive every Thursday, with all the charts.",
+    )
+    main = [distinct(f"m{i}", i, [shared]) for i in range(3)]
+    pe = [distinct(f"p{i}", 10 + i, [shared, pe_twice] if i < 2 else [shared], PE, 2) for i in range(3)]
     report = build(cfg, {"main": main, PE: pe})
-    assert report.boilerplate_paragraphs == 3  # in 3 main posts; only 2 in the other newsletter
+    assert not report.failed
+    assert report.boilerplate_paragraphs == 6  # the shared line in all 6 posts; pe_twice is in only 2
     with db.connect(cfg, "reader") as conn:
         gen = db.active_generation(conn)
         bodies = dict(
             conn.execute(
-                f"SELECT post_id, string_agg(body, ' ') FROM {gen.schema}.passages WHERE kind = 'passage' GROUP BY post_id"
+                f"SELECT post_id, string_agg(body, ' ') FROM {gen.schema}.passages "
+                "WHERE kind = 'passage' GROUP BY post_id"
             ).fetchall()
         )
-        stored = conn.execute(f"SELECT count(*) FROM {gen.schema}.boilerplate").fetchone()[0]
-    assert all("forward it to a colleague" not in bodies[f"main/m{i}"] for i in range(3))
-    assert all("forward it to a colleague" in bodies[f"{PE}/p{i}"] for i in range(2))
-    assert stored >= 1
+        stored = conn.execute(f"SELECT cluster_id, post_count FROM {gen.schema}.boilerplate").fetchall()
+    assert all("forward it to a colleague" not in body for body in bodies.values())
+    assert all("full deep dive" in bodies[f"{PE}/p{i}"] for i in range(2))  # 2 posts: not boilerplate
+    assert stored == [(1, 3)]  # one row for the line both newsletters repeat (each in 3 posts)
+
+
+def test_a_newsletter_indexed_after_a_search_is_known_at_once(cfg):
+    news = two_newsletters()
+    build(cfg, {"main": news["main"]})
+    svc = service(cfg)
+    assert ask(svc, "delegate", source="main").results  # fills the cached list of newsletters
+    build(cfg, news)  # the weekly run adds the second newsletter to the same index
+    assert {r.post.source for r in ask(svc, "delegate", source=PE).results} == {PE}
+
+
+def test_a_blank_source_is_an_error_not_a_search_of_everything():
+    for blank in (" ", [" "], ["main", ""]):
+        with pytest.raises(SearchError, match="not blank"):
+            SearchRequest.create("team", source=blank)
 
 
 def test_every_row_carries_its_source(cfg):

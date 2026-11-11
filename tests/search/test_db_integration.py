@@ -275,5 +275,5 @@ def test_rows_from_before_the_move_search_without_a_source(db_config):
     resp = svc.search(SearchRequest.create("delegation"))
     [hit] = resp.results
     assert (hit.post.source, hit.post.source_name) == (None, None)
-    assert "· Old post () ·" not in render_text(resp) and "Old post" in render_text(resp)
+    assert "] passage · Old post · score" in render_text(resp)  # no newsletter, no empty ()
     assert svc.overview().sources == []  # nothing to list until the move's index run

@@ -149,14 +149,14 @@ _source_cache: dict[tuple[str, str], tuple[float, list[str]]] = {}
 
 
 def all_sources(
-    conn: psycopg.Connection, schema: str, clock: Callable[[], float] = time.monotonic
+    conn: psycopg.Connection, schema: str, clock: Callable[[], float] = time.monotonic, *, fresh: bool = False
 ) -> list[str]:
-    """Every newsletter id in the generation, sorted; cached like ``all_categories``. Rows from
-    before the move to per-newsletter folders (no source) are left out."""
+    """Every newsletter id in the generation, sorted; cached like ``all_categories`` unless
+    ``fresh``. Rows from before the move to per-newsletter folders (no source) are left out."""
     now = clock()
     key = (conn.info.dbname, schema)
     hit = _source_cache.get(key)
-    if hit and now - hit[0] < CATEGORY_CACHE_SECONDS:
+    if hit and not fresh and now - hit[0] < CATEGORY_CACHE_SECONDS:
         return list(hit[1])
     rows = conn.execute(
         sql.SQL("SELECT DISTINCT source FROM {}.posts WHERE source IS NOT NULL ORDER BY source").format(

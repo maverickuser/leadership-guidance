@@ -97,6 +97,8 @@ BEGIN
     WHERE EXISTS (SELECT 1 FROM pg_namespace WHERE nspname = format('idx_g%s', g.generation))
     ORDER BY g.generation
   LOOP
+    -- Drop the BM25 index first, so the fill below doesn't update it row by row.
+    EXECUTE format('DROP INDEX IF EXISTS %I.passages_bm25', s);
     EXECUTE format('ALTER TABLE %I.posts ADD COLUMN IF NOT EXISTS source text', s);
     EXECUTE format('ALTER TABLE %I.passages ADD COLUMN IF NOT EXISTS source text', s);
     EXECUTE format(
@@ -104,7 +106,6 @@ BEGIN
     EXECUTE format(
       $sql$UPDATE %I.passages SET source = split_part(post_id, '/', 1) WHERE position('/' in post_id) > 0$sql$, s);
     EXECUTE format('CREATE INDEX IF NOT EXISTS passages_source_idx ON %I.passages (source)', s);
-    EXECUTE format('DROP INDEX IF EXISTS %I.passages_bm25', s);
     EXECUTE format($sql$
       CREATE INDEX passages_bm25 ON %I.passages USING bm25 (
         passage_id,

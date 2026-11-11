@@ -123,7 +123,9 @@ class SearchRequest:
             srcs = tuple(source)
         else:
             raise SearchError("source must be a newsletter id or a list of ids")
-        srcs = tuple(dict.fromkeys(s.strip().lower() for s in srcs if s.strip()))
+        if any(not s.strip() for s in srcs):
+            raise SearchError("source must be a newsletter id or a list of ids, not blank")
+        srcs = tuple(dict.fromkeys(s.strip().lower() for s in srcs))
         return cls(text, n, cats, start, end, str(kind), srcs)
 
 
@@ -362,6 +364,8 @@ class SearchService:
                     raise SearchError(f"unknown category {', '.join(unknown)}; valid categories: {valid}")
             if req.sources:
                 known = all_sources(conn, gen.schema)
+                if any(s not in known for s in req.sources):  # maybe just indexed: read again
+                    known = all_sources(conn, gen.schema, fresh=True)
                 unknown = [s for s in req.sources if s not in known]
                 if unknown:
                     valid = ", ".join(known) or "(none)"
