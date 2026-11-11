@@ -269,3 +269,13 @@ def test_load_candidates_shows_found_passages_first(cfg):
     hiring = found["main/hiring"]
     assert hiring.title and hiring.summary and 1 <= len(hiring.passages) <= 2
     assert "bar raiser" in " ".join(hiring.passages)
+
+
+def test_expected_scores_are_recorded_only_when_reranked(cfg):
+    report = evaluate(make_service(cfg), QUESTIONS[:1], variants=(True,))
+    [o] = report.outcomes
+    assert o.expected_scores and o.reranked
+    svc = make_service(cfg)
+    svc.reranker = None  # results not re-ranked: no scores on the re-ranker's scale
+    unranked = evaluate(svc, QUESTIONS[:1], variants=(True,))
+    assert unranked.outcomes[0].expected_scores == ()

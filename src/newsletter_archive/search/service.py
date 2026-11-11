@@ -31,7 +31,7 @@ from ..runlog import RedactFilter
 from . import db
 from .embeddings import query_input
 from .filters import KIND_VALUES, Filters
-from .fusion import diversify, rrf
+from .fusion import diversify, represent_sources, rrf
 from .keyword import all_categories, all_sources, build_keyword_query, keyword_search, resolve_categories
 from .rerank import RerankerUnavailableError
 from .vector import vector_search
@@ -371,6 +371,8 @@ class SearchService:
                     valid = ", ".join(known) or "(none)"
                     raise SearchError(f"unknown source {', '.join(unknown)}; valid sources: {valid}")
             filters = Filters(cats, req.since, req.until, req.kind, req.sources)
+            # Every newsletter is represented only when none was chosen and there are several.
+            represented = [] if req.sources else all_sources(conn, gen.schema)
             paused = self._semantic_paused_until - self.clock()
             embedding = None if paused > 0 else _pool.submit(self._embed_query, req.query, gen)
             keyword = keyword_search(
@@ -402,12 +404,26 @@ class SearchService:
             # Re-rank at least as many as were asked for; when re-ranked, only re-ranked
             # candidates are returned, so every score is on the same scale.
             top = order[: max(self.s.rerank_top, req.limit)]
+            # Every newsletter represented: also score each missing newsletter's best candidate,
+            # so one just below the re-rank cut still gets its chance (kept only if it qualifies).
+            shown = {rows[p].post.source for p in top}
+            extra = [
+                p
+                for src in (represented if len(represented) > 1 else [])
+                if src not in shown
+                for p in [next((q for q in order if rows[q].post.source == src), None)]
+                if p is not None
+            ]
+            batch = top + extra
             try:
-                new = [float(x) for x in self.reranker.score(req.query, [rows[p].rerank_text() for p in top])]
-                if len(new) != len(top):
+                new = [
+                    float(x) for x in self.reranker.score(req.query, [rows[p].rerank_text() for p in batch])
+                ]
+                if len(new) != len(batch):
                     raise RerankerUnavailableError("re-ranker returned the wrong number of scores")
-                scores.update(zip(top, new, strict=True))
-                order = sorted(top, key=lambda p: -scores[p])  # stable: ties keep combined order
+                scores.update(zip(batch, new, strict=True))
+                kept_extra = [p for p in extra if scores[p] >= self.s.source_min_score]
+                order = sorted(top + kept_extra, key=lambda p: -scores[p])  # stable: ties keep combined order
                 reranked = True
             except RerankerUnavailableError as e:
                 notes.append(f"results not re-ranked: {e}")
@@ -424,13 +440,25 @@ class SearchService:
                 reranked=list(order) if reranked else [],
                 post_of={pid: row.post_id for pid, row in rows.items()},
             )
-        kept = diversify(
+        diverse = diversify(
             order,
             lambda p: rows[p].post_id,
             lambda p: rows[p].kind == "summary",
             self.s.max_per_post,
             1,
-        )[: req.limit]
+        )
+        if reranked and len(represented) > 1:
+            # Only re-ranked scores say "relevant"; without them the rule is off, so a weak
+            # keyword match is never forced in.
+            kept = represent_sources(
+                diverse,
+                req.limit,
+                lambda p: rows[p].post.source,
+                lambda p: scores[p] >= self.s.source_min_score,
+                represented,
+            )
+        else:
+            kept = diverse[: req.limit]
         results = [
             SearchResult(
                 rank=i,

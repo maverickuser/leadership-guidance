@@ -54,3 +54,35 @@ def diversify(
             bucket[post] = bucket.get(post, 0) + 1
             out.append(pid)
     return out
+
+
+def represent_sources(
+    ranked: Sequence[str],
+    limit: int,
+    source_of: Callable[[str], str | None],
+    qualifies: Callable[[str], bool],
+    sources: Sequence[str],
+) -> list[str]:
+    """The first ``limit`` of ``ranked``, changed so every newsletter in ``sources`` with a
+    qualifying result below the cut gets one place (spec hybrid-search / Result content).
+
+    For each newsletter missing from the top: its best result below the cut, if it qualifies,
+    replaces the lowest result of a newsletter that has more than one in the top. The kept
+    results stay in their original order, so a swapped-in result shows its own (lower) rank and
+    score; nothing is disguised. A newsletter with nothing that qualifies is not forced in."""
+    top = list(ranked[:limit])
+    position = {pid: i for i, pid in enumerate(ranked)}
+    for src in sources:
+        if any(source_of(p) == src for p in top):
+            continue
+        best = next((p for p in ranked[limit:] if source_of(p) == src), None)
+        if best is None or not qualifies(best):
+            continue
+        counts: dict[str | None, int] = {}
+        for p in top:
+            counts[source_of(p)] = counts.get(source_of(p), 0) + 1
+        victim = next((p for p in reversed(top) if counts[source_of(p)] > 1), None)
+        if victim is None:
+            continue
+        top[top.index(victim)] = best
+    return sorted(top, key=lambda p: position[p])

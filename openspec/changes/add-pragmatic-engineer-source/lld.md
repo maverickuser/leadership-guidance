@@ -172,9 +172,21 @@ for src in sources_in_generation - {r.source for r in top}:
         victim = last r in top whose source has > 1 result in top
         if victim: replace victim with best
 top.sort(by original rank)
-qualifies(r) = r.rerank_score >= source_min_score          when re-ranked
-             = r was among the first `candidates` fused    when not re-ranked
+qualifies(r) = r.rerank_score >= source_min_score          (re-ranked searches only)
 ```
+
+- **Changed in the PR (review):** without re-ranker scores the rule is off. A fused rank says nothing about relevance, so "among the first `candidates`" let weak keyword matches in. When re-ranking, each missing newsletter's best fused candidate is scored too, even below the `rerank_top` cut, and is kept only if it qualifies.
+- **Measuring `source_min_score`:** run the eval with `search.source_min_score: 0`, so no expected result is held back by the current value. Only the cross-newsletter questions count.
+- **Measured 2026-11-11 (837 posts, 36 questions, 6 cross-newsletter):**
+
+  | `source_min_score` | source coverage | recall@10 (returned) |
+  |---|---|---|
+  | 1.0 (rule off) | 0.50 | 0.70 |
+  | 0.95 (the "lowest expected score" rule) | 0.67 | 0.71 |
+  | **0.5 (default kept)** | **0.83** | 0.71 |
+  | 0 (anything qualifies) | 1.00 | 0.71 |
+
+  The Qwen3 re-ranker's scores are nearly binary (relevant passages ≥ 0.95, the rest far lower), so "the lowest expected-result score" lands at 0.95 and gives up coverage. 0.5 keeps the meaning "the re-ranker judges it relevant", gains most of the coverage, and never forces a weak result in (0 would). Recall never drops.
 
 - **Result content:** each result keeps its own score and rank. A swapped-in result shows its true (lower) score, so nothing is disguised.
 - **`source_min_score` default:** measured in the search PR. It's the lowest re-ranker score among expected results across the eval questions (including the new cross-newsletter ones), rounded down to 0.05, and recorded with the measurement in `config.py` and the PR.

@@ -70,11 +70,11 @@
 
 ## 7. Every newsletter represented (PR 7)
 
-- [ ] 7.1 `service.py`: swap-in after diversity, before the limit, only without a `source` filter and with more than one source (lld §9.3)
-- [ ] 7.2 `search.source_min_score` setting and validation
-- [ ] 7.3 Eval: "source coverage" in the report; with the user, add 6 cross-newsletter questions to their local `eval-queries.yaml`
-- [ ] 7.4 Live, with the user's go-ahead: run the eval on the real index and set the `source_min_score` default from the lowest expected-result score (rounded down to 0.05); record the measurement in the PR
-- [ ] 7.5 `db` tests: both relevant, only one relevant (no weak result forced in), filter disables the rule, not-re-ranked path
+- [x] 7.1 `service.py`: swap-in after diversity, before the limit, only without a `source` filter and with more than one source (lld §9.3)
+- [x] 7.2 `search.source_min_score` setting and validation
+- [x] 7.3 Eval: "source coverage" in the report (code done; the 6 questions are written with the user at acceptance); with the user, add 6 cross-newsletter questions to their local `eval-queries.yaml`
+- [x] 7.4 Live, with the user's go-ahead: run the eval on the real index and set the `source_min_score` default from the lowest expected-result score (rounded down to 0.05); record the measurement in the PR
+- [x] 7.5 `db` tests: both relevant, only one relevant (no weak result forced in), filter disables the rule, not-re-ranked path
 
 ## 8. Adding a newsletter and acceptance (PR 8)
 
