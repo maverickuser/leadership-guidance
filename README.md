@@ -334,6 +334,20 @@ The stages are keyword only, semantic only, combined, and re-ranked. Options:
 
 The judge only advises: you decide what goes in the file, and the swap check below keeps using your lists. The first run makes about one request per question per 12 posts (a few cents); delete the grades file to grade everything again.
 
+**Answer evaluation (`--answers`).** This checks the answers, not just the search. For each question it runs a summaries search and a passages search, the way the `ask` prompt starts, and has Gemini (`search.answers.model`) write the answer from the `ask` instructions and those results. A second Gemini call (`search.answers.judge_model`) lists the answer's claims and checks each against the passages it cites. The report gives, overall and per question type:
+- **faithfulness:** the share of claims that the cited passages support
+- **citations:** the share of linked posts that the searches actually returned
+- **coverage:** the share of the question's relevant posts (your expected ones plus the judge's grade 2–3 posts) that the answer draws on
+- **overall:** the judge's 0–3 grade
+
+```bash
+python scripts/eval_search.py --answers --dry-run           # the cost, nothing else
+python scripts/eval_search.py --answers --label baseline    # answer and grade
+python scripts/eval_search.py --compare baseline posts-15x2 # two runs side by side
+```
+
+The cost is shown before any search or Gemini call, as an upper bound: about $1.50 for 36 questions (the actual cost is usually lower). A run over `search.answers.max_tokens_per_run` needs `--yes`. Answers and grades are saved in `../leadership-coach-datasets/eval-answers/<label>.json` (never committed) and reused, so a second run with nothing changed costs nothing. Gemini stands in for your agent here, so compare runs with each other rather than reading the scores as your agent's quality.
+
 A run costs a fraction of a cent (query embeddings only). While the file exists, `archive index --refresh` and `--swap` compare a new index version with the live one, and won't switch if it scores more than 2 points worse unless you pass `--force`.
 
 ### Search settings (`search:` in `config.yaml`)

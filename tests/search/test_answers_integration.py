@@ -141,3 +141,122 @@ def test_an_unusable_question_or_unexpected_error_is_recorded_not_raised(cfg):
     svc.search = broken
     run = answer_questions(svc, QUESTIONS[:1], FakeAnswerer(), cfg.output_dir, "other", 5)
     assert run.records["bar-raiser"].error == "search: RuntimeError"
+
+
+# -- the whole run (PR 3) -------------------------------------------------------------------------
+
+
+def keyed(cfg):
+    from dataclasses import replace
+
+    from newsletter_archive.config import Secret
+
+    return replace(cfg, gemini_api_key=Secret("AIza-test-key-not-real"))
+
+
+def run_with_fakes(cfg, label="baseline", **kw):
+    from newsletter_archive.search.answers import run_answers
+
+    from .test_answers import FakeJudge
+
+    lines = []
+    calls = {"service": 0}
+
+    def service():
+        calls["service"] += 1
+        return make_service(cfg)
+
+    code = run_answers(
+        cfg,
+        QUESTIONS,
+        label,
+        dry_run=kw.get("dry_run", False),
+        yes=kw.get("yes", False),
+        service_factory=service,
+        answerer_factory=lambda: FakeAnswerer(),
+        judge_factory=lambda: FakeJudge(),
+        judge_grades={"bar-raiser": {"main/hiring": 3, "main/career": 2}},
+        print_line=lines.append,
+    )
+    return code, "\n".join(lines), calls["service"]
+
+
+def test_a_dry_run_needs_no_key(cfg):
+    code, out, services = run_with_fakes(cfg, dry_run=True)
+    assert code == 0 and "Estimate:" in out and services == 0
+
+
+def test_a_reused_answer_gets_this_runs_results_and_no_old_error(cfg):
+    from newsletter_archive.search.answers import load_run, save_run
+
+    answer_questions(make_service(cfg), QUESTIONS, FakeAnswerer(), cfg.output_dir, "baseline", 5)
+    base = load_run(cfg.output_dir, "baseline")
+    for r in base.records.values():
+        r.results_text, r.error = "", "grade: OldError"  # as saved by an older run
+    save_run(cfg.output_dir, base)
+    again = answer_questions(make_service(cfg), QUESTIONS, FakeAnswerer(), cfg.output_dir, "posts-test", 5)
+    assert all(r.results_text and r.error is None for r in again.records.values())
+
+
+# spec: answer-evaluation / Cost shown before spending (Dry run)
+def test_dry_run_shows_the_cost_and_searches_nothing(cfg):
+    code, out, services = run_with_fakes(keyed(cfg), dry_run=True)
+    assert code == 0 and "Estimate: 2 answers and 2 grades" in out and "Dry run" in out
+    assert services == 0 and not (cfg.output_dir / "eval-answers").exists()
+
+
+# spec: answer-evaluation / Cost shown before spending (Over the ceiling)
+def test_over_the_ceiling_needs_yes(cfg):
+    from dataclasses import replace
+
+    small = replace(
+        keyed(cfg), search=replace(cfg.search, answers=replace(cfg.search.answers, max_tokens_per_run=10))
+    )
+    code, out, services = run_with_fakes(small)
+    assert code == 1 and "re-run with --yes" in out and services == 0
+    code, out, services = run_with_fakes(small, yes=True)
+    assert code == 0 and services == 1
+
+
+# spec: answer-evaluation / Answer evaluation errors (No key)
+def test_no_key_stops_before_any_search(cfg):
+    from dataclasses import replace
+
+    from newsletter_archive.config import Secret
+
+    code, out, services = run_with_fakes(replace(cfg, gemini_api_key=Secret(None)))
+    assert code == 1 and "GEMINI_API_KEY is not set; add it to .env" in out and services == 0
+
+
+# spec: answer-evaluation / Grade each answer; Saved answers and grades (Compare two runs)
+def test_a_full_run_answers_grades_and_reports(cfg):
+    from newsletter_archive.search.answers import compare_lines, load_run
+
+    code, out, _ = run_with_fakes(keyed(cfg))
+    assert code == 0 and "label baseline, 2 questions (2 answered, 2 graded)" in out
+    run = load_run(cfg.output_dir, "baseline")
+    g = run.records["bar-raiser"].grade
+    assert g["overall"] == 3 and g["citation_precision"] == 1.0 and g["post_coverage"] == 0.5
+    code, out, _ = run_with_fakes(keyed(cfg), label="posts-test")
+    assert code == 0
+    lines = "\n".join(compare_lines(run, load_run(cfg.output_dir, "posts-test"), QUESTIONS))
+    assert "+0.00" in lines  # same search, same answers: no change
+
+
+def test_no_index_yet_stops_with_what_to_do(db_config):
+    from newsletter_archive.search import db
+
+    with db.connect(db_config, "writer") as conn:
+        db.apply_migrations(conn)
+        conn.commit()
+    code, out, services = run_with_fakes(keyed(small_config(db_config)))
+    assert code == 1 and "run `archive index` first" in out and services == 0
+
+
+def test_the_real_models_share_one_client(cfg):
+    from newsletter_archive.search.answers import GeminiAnswerer, GeminiAnswerJudge, gemini_factories
+
+    answerer_f, judge_f = gemini_factories(keyed(cfg))
+    a, j = answerer_f(), judge_f()
+    assert isinstance(a, GeminiAnswerer) and isinstance(j, GeminiAnswerJudge) and a.client is j.client
+    assert (a.model, j.model) == (cfg.search.answers.model, cfg.search.answers.judge_model)
