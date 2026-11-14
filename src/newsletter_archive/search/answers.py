@@ -34,7 +34,7 @@ ANSWER_PROMPT_VERSION = 1  # bump when the prompt below changes: every answer is
 ANSWERS_DIR = "eval-answers"
 STORE_VERSION = 1
 LABEL_RE = re.compile(r"^[a-z0-9][a-z0-9._-]{0,63}$")
-LINK_RE = re.compile(r"\[[^\]]*\]\((https?://[^)\s]+)\)")
+REF_DEF_RE = re.compile(r"^[ \t]*\[[^\]\n]+\]:[ \t]*<?(https?://[^\s>]+)>?", re.M)
 
 ANSWER_INSTRUCTION = """You are answering from a personal newsletter archive. The archive has
 already been searched for you: the results below are the only material you may use, and you
@@ -101,9 +101,45 @@ def answer_prompt(question: str, retrieved: Retrieved) -> str:
 
 
 def normalize_url(url: str) -> str:
-    """Scheme and host lowercased; query, fragment and trailing slash dropped."""
+    """Scheme and host lowercased, default port dropped; query, fragment and trailing slash
+    dropped (post URLs in the index never carry a query: discovery normalizes them)."""
     parts = urlsplit(url.strip())
-    return f"{parts.scheme.lower()}://{parts.netloc.lower()}{parts.path.rstrip('/')}"
+    scheme = parts.scheme.lower()
+    host = (parts.hostname or "").lower()
+    if parts.port and (scheme, parts.port) not in (("http", 80), ("https", 443)):
+        host += f":{parts.port}"
+    return f"{scheme}://{host}{parts.path.rstrip('/')}"
+
+
+def link_urls(text: str) -> list[str]:
+    """Every link target in Markdown text, in order: inline links ``[t](url)``, also with
+    ``<url>``, a title, spaces or balanced parentheses in the URL, and reference definitions
+    ``[label]: url``. Bare URLs are not links."""
+    urls: list[str] = []
+    i = 0
+    while (j := text.find("](", i)) != -1:
+        k = j + 2
+        while k < len(text) and text[k] in " \t":
+            k += 1
+        if text.startswith("<", k):
+            end = text.find(">", k)
+            url = text[k + 1 : end] if end != -1 else ""
+        else:
+            depth, start = 0, k
+            while k < len(text) and not text[k].isspace():
+                if text[k] == "(":
+                    depth += 1
+                elif text[k] == ")":
+                    if depth == 0:
+                        break
+                    depth -= 1
+                k += 1
+            url = text[start:k]
+        if url.startswith(("http://", "https://")):
+            urls.append(url)
+        i = j + 2
+    urls += REF_DEF_RE.findall(text)
+    return urls
 
 
 @dataclass(frozen=True)
@@ -120,7 +156,7 @@ def citations(answer: str, url_to_post: Mapping[str, str]) -> Citations:
     """The posts an answer links to. Each distinct post or unknown URL counts once."""
     posts: dict[str, None] = {}
     unknown: dict[str, None] = {}
-    for url in LINK_RE.findall(answer):
+    for url in link_urls(answer):
         key = normalize_url(url)
         if key in url_to_post:
             posts.setdefault(url_to_post[key], None)
@@ -207,7 +243,7 @@ def load_run(output_dir: Path, label: str) -> AnswerRun:
         if data.get("schema_version") != STORE_VERSION:
             raise ValueError(f"unknown schema_version {data.get('schema_version')!r}")
         records = {r["question_id"]: AnswerRecord(**r) for r in data["records"]}
-    except (OSError, ValueError, KeyError, TypeError) as e:
+    except (OSError, ValueError, KeyError, TypeError, AttributeError) as e:
         raise AnswerError(f"{path} can't be read ({e}); move it aside and run again") from None
     return AnswerRun(label, records)
 
@@ -230,7 +266,12 @@ def saved_answers(output_dir: Path) -> dict[str, AnswerRecord]:
     if not folder.is_dir():
         return out
     for path in sorted(folder.glob("*.json")):
-        for r in load_run(output_dir, path.stem).records.values():
+        try:
+            run = load_run(output_dir, path.stem)
+        except AnswerError as e:  # another label's broken file, or a stray file: skip it
+            log.warning("not reusing answers from %s: %s", path.name, e)
+            continue
+        for r in run.records.values():
             if r.answer is not None:
                 out.setdefault(r.answer_key, r)
     return out
@@ -262,7 +303,7 @@ def answer_questions(
     for q in questions:
         try:
             retrieved = retrieve(service, q.question, results_per_search)
-        except ArchiveError as e:
+        except Exception as e:  # one question's failure never stops the run; the type is recorded
             record = AnswerRecord(q.id, q.question, "", answerer.model, ANSWER_PROMPT_VERSION, [], {}, {})
             record.error = f"search: {type(e).__name__}"
             run.records[q.id] = record
@@ -274,7 +315,9 @@ def answer_questions(
         key = answer_key(q.question, answerer.model, answerer.thinking_level, retrieved.result_ids)
         old = reusable.get(key)
         if old is not None:
-            record = AnswerRecord(**{**asdict(old), "question_id": q.id})
+            # The answer is reused; its grade is not (it belongs to the other run and may be
+            # out of date), so the judge decides that separately.
+            record = AnswerRecord(**{**asdict(old), "question_id": q.id, "grade": None})
             reused = True
         else:
             record = AnswerRecord(
@@ -289,7 +332,7 @@ def answer_questions(
             )
             try:
                 record.answer = answerer.answer(answer_prompt(q.question, retrieved))
-            except ArchiveError as e:
+            except Exception as e:  # a model error, or an unusable question for the ask text
                 record.error = f"answer: {type(e).__name__}"
             reused = False
             if record.answer is not None:
@@ -309,7 +352,7 @@ class GeminiAnswerer:
     client: Any  # GeminiClient
     model: str
     thinking_level: str = "low"
-    max_output_tokens: int = 2048
+    max_output_tokens: int = 4096  # a teaching post plus thinking
 
     def answer(self, prompt: str) -> str:
         from .summaries import check_response
