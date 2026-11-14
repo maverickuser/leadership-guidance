@@ -322,7 +322,7 @@ Then run `python scripts/eval_search.py`. For each stage, with and without summa
 - which questions missed posts
 
 The stages are keyword only, semantic only, combined, and re-ranked. Options:
-- `--rerank-top N` and `--no-rerank` compare re-ranking settings.
+- `--rerank-top N` (with `--selection rows`) and `--no-rerank` compare re-ranking settings.
 - `--selection posts`, `--post-score max|sum_top3`, `--rerank-posts N` and `--rows-per-post N` try the post-level selection without changing `config.yaml`; `--summaries-only` halves the run time. The report also shows the median number of distinct posts returned and the share of expected posts that were never re-ranked.
 - `--generation N` scores an index version that isn't live yet.
 - `--json FILE` saves the full report.
@@ -361,7 +361,7 @@ A run costs a fraction of a cent (query embeddings only). While the file exists,
 | `max_embed_tokens_per_run` / `summaries.max_tokens_per_run` | `1500000` each | spending ceilings; `--yes` goes over them |
 | `chunk_words` / `chunk_overlap_words` | `300` / `50` | passage size |
 | `candidates` | `50` | results taken from each of keyword and semantic search |
-| `rerank_top` / `rerank_timeout_seconds` | `20` / `10` | re-ranking takes ~0.2 s per passage on Apple Silicon |
+| `rerank_top` / `rerank_timeout_seconds` | `20` / `20` | `rerank_top` applies only to `selection: rows` (the passages re-ranked there). Re-ranking takes ~0.15 s per passage on Apple Silicon (measured), about 6–7 s for the `posts` default; past the timeout a search returns unranked results with a note |
 | `query_timeout_seconds` | `8` | after this, search uses keywords only |
 | `bm25_boosts` | heading `2`, title `1.5`, body `1` | |
 | `fusion_weights` | keyword `1`, semantic `2` | how much each list counts when combining (semantic 2 scored best) |

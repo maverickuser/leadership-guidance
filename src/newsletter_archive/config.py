@@ -129,7 +129,9 @@ class SearchConfig:
     candidates: int = 50
     rerank_top: int = 20  # ~0.22 s per pair on Apple MPS (measured in PR 8)
     reranker_model: str = "Qwen/Qwen3-Reranker-0.6B"
-    rerank_timeout_seconds: float = 10.0
+    # posts mode re-ranks about 40 passages (~6.3 s measured on Apple MPS); 20 s leaves room for a
+    # slower or just-loaded model before a search falls back to unranked results.
+    rerank_timeout_seconds: float = 20.0
     query_timeout_seconds: float = 8.0  # embedding a search query (search falls back to keywords)
     max_per_post: int = 3
     # How results are chosen (openspec improve-search-post-selection). "posts": rows are

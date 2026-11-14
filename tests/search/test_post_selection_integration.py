@@ -141,3 +141,33 @@ def test_sum_top3_favours_posts_with_several_matching_parts(cfg):
         kind="passages")  # fmt: skip
     batch_posts = list(dict.fromkeys(trace["post_of"][p] for p in trace["batch"]))
     assert batch_posts[0] == "main/long"  # the post with several matching parts is kept first
+
+
+def test_a_summaries_search_can_return_as_many_summaries_as_asked(cfg):
+    # 12 posts, one summary each: a summaries search with limit 12 keeps enough posts for all.
+    build(cfg, {"main": [distinct(f"m{i}", i, [f"Delegate outcomes, part {i}."]) for i in range(12)]})
+    resp = ask(
+        mode(cfg, "posts", rerank_posts=4, rerank_rows_per_post=3), FakeReranker(), limit=12, kind="summaries"
+    )
+    assert len(resp.results) == 12 and all(r.kind == "summary" for r in resp.results)
+
+
+def test_every_result_is_re_ranked_even_past_rerank_posts(cfg):
+    build(cfg, one_long_and_nine_short())
+    seen = []
+
+    class Count(FakeReranker):
+        def score(self, query, documents):
+            seen.append(len(documents))
+            return [1.0 - i / 100 for i in range(len(documents))]
+
+    trace = {}
+    resp = ask(
+        mode(cfg, "posts", rerank_posts=2, rerank_rows_per_post=1),
+        Count(),
+        trace=trace,
+        limit=8,
+        kind="passages",
+    )
+    assert resp.reranked and len(seen) == 1 and {r.id for r in resp.results} <= set(trace["batch"])
+    assert len(resp.results) == 8
