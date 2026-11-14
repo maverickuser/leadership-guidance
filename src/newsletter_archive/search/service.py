@@ -523,7 +523,11 @@ class SearchService:
         groups = group_by_post(
             fused, lambda p: rows[p].post_id, lambda p: rows[p].kind == "summary", s.post_score
         )
-        kept = list(groups[: s.rerank_posts])
+        # Enough posts to fill the limit within the per-post caps (a large `limit` with few
+        # rerank_posts would otherwise return fewer results than asked for).
+        per_post = min(s.rerank_rows_per_post, s.max_per_post) + (1 if req.kind != "passages" else 0)
+        n_posts = max(s.rerank_posts, -(-req.limit // max(per_post, 1)))
+        kept = list(groups[:n_posts])
         extra_posts: set[str] = set()
         if len(represented) > 1:
             shown = {rows[_first_row(g)].post.source for g in kept}
@@ -535,19 +539,18 @@ class SearchService:
                     kept.append(best)
                     extra_posts.add(best.post_id)
         batch = rerank_batch(kept, s.rerank_rows_per_post, with_summaries=req.kind != "passages")
-        order = list(batch)  # combined order, kept posts only
+        fused_rank = {f.passage_id: i for i, f in enumerate(fused)}
+        order = sorted(batch, key=lambda p: fused_rank[p])  # combined order, kept posts only
         reranked = False
         if batch:
             new = self._rerank(req.query, batch, rows, notes)
             if new is not None:
                 scores.update(zip(batch, new, strict=True))
-                # A missing newsletter's post is kept only when it qualifies, as in rows mode.
+                # A missing newsletter's rows are kept only when each qualifies, as in rows mode.
                 order = [
                     p
-                    for p in sorted(batch, key=lambda p: -scores[p])
-                    if rows[p].post_id not in extra_posts
-                    or max(scores[q] for q in batch if rows[q].post_id == rows[p].post_id)
-                    >= s.source_min_score
+                    for p in sorted(batch, key=lambda p: -scores[p])  # stable: ties keep batch order
+                    if rows[p].post_id not in extra_posts or scores[p] >= s.source_min_score
                 ]
                 reranked = True
         picked = select_across_posts(

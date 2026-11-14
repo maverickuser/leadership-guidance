@@ -94,6 +94,21 @@ def test_without_the_re_ranker_the_kept_posts_come_in_combined_order(cfg):
     assert not resp.reranked and any("not re-ranked" in n for n in resp.notes)
     assert {r.id for r in resp.results} <= set(trace["batch"])
     assert len(set(posts_of(resp))) == 4
+    combined = trace["combined"]
+    firsts = [next(r.id for r in resp.results if r.post.id == post) for post in dict.fromkeys(posts_of(resp))]
+    assert firsts == sorted(firsts, key=combined.index)  # each post's representative in combined order
+    rep_of = {r.post.id: r.id for r in reversed(resp.results)}  # each post's first result
+    for post, rid in rep_of.items():
+        best = min((p for p in trace["batch"] if trace["post_of"][p] == post), key=combined.index)
+        assert rid == best  # the post's best fused row, not just its first passage
+
+
+def test_a_large_limit_is_filled_even_with_few_rerank_posts(cfg):
+    build(cfg, one_long_and_nine_short())
+    resp = ask(
+        mode(cfg, "posts", rerank_posts=2, rerank_rows_per_post=1), FakeReranker(), limit=10, kind="passages"
+    )
+    assert len(resp.results) == 10
 
 
 # spec: hybrid-search / Every source represented, at post level
@@ -124,4 +139,5 @@ def test_sum_top3_favours_posts_with_several_matching_parts(cfg):
     trace = {}
     ask(mode(cfg, "posts", post_score="sum_top3", rerank_posts=1), FakeReranker(), trace=trace, limit=5,
         kind="passages")  # fmt: skip
-    assert {trace["post_of"][p] for p in trace["batch"]} == {"main/long"}
+    batch_posts = list(dict.fromkeys(trace["post_of"][p] for p in trace["batch"]))
+    assert batch_posts[0] == "main/long"  # the post with several matching parts is kept first
