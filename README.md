@@ -351,6 +351,9 @@ A run costs a fraction of a cent (query embeddings only). While the file exists,
 | `bm25_boosts` | heading `2`, title `1.5`, body `1` | |
 | `fusion_weights` | keyword `1`, semantic `2` | how much each list counts when combining (semantic 2 scored best) |
 | `max_per_post` | `3` | passages per post in one result list (plus one summary) |
+| `selection` | `rows` | how results are chosen: `rows` re-ranks the first `rerank_top` passages; `posts` groups passages by post first and re-ranks the best passages of the best posts, so results cover more posts. `posts` is being measured and becomes the default once it is |
+| `post_score` / `rerank_posts` / `rerank_rows_per_post` | `max` / `15` / `2` | for `selection: posts`: how a post is scored from its passages (`max` or `sum_top3`), how many posts are re-ranked, and how many passages of each (plus its summary). Provisional until measured |
+| `answers` | Flash, 10 results, 1.5M tokens | for the answer evaluation: `model`, `judge_model`, `thinking_level`, `results_per_search`, `max_tokens_per_run` (over it a run needs `--yes`) |
 | `source_min_score` | `0.5` | when you search every newsletter, one that's missing from the top results gets its best result in if the re-ranker scores it at least this (0-1); measured: it shows the other newsletter on 5 of 6 cross-newsletter eval questions (3 of 6 with the rule off) without lowering recall |
 | `db_host` / `db_port` / `db_name` | `127.0.0.1` / `5433` / `archive` | |
 
