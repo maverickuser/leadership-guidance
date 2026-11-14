@@ -29,7 +29,7 @@
 - [x] 3.3 Report per question type, `--compare A B`, `--answers` and `--label` in `scripts/eval_search.py` (lld §5.8, 5.9)
 - [x] 3.4 README: the answer evaluation, its cost, where results are saved
 - [x] 3.5 Tests end to end with the fakes
-- [ ] 3.6 Live, with the user's go-ahead: dry run, then `--answers --label baseline` on today's search; record the scores in the PR
+- [x] 3.6 Live, with the user's go-ahead: dry run, then `--answers --label baseline` on today's search; record the scores in the PR
 
 ## 4. Post-level selection (PR 4)
 
@@ -42,13 +42,13 @@
 - [x] 5.1 `evaluate.py`: distinct posts returned and expected posts never re-ranked, in the report and `--json` (lld §4)
 - [x] 5.2 Overrides `--selection`, `--post-score`, `--rerank-posts`, `--rows-per-post`
 - [x] 5.3 Tests for the report lines, JSON and overrides
-- [ ] 5.4 Live, with the user's go-ahead: the retrieval grid (lld §8.2), with latency; record the table in the PR and choose the configuration
+- [x] 5.4 Live, with the user's go-ahead: the retrieval grid (lld §8.2), with latency; record the table in the PR and choose the configuration
 
 ## 6. Defaults and acceptance (PR 6)
 
-- [ ] 6.1 Set `post_score`, `rerank_posts`, `rerank_rows_per_post` to the measured choice, with the measurement in `config.py` comments; default `selection: posts`
-- [ ] 6.2 Live, with the user's go-ahead: `--answers --label posts-<choice>` and `--compare baseline posts-<choice>`; record both in the PR
-- [ ] 6.3 README: how results are chosen now, the new defaults, how to switch back (`selection: rows`)
+- [x] 6.1 Set `post_score`, `rerank_posts`, `rerank_rows_per_post` to the measured choice, with the measurement in `config.py` comments; default `selection: posts`
+- [x] 6.2 Live, with the user's go-ahead: `--answers --label posts-<choice>` and `--compare baseline posts-<choice>`; record both in the PR
+- [x] 6.3 README: how results are chosen now, the new defaults, how to switch back (`selection: rows`)
 - [ ] 6.4 After merge: sync the delta specs into `openspec/specs/` and archive this change
 
 ## Every PR (definition of done)

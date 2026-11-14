@@ -257,7 +257,7 @@ def test_any_reranker_error_degrades_instead_of_failing(cfg):
 
 def test_reranked_results_are_all_reranked_even_past_rerank_top(cfg):
     build(cfg)
-    small = replace(cfg, search=replace(cfg.search, rerank_top=2))
+    small = replace(cfg, search=replace(cfg.search, selection="rows", rerank_top=2))  # rows mode
     seen = []
 
     class Count(FakeReranker):
