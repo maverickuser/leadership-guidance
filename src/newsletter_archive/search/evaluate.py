@@ -648,6 +648,8 @@ def main(argv: Sequence[str] | None = None) -> int:  # pragma: no cover - real G
     try:
         config = load_config(args.config, args.config.parent / ".env")
         config = with_search_overrides(config, args)
+        if args.rerank_top and config.search.selection != "rows":
+            print("note: --rerank-top applies only to --selection rows; it is ignored here", file=sys.stderr)
         questions = load_questions(args.file or eval_path(config))
         reranker = None
         if not args.no_rerank:

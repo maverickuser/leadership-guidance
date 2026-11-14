@@ -525,7 +525,9 @@ class SearchService:
         )
         # Enough posts to fill the limit within the per-post caps (a large `limit` with few
         # rerank_posts would otherwise return fewer results than asked for).
-        per_post = min(s.rerank_rows_per_post, s.max_per_post) + (1 if req.kind != "passages" else 0)
+        # Results one post can give: its summary only, its capped passages, or both.
+        passages_each = min(s.rerank_rows_per_post, s.max_per_post)
+        per_post = {"summaries": 1, "passages": passages_each}.get(req.kind, passages_each + 1)
         n_posts = max(s.rerank_posts, -(-req.limit // max(per_post, 1)))
         kept = list(groups[:n_posts])
         extra_posts: set[str] = set()

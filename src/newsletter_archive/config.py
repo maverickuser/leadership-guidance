@@ -129,17 +129,24 @@ class SearchConfig:
     candidates: int = 50
     rerank_top: int = 20  # ~0.22 s per pair on Apple MPS (measured in PR 8)
     reranker_model: str = "Qwen/Qwen3-Reranker-0.6B"
-    rerank_timeout_seconds: float = 10.0
+    # posts mode re-ranks about 40 passages (~6.3 s measured on Apple MPS); 20 s leaves room for a
+    # slower or just-loaded model before a search falls back to unranked results.
+    rerank_timeout_seconds: float = 20.0
     query_timeout_seconds: float = 8.0  # embedding a search query (search falls back to keywords)
     max_per_post: int = 3
-    # How results are chosen (openspec improve-search-post-selection). "rows": the first
-    # rerank_top fused rows are re-ranked (the original behaviour). "posts": rows are grouped
-    # by post first, the best rerank_posts posts are kept, and their best rerank_rows_per_post
-    # passages (plus summary) are re-ranked. The post defaults are provisional until measured.
-    selection: str = "rows"
-    post_score: str = "max"  # max | sum_top3: a post's score from its rows' fused scores
-    rerank_posts: int = 15
-    rerank_rows_per_post: int = 2
+    # How results are chosen (openspec improve-search-post-selection). "posts": rows are
+    # grouped by post first, the best rerank_posts posts are kept, and their best
+    # rerank_rows_per_post passages (plus summary) are re-ranked. "rows": the first rerank_top
+    # fused rows are re-ranked (the behaviour before this change; set it to switch back).
+    # Measured 14 Nov 2026 on 837 posts and 36 eval questions (with summaries, Qwen3 on MPS):
+    #   rows (rerank_top 20):  4 posts returned, recall@10 0.71, nDCG@10 0.71, p90 5.3 s
+    #   posts max 10 x 3:     10 posts returned, recall@10 0.84, nDCG@10 0.90, p90 7.4 s
+    # the only grid point meeting every target (>= 8 posts, recall >= 0.84, nDCG >= 0.89, local
+    # recall >= 0.91, p90 <= 8 s). Answers built on it cite 0.70 of the relevant posts (0.57 before).
+    selection: str = "posts"
+    post_score: str = "max"  # max | sum_top3 (sum_top3: more recall, worse ranking, measured)
+    rerank_posts: int = 10
+    rerank_rows_per_post: int = 3
     # Searches over every newsletter show each one that has a relevant result: a newsletter
     # missing from the top gets its best result in if its re-ranker score is at least this
     # (a probability, 0-1). Measured 2026-11-11 on the two-newsletter index (837 posts, 36 eval
@@ -444,12 +451,6 @@ def _validate_search(s: SearchConfig) -> None:
         raise ConfigError("search.rerank_posts must be between 1 and 50")
     if not 1 <= s.rerank_rows_per_post <= 5:
         raise ConfigError("search.rerank_rows_per_post must be between 1 and 5")
-    # Only when the posts mode is on: an existing rows-mode config with few candidates stays valid.
-    if s.selection == "posts" and s.rerank_posts * (s.rerank_rows_per_post + 1) > 2 * s.candidates:
-        raise ConfigError(
-            "search.rerank_posts × (rerank_rows_per_post + 1) can't exceed the combined candidates "
-            "(2 × search.candidates)"
-        )
     a = s.answers
     if not a.model or not a.judge_model:
         raise ConfigError("search.answers.model and search.answers.judge_model must not be empty")

@@ -322,7 +322,7 @@ Then run `python scripts/eval_search.py`. For each stage, with and without summa
 - which questions missed posts
 
 The stages are keyword only, semantic only, combined, and re-ranked. Options:
-- `--rerank-top N` and `--no-rerank` compare re-ranking settings.
+- `--rerank-top N` (with `--selection rows`) and `--no-rerank` compare re-ranking settings.
 - `--selection posts`, `--post-score max|sum_top3`, `--rerank-posts N` and `--rows-per-post N` try the post-level selection without changing `config.yaml`; `--summaries-only` halves the run time. The report also shows the median number of distinct posts returned and the share of expected posts that were never re-ranked.
 - `--generation N` scores an index version that isn't live yet.
 - `--json FILE` saves the full report.
@@ -361,13 +361,13 @@ A run costs a fraction of a cent (query embeddings only). While the file exists,
 | `max_embed_tokens_per_run` / `summaries.max_tokens_per_run` | `1500000` each | spending ceilings; `--yes` goes over them |
 | `chunk_words` / `chunk_overlap_words` | `300` / `50` | passage size |
 | `candidates` | `50` | results taken from each of keyword and semantic search |
-| `rerank_top` / `rerank_timeout_seconds` | `20` / `10` | re-ranking takes ~0.2 s per passage on Apple Silicon |
+| `rerank_top` / `rerank_timeout_seconds` | `20` / `20` | `rerank_top` applies only to `selection: rows` (the passages re-ranked there). Re-ranking takes ~0.15 s per passage on Apple Silicon (measured), about 6–7 s for the `posts` default; past the timeout a search returns unranked results with a note |
 | `query_timeout_seconds` | `8` | after this, search uses keywords only |
 | `bm25_boosts` | heading `2`, title `1.5`, body `1` | |
 | `fusion_weights` | keyword `1`, semantic `2` | how much each list counts when combining (semantic 2 scored best) |
 | `max_per_post` | `3` | passages per post in one result list (plus one summary) |
-| `selection` | `rows` | how results are chosen: `rows` re-ranks the first `rerank_top` passages; `posts` groups passages by post first and re-ranks the best passages of the best posts, so results cover more posts. `posts` is being measured and becomes the default once it is |
-| `post_score` / `rerank_posts` / `rerank_rows_per_post` | `max` / `15` / `2` | for `selection: posts`: how a post is scored from its passages (`max` or `sum_top3`), how many posts are re-ranked, and how many passages of each (plus its summary). Provisional until measured |
+| `selection` | `posts` | how results are chosen. `posts` groups passages by post and re-ranks the best 3 passages of the best 10 posts, so a search returns results from about 10 posts instead of 4 (measured: recall@10 0.71 → 0.84, nDCG@10 0.71 → 0.90, answers cite 57% → 70% of the relevant posts, p90 search 5.3 s → 7.4 s). Set `rows` to switch back to re-ranking the first `rerank_top` passages |
+| `post_score` / `rerank_posts` / `rerank_rows_per_post` | `max` / `10` / `3` | for `selection: posts`: how a post is scored from its passages (`max` = its best passage; `sum_top3` found slightly more posts but ranked them worse), how many posts are re-ranked, and how many passages of each (plus its summary). More rows per post costs ~0.15 s each |
 | `answers` | Flash, 10 results, 1.5M tokens | for the answer evaluation: `model`, `judge_model`, `thinking_level`, `results_per_search`, `max_tokens_per_run` (over it a run needs `--yes`) |
 | `source_min_score` | `0.5` | when you search every newsletter, one that's missing from the top results gets its best result in if the re-ranker scores it at least this (0-1); measured: it shows the other newsletter on 5 of 6 cross-newsletter eval questions (3 of 6 with the rule off) without lowering recall |
 | `db_host` / `db_port` / `db_name` | `127.0.0.1` / `5433` / `archive` | |

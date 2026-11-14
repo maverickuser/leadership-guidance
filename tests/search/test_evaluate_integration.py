@@ -293,4 +293,4 @@ def test_outcomes_record_breadth_and_never_scored_posts(cfg):
 def test_breadth_numbers_name_the_selection_and_skip_keyword_only_runs(cfg):
     report = evaluate(make_service(cfg, embedder=RuntimeError("down")), QUESTIONS, variants=(True,))
     assert all(o.found_by_combined == () and o.unscored == () for o in report.outcomes)
-    assert "selection rows (rerank_top 20)" in report.lines()[0]
+    assert "selection posts (max, 10 posts x 3 rows)" in report.lines()[0]
