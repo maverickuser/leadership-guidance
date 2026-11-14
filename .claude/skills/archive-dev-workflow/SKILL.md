@@ -37,7 +37,7 @@ These protect the user's subscription and secrets. Breaking one is worse than no
 - **Polite scraping:** one request at a time, at least 2 seconds apart, with backoff. Never lower the floor, add concurrency, or work around the paywall.
 - **Secrets live only in `.env`:** `NEWSLETTER_COOKIE`, `GEMINI_API_KEY` and the `ARCHIVE_DB_*_PASSWORD`s are never printed, logged, put in error messages or MCP responses, or committed. Wrap new secrets in the `Secret` type.
 - **Fixtures are structure-only:** real page markup with the text replaced by filler (`scripts/make_fixtures.py`). Never use real article text, names, emails or ids.
-- **Never commit** `.env`, `config.yaml`, `data/`, or anything from the archive folder (`../newsletter-archive-data/`).
+- **Never commit** `.env`, `config.yaml`, `data/`, or anything from the archive folder (`../leadership-coach-datasets/`).
 - **Tests are offline.** Fake HTTP, Gemini, summarizer and re-ranker (`tests/fakes.py`). Real-API tests carry the `api` marker and stay opt-in.
 
 ### Ask before any live call
