@@ -488,6 +488,11 @@ def _answers_main(args: Any) -> int:  # pragma: no cover - real Gemini, model an
         config = load_config(args.config, args.config.parent / ".env")
         questions = load_questions(args.file or eval_path(config))
         if args.compare:
+            if args.answers:
+                raise EvalFileError("use --answers or --compare, not both")
+            for label in args.compare:
+                if not answers.run_exists(config.output_dir, label):
+                    raise EvalFileError(f"no saved answer run {label!r}; run --answers --label {label} first")
             a, b = (answers.load_run(config.output_dir, label) for label in args.compare)
             print("\n".join(answers.compare_lines(a, b, questions)))
             return 0
@@ -518,7 +523,7 @@ def _answers_main(args: Any) -> int:  # pragma: no cover - real Gemini, model an
             judge_factory=judge_,
             judge_grades={qid: j.grades for qid, j in judgments.items()},
         )
-    except ArchiveError as e:
+    except (ArchiveError, psycopg.Error) as e:
         print(f"Error: {e}", file=sys.stderr)
         return 1
 

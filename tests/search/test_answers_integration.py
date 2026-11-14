@@ -181,6 +181,23 @@ def run_with_fakes(cfg, label="baseline", **kw):
     return code, "\n".join(lines), calls["service"]
 
 
+def test_a_dry_run_needs_no_key(cfg):
+    code, out, services = run_with_fakes(cfg, dry_run=True)
+    assert code == 0 and "Estimate:" in out and services == 0
+
+
+def test_a_reused_answer_gets_this_runs_results_and_no_old_error(cfg):
+    from newsletter_archive.search.answers import load_run, save_run
+
+    answer_questions(make_service(cfg), QUESTIONS, FakeAnswerer(), cfg.output_dir, "baseline", 5)
+    base = load_run(cfg.output_dir, "baseline")
+    for r in base.records.values():
+        r.results_text, r.error = "", "grade: OldError"  # as saved by an older run
+    save_run(cfg.output_dir, base)
+    again = answer_questions(make_service(cfg), QUESTIONS, FakeAnswerer(), cfg.output_dir, "posts-test", 5)
+    assert all(r.results_text and r.error is None for r in again.records.values())
+
+
 # spec: answer-evaluation / Cost shown before spending (Dry run)
 def test_dry_run_shows_the_cost_and_searches_nothing(cfg):
     code, out, services = run_with_fakes(keyed(cfg), dry_run=True)

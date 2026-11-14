@@ -346,7 +346,7 @@ python scripts/eval_search.py --answers --label baseline    # answer and grade
 python scripts/eval_search.py --compare baseline posts-15x2 # two runs side by side
 ```
 
-The cost is shown before any search or Gemini call, as an upper bound: under $1 for about 40 questions. A run over `search.answers.max_tokens_per_run` needs `--yes`. Answers and grades are saved in `../leadership-coach-datasets/eval-answers/<label>.json` (never committed) and reused, so a second run with nothing changed costs nothing. Gemini stands in for your agent here, so compare runs with each other rather than reading the scores as your agent's quality.
+The cost is shown before any search or Gemini call, as an upper bound: about $1.50 for 36 questions (the actual cost is usually lower). A run over `search.answers.max_tokens_per_run` needs `--yes`. Answers and grades are saved in `../leadership-coach-datasets/eval-answers/<label>.json` (never committed) and reused, so a second run with nothing changed costs nothing. Gemini stands in for your agent here, so compare runs with each other rather than reading the scores as your agent's quality.
 
 A run costs a fraction of a cent (query embeddings only). While the file exists, `archive index --refresh` and `--swap` compare a new index version with the live one, and won't switch if it scores more than 2 points worse unless you pass `--force`.
 
