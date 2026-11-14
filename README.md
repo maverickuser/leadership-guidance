@@ -323,6 +323,7 @@ Then run `python scripts/eval_search.py`. For each stage, with and without summa
 
 The stages are keyword only, semantic only, combined, and re-ranked. Options:
 - `--rerank-top N` and `--no-rerank` compare re-ranking settings.
+- `--selection posts`, `--post-score max|sum_top3`, `--rerank-posts N` and `--rows-per-post N` try the post-level selection without changing `config.yaml`; `--summaries-only` halves the run time. The report also shows the median number of distinct posts returned and the share of expected posts that were never re-ranked.
 - `--generation N` scores an index version that isn't live yet.
 - `--json FILE` saves the full report.
 - `--judge` also asks Gemini (`summaries.model`) to grade the results, so you can check your `expected` lists (below).

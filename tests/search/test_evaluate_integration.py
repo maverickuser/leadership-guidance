@@ -279,3 +279,18 @@ def test_expected_scores_are_recorded_only_when_reranked(cfg):
     svc.reranker = None  # results not re-ranked: no scores on the re-ranker's scale
     unranked = evaluate(svc, QUESTIONS[:1], variants=(True,))
     assert unranked.outcomes[0].expected_scores == ()
+
+
+def test_outcomes_record_breadth_and_never_scored_posts(cfg):
+    report = evaluate(make_service(cfg), QUESTIONS, variants=(True,))
+    assert all(o.returned_posts >= 1 for o in report.outcomes)
+    assert all(
+        set(o.unscored) <= set(o.found_by_combined) <= set(o.question.expected) for o in report.outcomes
+    )
+    assert report.breadth() is not None and report.unscored_share() is not None
+
+
+def test_breadth_numbers_name_the_selection_and_skip_keyword_only_runs(cfg):
+    report = evaluate(make_service(cfg, embedder=RuntimeError("down")), QUESTIONS, variants=(True,))
+    assert all(o.found_by_combined == () and o.unscored == () for o in report.outcomes)
+    assert "selection rows (rerank_top 20)" in report.lines()[0]

@@ -39,9 +39,9 @@
 
 ## 5. Breadth in the eval report and the grid (PR 5)
 
-- [ ] 5.1 `evaluate.py`: distinct posts returned and expected posts never re-ranked, in the report and `--json` (lld §4)
-- [ ] 5.2 Overrides `--selection`, `--post-score`, `--rerank-posts`, `--rows-per-post`
-- [ ] 5.3 Tests for the report lines, JSON and overrides
+- [x] 5.1 `evaluate.py`: distinct posts returned and expected posts never re-ranked, in the report and `--json` (lld §4)
+- [x] 5.2 Overrides `--selection`, `--post-score`, `--rerank-posts`, `--rows-per-post`
+- [x] 5.3 Tests for the report lines, JSON and overrides
 - [ ] 5.4 Live, with the user's go-ahead: the retrieval grid (lld §8.2), with latency; record the table in the PR and choose the configuration
 
 ## 6. Defaults and acceptance (PR 6)
