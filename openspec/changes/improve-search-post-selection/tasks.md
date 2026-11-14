@@ -33,9 +33,9 @@
 
 ## 4. Post-level selection (PR 4)
 
-- [ ] 4.1 `fusion.py`: `PostGroup`, `group_by_post` (max, sum_top3), `rerank_batch`, `select_across_posts` (lld §2)
-- [ ] 4.2 `service._search` `posts` mode: keep posts, add a missing newsletter's best post, re-rank the batch, pick across posts, then `represent_sources`; `rows` mode untouched; `batch` in the trace (lld §3)
-- [ ] 4.3 Unit tests incl. `hypothesis` properties; `db` tests for the spec scenarios (one post with many matching passages, relevant posts further down, ten relevant posts, few relevant posts, re-ranker failure, every newsletter represented)
+- [x] 4.1 `fusion.py`: `PostGroup`, `group_by_post` (max, sum_top3), `rerank_batch`, `select_across_posts` (lld §2)
+- [x] 4.2 `service._search` `posts` mode: keep posts, add a missing newsletter's best post, re-rank the batch, pick across posts, then `represent_sources`; `rows` mode untouched; `batch` in the trace (lld §3)
+- [x] 4.3 Unit tests incl. `hypothesis` properties; `db` tests for the spec scenarios (one post with many matching passages, relevant posts further down, ten relevant posts, few relevant posts, re-ranker failure, every newsletter represented)
 
 ## 5. Breadth in the eval report and the grid (PR 5)
 

@@ -31,7 +31,16 @@ from ..runlog import RedactFilter
 from . import db
 from .embeddings import query_input
 from .filters import KIND_VALUES, Filters
-from .fusion import diversify, represent_sources, rrf
+from .fusion import (
+    Fused,
+    PostGroup,
+    diversify,
+    group_by_post,
+    represent_sources,
+    rerank_batch,
+    rrf,
+    select_across_posts,
+)
 from .keyword import all_categories, all_sources, build_keyword_query, keyword_search, resolve_categories
 from .rerank import RerankerUnavailableError
 from .vector import vector_search
@@ -399,39 +408,10 @@ class SearchService:
         order = [f.passage_id for f in fused]
         scores = {f.passage_id: f.score for f in fused}
         found = {f.passage_id: f.found_by for f in fused}
-        reranked = False
-        if order and self.reranker is not None:
-            # Re-rank at least as many as were asked for; when re-ranked, only re-ranked
-            # candidates are returned, so every score is on the same scale.
-            top = order[: max(self.s.rerank_top, req.limit)]
-            # Every newsletter represented: also score each missing newsletter's best candidate,
-            # so one just below the re-rank cut still gets its chance (kept only if it qualifies).
-            shown = {rows[p].post.source for p in top}
-            extra = [
-                p
-                for src in (represented if len(represented) > 1 else [])
-                if src not in shown
-                for p in [next((q for q in order if rows[q].post.source == src), None)]
-                if p is not None
-            ]
-            batch = top + extra
-            try:
-                new = [
-                    float(x) for x in self.reranker.score(req.query, [rows[p].rerank_text() for p in batch])
-                ]
-                if len(new) != len(batch):
-                    raise RerankerUnavailableError("re-ranker returned the wrong number of scores")
-                scores.update(zip(batch, new, strict=True))
-                kept_extra = [p for p in extra if scores[p] >= self.s.source_min_score]
-                order = sorted(top + kept_extra, key=lambda p: -scores[p])  # stable: ties keep combined order
-                reranked = True
-            except RerankerUnavailableError as e:
-                notes.append(f"results not re-ranked: {e}")
-            except Exception as e:
-                notes.append(f"results not re-ranked: re-ranker failed: {_reason(e)}")
-                log.warning("re-ranker failed: %s", _reason(e))  # log handlers redact
-        elif order:
-            notes.append("results not re-ranked: no re-ranker configured")
+        if self.s.selection == "posts":
+            order, kept, reranked, batch = self._select_posts(req, fused, rows, scores, represented, notes)
+        else:
+            order, kept, reranked, batch = self._select_rows(req, order, rows, scores, represented, notes)
         if trace is not None:
             trace.update(
                 keyword=list(lists["keyword"]),
@@ -439,26 +419,8 @@ class SearchService:
                 combined=[f.passage_id for f in fused],
                 reranked=list(order) if reranked else [],
                 post_of={pid: row.post_id for pid, row in rows.items()},
+                batch=list(batch),
             )
-        diverse = diversify(
-            order,
-            lambda p: rows[p].post_id,
-            lambda p: rows[p].kind == "summary",
-            self.s.max_per_post,
-            1,
-        )
-        if reranked and len(represented) > 1:
-            # Only re-ranked scores say "relevant"; without them the rule is off, so a weak
-            # keyword match is never forced in.
-            kept = represent_sources(
-                diverse,
-                req.limit,
-                lambda p: rows[p].post.source,
-                lambda p: scores[p] >= self.s.source_min_score,
-                represented,
-            )
-        else:
-            kept = diverse[: req.limit]
         results = [
             SearchResult(
                 rank=i,
@@ -481,6 +443,138 @@ class SearchService:
         }
         notes = [self._redact(n) for n in notes]  # the one place notes are made safe
         return SearchResponse(req.query, filt, semantic, reranked, results, notes, gen.generation)
+
+    def _rerank(
+        self, query: str, batch: list[str], rows: dict[str, _Row], notes: list[str]
+    ) -> list[float] | None:
+        """Re-ranker scores for ``batch``, or None (with a note) when it can't re-rank."""
+        if self.reranker is None:
+            notes.append("results not re-ranked: no re-ranker configured")
+            return None
+        try:
+            new = [float(x) for x in self.reranker.score(query, [rows[p].rerank_text() for p in batch])]
+            if len(new) != len(batch):
+                raise RerankerUnavailableError("re-ranker returned the wrong number of scores")
+            return new
+        except RerankerUnavailableError as e:
+            notes.append(f"results not re-ranked: {e}")
+        except Exception as e:
+            notes.append(f"results not re-ranked: re-ranker failed: {_reason(e)}")
+            log.warning("re-ranker failed: %s", _reason(e))  # log handlers redact
+        return None
+
+    def _select_rows(
+        self,
+        req: SearchRequest,
+        order: list[str],
+        rows: dict[str, _Row],
+        scores: dict[str, float],
+        represented: list[str],
+        notes: list[str],
+    ) -> tuple[list[str], list[str], bool, list[str]]:
+        """``selection: rows``: the first ``rerank_top`` fused rows are re-ranked (unchanged)."""
+        reranked = False
+        batch: list[str] = []
+        if order and self.reranker is not None:
+            # Re-rank at least as many as were asked for; when re-ranked, only re-ranked
+            # candidates are returned, so every score is on the same scale.
+            top = order[: max(self.s.rerank_top, req.limit)]
+            # Every newsletter represented: also score each missing newsletter's best candidate,
+            # so one just below the re-rank cut still gets its chance (kept only if it qualifies).
+            shown = {rows[p].post.source for p in top}
+            extra = [
+                p
+                for src in (represented if len(represented) > 1 else [])
+                if src not in shown
+                for p in [next((q for q in order if rows[q].post.source == src), None)]
+                if p is not None
+            ]
+            batch = top + extra
+            new = self._rerank(req.query, batch, rows, notes)
+            if new is not None:
+                scores.update(zip(batch, new, strict=True))
+                kept_extra = [p for p in extra if scores[p] >= self.s.source_min_score]
+                order = sorted(top + kept_extra, key=lambda p: -scores[p])  # stable: ties keep combined order
+                reranked = True
+        elif order:
+            notes.append("results not re-ranked: no re-ranker configured")
+        diverse = diversify(
+            order,
+            lambda p: rows[p].post_id,
+            lambda p: rows[p].kind == "summary",
+            self.s.max_per_post,
+            1,
+        )
+        return order, self._represent(req, diverse, rows, scores, represented, reranked), reranked, batch
+
+    def _select_posts(
+        self,
+        req: SearchRequest,
+        fused: list[Fused],
+        rows: dict[str, _Row],
+        scores: dict[str, float],
+        represented: list[str],
+        notes: list[str],
+    ) -> tuple[list[str], list[str], bool, list[str]]:
+        """``selection: posts``: group the fused rows by post, keep the best ``rerank_posts``
+        posts (plus each missing newsletter's best post), re-rank their best passages and
+        summary, then pick results across posts (spec hybrid-search / Re-ranking)."""
+        s = self.s
+        groups = group_by_post(
+            fused, lambda p: rows[p].post_id, lambda p: rows[p].kind == "summary", s.post_score
+        )
+        kept = list(groups[: s.rerank_posts])
+        extra_posts: set[str] = set()
+        if len(represented) > 1:
+            shown = {rows[_first_row(g)].post.source for g in kept}
+            for src in represented:
+                if src in shown:
+                    continue
+                best = next((g for g in groups if rows[_first_row(g)].post.source == src), None)
+                if best is not None:
+                    kept.append(best)
+                    extra_posts.add(best.post_id)
+        batch = rerank_batch(kept, s.rerank_rows_per_post, with_summaries=req.kind != "passages")
+        order = list(batch)  # combined order, kept posts only
+        reranked = False
+        if batch:
+            new = self._rerank(req.query, batch, rows, notes)
+            if new is not None:
+                scores.update(zip(batch, new, strict=True))
+                # A missing newsletter's post is kept only when it qualifies, as in rows mode.
+                order = [
+                    p
+                    for p in sorted(batch, key=lambda p: -scores[p])
+                    if rows[p].post_id not in extra_posts
+                    or max(scores[q] for q in batch if rows[q].post_id == rows[p].post_id)
+                    >= s.source_min_score
+                ]
+                reranked = True
+        picked = select_across_posts(
+            order, lambda p: rows[p].post_id, lambda p: rows[p].kind == "summary", s.max_per_post, 1
+        )
+        return order, self._represent(req, picked, rows, scores, represented, reranked), reranked, batch
+
+    def _represent(
+        self,
+        req: SearchRequest,
+        candidates: list[str],
+        rows: dict[str, _Row],
+        scores: dict[str, float],
+        represented: list[str],
+        reranked: bool,
+    ) -> list[str]:
+        if reranked and len(represented) > 1:
+            # Only re-ranked scores say "relevant"; without them the rule is off, so a weak
+            # keyword match is never forced in.
+            return represent_sources(
+                candidates,
+                req.limit,
+                lambda p: rows[p].post.source,
+                lambda p: scores[p] >= self.s.source_min_score,
+                represented,
+            )
+        return candidates[: req.limit]
 
     def _active(self, conn: psycopg.Connection) -> db.Generation:
         now = self.clock()
@@ -536,6 +630,13 @@ class SearchService:
             )
             out[pid] = _Row(pid, post_id, kind, heading, body, post)
         return out
+
+
+def _first_row(g: PostGroup) -> str:
+    """Any row of a post group (its best passage, else its summary), to read the post's details."""
+    row = g.passages[0] if g.passages else g.summary
+    assert row is not None  # a group has at least one row
+    return row
 
 
 def _reason(e: BaseException) -> str:

@@ -238,7 +238,7 @@ def test_trace_records_each_stage(cfg):
     svc = make_service(cfg)
     svc.reranker = FakeReranker()
     resp = svc.search(SearchRequest.create("bar raiser"), trace=trace)
-    assert set(trace) == {"keyword", "semantic", "combined", "reranked", "post_of"}
+    assert set(trace) == {"keyword", "semantic", "combined", "reranked", "post_of", "batch"}
     assert trace["reranked"] and trace["post_of"][trace["keyword"][0]] == "main/hiring"
     assert resp.results[0].id in trace["reranked"]
 
