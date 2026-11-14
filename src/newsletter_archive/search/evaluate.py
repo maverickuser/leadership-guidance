@@ -475,6 +475,54 @@ def gate_for(config: Config) -> Callable[[db.Generation, db.Generation], tuple[f
     return quality_gate(reader_service(config), load_questions(eval_path(config)))
 
 
+def _answers_main(args: Any) -> int:  # pragma: no cover - real Gemini, model and database
+    """`--answers` and `--compare` (openspec improve-search-post-selection, lld §5.9)."""
+    import sys
+
+    from ..config import load_config
+    from . import answers
+    from .judge import JUDGE_FILE, load_judgments
+    from .rerank import Reranking, qwen_loader
+
+    try:
+        config = load_config(args.config, args.config.parent / ".env")
+        questions = load_questions(args.file or eval_path(config))
+        if args.compare:
+            a, b = (answers.load_run(config.output_dir, label) for label in args.compare)
+            print("\n".join(answers.compare_lines(a, b, questions)))
+            return 0
+        judgments = (
+            load_judgments(config.output_dir / JUDGE_FILE)
+            if (config.output_dir / JUDGE_FILE).exists()
+            else {}
+        )
+
+        def service() -> SearchService:
+            reranking = Reranking(
+                qwen_loader(config.search.reranker_model, config.output_dir),
+                config.search.rerank_timeout_seconds,
+            )
+            reranking.wait_loaded(300)
+            print(f"re-ranker: {reranking.status}", file=sys.stderr)
+            return reader_service(config, reranking)
+
+        answerer, judge_ = answers.gemini_factories(config)
+        return answers.run_answers(
+            config,
+            questions,
+            args.label,
+            dry_run=args.dry_run,
+            yes=args.yes,
+            service_factory=service,
+            answerer_factory=answerer,
+            judge_factory=judge_,
+            judge_grades={qid: j.grades for qid, j in judgments.items()},
+        )
+    except ArchiveError as e:
+        print(f"Error: {e}", file=sys.stderr)
+        return 1
+
+
 def main(argv: Sequence[str] | None = None) -> int:  # pragma: no cover - real Gemini, model and database
     import argparse
     import json
@@ -497,7 +545,22 @@ def main(argv: Sequence[str] | None = None) -> int:  # pragma: no cover - real G
         action="store_true",
         help="also grade the results with Gemini and suggest changes to the expected lists",
     )
+    parser.add_argument(
+        "--answers",
+        action="store_true",
+        help="instead: write an answer per question and grade it with Gemini (shows the cost first)",
+    )
+    parser.add_argument("--label", default="baseline", help="name of this answer run (default: baseline)")
+    parser.add_argument(
+        "--dry-run", action="store_true", help="with --answers: show the cost, change nothing"
+    )
+    parser.add_argument("--yes", action="store_true", help="with --answers: go ahead over the per-run limit")
+    parser.add_argument(
+        "--compare", nargs=2, metavar=("LABEL_A", "LABEL_B"), help="compare two saved answer runs and exit"
+    )
     args = parser.parse_args(argv)
+    if args.answers or args.compare:
+        return _answers_main(args)
 
     try:
         config = load_config(args.config, args.config.parent / ".env")

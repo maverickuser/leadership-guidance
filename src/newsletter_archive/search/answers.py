@@ -8,7 +8,7 @@ on has changed, so comparing two search versions only pays for what differs.
 
 What the answer cites is worked out here, from its Markdown links: citation precision (cited
 posts that the searches returned) and post coverage (relevant posts the answer drew on). An
-LLM judge adds faithfulness and an overall grade (PR 3).
+LLM judge adds faithfulness and an overall grade.
 """
 
 from __future__ import annotations
@@ -31,6 +31,10 @@ from .service import SearchRequest, SearchResponse, SearchService
 log = logging.getLogger("newsletter_archive.search.answers")
 
 ANSWER_PROMPT_VERSION = 1  # bump when the prompt below changes: every answer is then made again
+ANSWER_JUDGE_VERSION = 1  # bump when JUDGE_PROMPT changes: every grade is then made again
+JUDGE_ATTEMPTS = 2
+ANSWER_OUTPUT_TOKENS = 4096  # a teaching post plus thinking
+JUDGE_OUTPUT_TOKENS = 8192  # the claims list plus thinking
 ANSWERS_DIR = "eval-answers"
 STORE_VERSION = 1
 LABEL_RE = re.compile(r"^[a-z0-9][a-z0-9._-]{0,63}$")
@@ -204,7 +208,8 @@ class AnswerRecord:
     url_to_post: dict[str, str]
     answer: str | None = None
     error: str | None = None
-    grade: dict[str, Any] | None = None  # filled by the answer judge (PR 3)
+    grade: dict[str, Any] | None = None  # filled by the answer judge
+    results_text: str = ""  # the results as the model saw them, so the judge sees the same
 
     @property
     def cited(self) -> Citations:
@@ -329,6 +334,7 @@ def answer_questions(
                 retrieved.result_ids,
                 retrieved.post_of,
                 retrieved.url_to_post,
+                results_text=render_results(retrieved),
             )
             try:
                 record.answer = answerer.answer(answer_prompt(q.question, retrieved))
@@ -352,7 +358,7 @@ class GeminiAnswerer:
     client: Any  # GeminiClient
     model: str
     thinking_level: str = "low"
-    max_output_tokens: int = 4096  # a teaching post plus thinking
+    max_output_tokens: int = ANSWER_OUTPUT_TOKENS
 
     def answer(self, prompt: str) -> str:
         from .summaries import check_response
@@ -387,13 +393,384 @@ class GeminiAnswerer:
         return call
 
 
+# -- the answer judge -----------------------------------------------------------------------------
+
+JUDGE_PROMPT = """You check an answer written from a personal archive of newsletter posts against
+the search results it was written from. You are given the question, the results (each starts
+with [result id], its post's title and URL) and the answer.
+
+1. List every claim the answer makes about what the posts say or advise, one short sentence
+   each. For each claim give the post_id of the result it cites (the post the answer links for
+   that claim, "" when it cites none) and supported: true only when that post's results shown
+   here actually say it.
+2. Grade the whole answer for the question: 3 = answers it well from the archive, 2 = useful
+   but missing something the results had, 1 = weak or mostly general, 0 = wrong or unusable.
+
+Reply with JSON only: {"claims": [{"claim": "...", "post_id": "...", "supported": true}],
+"overall": 0}."""
+
+
+class AnswerJudge(Protocol):
+    model: str
+
+    def judge(self, question: str, answer: str, results_text: str, post_ids: Sequence[str]) -> dict[str, Any]:
+        """{"claims": [{"claim", "post_id", "supported"}], "overall": 0-3}."""
+        ...
+
+
+def parse_judgment(text: str, post_ids: Sequence[str]) -> dict[str, Any]:
+    """The judge's JSON, checked; GeminiResponseError when it can't be used."""
+    from .gemini import GeminiResponseError
+
+    raw = text.strip()
+    if raw.startswith("```"):
+        raw = raw.strip("`").removeprefix("json").strip()
+    try:
+        data = json.loads(raw)
+        claims = data["claims"]
+        overall = data["overall"]
+        if not isinstance(claims, list) or isinstance(overall, bool) or overall not in (0, 1, 2, 3):
+            raise ValueError("bad claims or overall")
+        allowed = set(post_ids) | {""}
+        out = []
+        for c in claims:
+            if not isinstance(c.get("supported"), bool) or not isinstance(c.get("claim"), str):
+                raise ValueError("bad claim")
+            pid = c.get("post_id") or ""
+            out.append(
+                {"claim": c["claim"], "post_id": pid if pid in allowed else "", "supported": c["supported"]}
+            )
+    except (ValueError, KeyError, TypeError, AttributeError) as e:
+        raise GeminiResponseError(f"unusable judgment ({e})") from None
+    return {"claims": out, "overall": int(overall)}
+
+
+def grade_key(answer: str, judge_model: str) -> str:
+    return _sha(answer, ANSWER_JUDGE_VERSION, judge_model)
+
+
+def grade_record(
+    record: AnswerRecord, judgment: dict[str, Any], relevant: Iterable[str], judge_model: str
+) -> dict[str, Any]:
+    """The grade saved with a record: the judge's claims and grade plus the computed scores."""
+    claims = judgment["claims"]
+    cited = record.cited
+    return {
+        "grade_key": grade_key(record.answer or "", judge_model),
+        "judge_model": judge_model,
+        "judge_version": ANSWER_JUDGE_VERSION,
+        "claims": claims,
+        "faithfulness": sum(1 for c in claims if c["supported"] and c["post_id"]) / len(claims)
+        if claims
+        else None,
+        "citation_precision": citation_precision(cited),
+        "post_coverage": post_coverage(cited, relevant),
+        "overall": judgment["overall"],
+    }
+
+
+def grade_answers(
+    run: AnswerRun,
+    judge: AnswerJudge,
+    relevant_of: Callable[[str], set[str]],
+    output_dir: Path,
+    on_question: Callable[[AnswerRecord, bool], None] | None = None,
+) -> AnswerRun:
+    """Grade every answered record whose saved grade is missing or out of date (a different
+    answer, judge model or judge version); save after each. ``on_question(record, reused)``."""
+    reusable = {
+        r.grade["grade_key"]: r.grade
+        for r in saved_answers(output_dir).values()
+        if r.grade and r.grade.get("judge_version") == ANSWER_JUDGE_VERSION
+    }
+    for record in run.records.values():
+        if record.answer is None:
+            continue
+        key = grade_key(record.answer, judge.model)
+        relevant = relevant_of(record.question_id)
+        if record.grade and record.grade.get("grade_key") == key:
+            reused = True
+        elif key in reusable:
+            record.grade = {**reusable[key], "post_coverage": post_coverage(record.cited, relevant)}
+            reused = True
+        else:
+            try:
+                judgment = judge.judge(
+                    record.question,
+                    record.answer,
+                    record.results_text,
+                    sorted(set(record.result_posts.values())),
+                )
+            except ArchiveError as e:
+                record.error = f"grade: {type(e).__name__}"
+                save_run(output_dir, run)
+                log.info("grade %s: failed (%s)", record.question_id, type(e).__name__)
+                if on_question:
+                    on_question(record, False)
+                continue
+            record.grade = grade_record(record, judgment, relevant, judge.model)
+            reusable[key] = record.grade
+            reused = False
+        save_run(output_dir, run)
+        log.info("grade %s: %s", record.question_id, "reused" if reused else "ok")
+        if on_question:
+            on_question(record, reused)
+    return run
+
+
+@dataclass
+class GeminiAnswerJudge:
+    client: Any  # GeminiClient
+    model: str
+    thinking_level: str = "low"
+
+    def judge(self, question: str, answer: str, results_text: str, post_ids: Sequence[str]) -> dict[str, Any]:
+        """One retry on an unusable judgment (with a note and a little temperature), then the error."""
+        from .gemini import GeminiResponseError
+        from .summaries import RETRY_TEMPERATURE, check_response
+        from .text import estimate_tokens
+
+        text = f"Question: {question}\n\nSearch results:\n\n{results_text}\n\nAnswer:\n{answer}"
+        tokens = estimate_tokens(JUDGE_PROMPT) + estimate_tokens(text) + JUDGE_OUTPUT_TOKENS
+        problem = ""
+        for _ in range(JUDGE_ATTEMPTS):
+            out: list[dict[str, Any]] = []
+
+            def keep(response: Any, out: list[dict[str, Any]] = out) -> None:
+                out.append(parse_judgment(check_response(response), post_ids))
+
+            note = (
+                f" Your previous reply was unusable ({problem}): reply with the JSON only." if problem else ""
+            )
+            request = self._request(text, JUDGE_PROMPT + note, RETRY_TEMPERATURE if problem else 0.0)
+            try:
+                self.client.call(request, tokens, "answer-judge", keep)
+                return out[0]
+            except GeminiResponseError as e:
+                problem = str(e)
+        raise AnswerError(f"no usable judgment after {JUDGE_ATTEMPTS} attempts: {problem}")
+
+    def _request(self, text: str, instruction: str, temperature: float) -> Callable[[Any], Any]:
+        from .summaries import thinking_config
+
+        def call(sdk: Any) -> Any:
+            from google.genai import types
+
+            return sdk.models.generate_content(
+                model=self.model,
+                contents=text,
+                config=types.GenerateContentConfig(
+                    system_instruction=instruction,
+                    temperature=temperature,
+                    max_output_tokens=JUDGE_OUTPUT_TOKENS,
+                    thinking_config=thinking_config(self.thinking_level),
+                    response_mime_type="application/json",
+                ),
+            )
+
+        return call
+
+
+# -- cost -----------------------------------------------------------------------------------------
+
+
+@dataclass(frozen=True)
+class Estimate:
+    questions: int
+    tokens: int
+    usd: float
+
+    def line(self) -> str:
+        return (
+            f"Estimate: {self.questions} answers and {self.questions} grades, "
+            f"at most ~{self.tokens:,} tokens, ~${self.usd:.2f} "
+            "(saved answers and grades are reused and cost nothing)"
+        )
+
+
+def estimate(
+    questions: Sequence[Question], results_per_search: int, avg_row_tokens: int, usd_per_million: float
+) -> Estimate:
+    """An upper bound made before any search or model call (a search embeds the query): every
+    question answered and graded, with two full searches' results each."""
+    from .text import estimate_tokens
+
+    instructions = estimate_tokens(ANSWER_INSTRUCTION) + 1500  # the ask text is about this long
+    results = 2 * results_per_search * avg_row_tokens
+    total = 0
+    for q in questions:
+        answer = instructions + estimate_tokens(q.question) + results + ANSWER_OUTPUT_TOKENS
+        grade = estimate_tokens(JUDGE_PROMPT) + results + ANSWER_OUTPUT_TOKENS + JUDGE_OUTPUT_TOKENS
+        total += answer + grade
+    return Estimate(len(questions), total, total / 1_000_000 * usd_per_million)
+
+
+# -- the report -----------------------------------------------------------------------------------
+
+METRICS = ("faithfulness", "citation_precision", "post_coverage", "overall")
+
+
+def _mean(values: Iterable[float | None]) -> float | None:
+    got = [v for v in values if v is not None]
+    return sum(got) / len(got) if got else None
+
+
+def scores(
+    run: AnswerRun, questions: Sequence[Question], qtype: str | None = None
+) -> dict[str, float | None]:
+    ids = {q.id for q in questions if qtype is None or q.type == qtype}
+    graded = [r.grade for qid, r in run.records.items() if qid in ids and r.grade]
+    return {m: _mean(g.get(m) for g in graded) for m in METRICS}
+
+
+def _cell(v: float | None, width: int = 11) -> str:
+    return f"{v:>{width}.2f}" if v is not None else f"{'n/a':>{width}}"
+
+
+def report_lines(run: AnswerRun, questions: Sequence[Question], model: str) -> list[str]:
+    answered = sum(1 for q in questions if (r := run.records.get(q.id)) and r.answer)
+    graded = sum(1 for q in questions if (r := run.records.get(q.id)) and r.grade)
+    out = [
+        f"Answer evaluation: label {run.label}, {len(questions)} questions "
+        f"({answered} answered, {graded} graded), {model}",
+        "",
+        f"{'':<10} {'faithful':>11} {'citations':>11} {'coverage':>11} {'overall':>11}",
+    ]
+    from .evaluate import TYPES
+
+    for qtype in (None, *TYPES):
+        if qtype and not any(q.type == qtype for q in questions):
+            continue
+        s = scores(run, questions, qtype)
+        out.append(f"{qtype or 'all':<10} " + " ".join(_cell(s[m]) for m in METRICS))
+    failed = [f"{q.id} ({r.error})" for q in questions if (r := run.records.get(q.id)) and r.error]
+    missing = [q.id for q in questions if q.id not in run.records]
+    if failed:
+        out.append("failed: " + ", ".join(failed))
+    if missing:
+        out.append("not run: " + ", ".join(missing))
+    return out
+
+
+def compare_lines(a: AnswerRun, b: AnswerRun, questions: Sequence[Question]) -> list[str]:
+    sa, sb = scores(a, questions), scores(b, questions)
+    out = [f"{'':<20} {a.label:>14} {b.label:>14} {'change':>9}"]
+    for m in METRICS:
+        va, vb = sa[m], sb[m]
+        diff = f"{vb - va:>+9.2f}" if va is not None and vb is not None else f"{'n/a':>9}"
+        out.append(f"{m:<20} {_cell(va, 14)} {_cell(vb, 14)} {diff}")
+    return out
+
+
+# -- running it ----------------------------------------------------------------------------------
+
+
+def average_row_tokens(conn: Any, schema: str) -> int:
+    """The mean size of a search result in the live index, for the estimate."""
+    from psycopg import sql
+
+    from .text import CHARS_PER_TOKEN
+
+    row = conn.execute(
+        sql.SQL("SELECT coalesce(avg(length(title) + length(body)), 0) FROM {}.passages").format(
+            sql.Identifier(schema)
+        )
+    ).fetchone()
+    return max(1, int(float(row[0]) / CHARS_PER_TOKEN) + 30)  # plus the result's header line
+
+
+def run_answers(
+    config: Any,
+    questions: Sequence[Question],
+    label: str,
+    *,
+    dry_run: bool,
+    yes: bool,
+    service_factory: Callable[[], SearchService],
+    answerer_factory: Callable[[], Answerer],
+    judge_factory: Callable[[], AnswerJudge],
+    judge_grades: Mapping[str, Mapping[str, int]],
+    print_line: Callable[[str], None] = print,
+) -> int:
+    """The `eval_search.py --answers` run: check the key, estimate, then answer, grade and report.
+    Returns the exit code (0 ok, 1 stopped before spending or a run error)."""
+    from . import db
+
+    s = config.search
+    check_label(label)
+    if not config.gemini_api_key:
+        print_line("Error: GEMINI_API_KEY is not set; add it to .env")
+        return 1
+    with db.connect(config, "reader") as conn:
+        gen = db.active_generation(conn)
+        if gen is None:
+            print_line("Error: there is no search index yet; run `archive index` first")
+            return 1
+        avg = average_row_tokens(conn, gen.schema)
+    est = estimate(questions, s.answers.results_per_search, avg, s.summary_usd_per_million_tokens)
+    print_line(est.line())
+    if dry_run:
+        print_line("Dry run: nothing was searched, answered or graded")
+        return 0
+    if est.tokens > s.answers.max_tokens_per_run and not yes:
+        print_line(
+            f"Over the per-run limit (search.answers.max_tokens_per_run = {s.answers.max_tokens_per_run:,}); "
+            "re-run with --yes to go ahead"
+        )
+        return 1
+    by_id = {q.id: q for q in questions}
+
+    def relevant_of(qid: str) -> set[str]:
+        return relevant_posts(by_id[qid], judge_grades.get(qid, {}))
+
+    answerer = answerer_factory()
+    run = answer_questions(
+        service_factory(), questions, answerer, config.output_dir, label, s.answers.results_per_search
+    )
+    run = grade_answers(run, judge_factory(), relevant_of, config.output_dir)
+    for line in report_lines(run, questions, answerer.model):
+        print_line(line)
+    return 0
+
+
+def gemini_factories(config: Any) -> tuple[Callable[[], Answerer], Callable[[], AnswerJudge]]:
+    """The real answer model and judge, sharing one rate-limited client."""
+    from .gemini import GeminiClient
+
+    s = config.search
+    shared: list[GeminiClient] = []
+
+    def client() -> GeminiClient:
+        if not shared:
+            shared.append(
+                GeminiClient(
+                    config.gemini_api_key,
+                    rpm=s.summary_rpm,
+                    tpm=s.summary_tpm,
+                    breaker_failures=s.circuit_breaker_failures,
+                    timeout_seconds=s.gemini_timeout_seconds,
+                )
+            )
+        return shared[0]
+
+    a = s.answers
+    return (
+        lambda: GeminiAnswerer(client(), a.model, a.thinking_level),
+        lambda: GeminiAnswerJudge(client(), a.judge_model, a.thinking_level),
+    )
+
+
 __all__ = [
+    "ANSWER_JUDGE_VERSION",
     "ANSWER_PROMPT_VERSION",
     "AnswerError",
+    "AnswerJudge",
     "AnswerRecord",
     "AnswerRun",
     "Answerer",
     "Citations",
+    "Estimate",
+    "GeminiAnswerJudge",
     "GeminiAnswerer",
     "Retrieved",
     "answer_key",
@@ -401,11 +778,17 @@ __all__ = [
     "answer_questions",
     "citation_precision",
     "citations",
+    "compare_lines",
+    "estimate",
+    "grade_answers",
     "load_run",
     "normalize_url",
+    "parse_judgment",
     "post_coverage",
     "relevant_posts",
+    "report_lines",
     "retrieve",
+    "run_answers",
     "save_run",
     "saved_answers",
 ]
