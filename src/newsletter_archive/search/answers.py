@@ -282,6 +282,24 @@ def saved_answers(output_dir: Path) -> dict[str, AnswerRecord]:
     return out
 
 
+def saved_grades(output_dir: Path) -> dict[str, dict[str, Any]]:
+    """Every current saved grade in every run, by grade key (not only the first record per
+    answer, so a graded copy in any run is found)."""
+    out: dict[str, dict[str, Any]] = {}
+    folder = answers_dir(output_dir)
+    if not folder.is_dir():
+        return out
+    for path in sorted(folder.glob("*.json")):
+        try:
+            run = load_run(output_dir, path.stem)
+        except AnswerError:
+            continue
+        for r in run.records.values():
+            if r.grade and r.grade.get("judge_version") == ANSWER_JUDGE_VERSION and r.grade.get("grade_key"):
+                out.setdefault(r.grade["grade_key"], r.grade)
+    return out
+
+
 # -- answering ------------------------------------------------------------------------------------
 
 
@@ -322,7 +340,15 @@ def answer_questions(
         if old is not None:
             # The answer is reused; its grade is not (it belongs to the other run and may be
             # out of date), so the judge decides that separately.
-            record = AnswerRecord(**{**asdict(old), "question_id": q.id, "grade": None})
+            record = AnswerRecord(
+                **{
+                    **asdict(old),
+                    "question_id": q.id,
+                    "grade": None,
+                    "error": None,
+                    "results_text": render_results(retrieved),
+                }
+            )
             reused = True
         else:
             record = AnswerRecord(
@@ -401,7 +427,8 @@ with [result id], its post's title and URL) and the answer.
 
 1. List every claim the answer makes about what the posts say or advise, one short sentence
    each. For each claim give the post_id of the result it cites (the post the answer links for
-   that claim, "" when it cites none) and supported: true only when that post's results shown
+   that claim: the result id without its "#..." part, from the valid post_id list; "" when it
+   cites none) and supported: true only when that post's results shown
    here actually say it.
 2. Grade the whole answer for the question: 3 = answers it well from the archive, 2 = useful
    but missing something the results had, 1 = weak or mostly general, 0 = wrong or unusable.
@@ -437,6 +464,8 @@ def parse_judgment(text: str, post_ids: Sequence[str]) -> dict[str, Any]:
             if not isinstance(c.get("supported"), bool) or not isinstance(c.get("claim"), str):
                 raise ValueError("bad claim")
             pid = c.get("post_id") or ""
+            if pid not in allowed and pid.split("#", 1)[0] in allowed:  # a result id: its post
+                pid = pid.split("#", 1)[0]
             out.append(
                 {"claim": c["claim"], "post_id": pid if pid in allowed else "", "supported": c["supported"]}
             )
@@ -478,11 +507,7 @@ def grade_answers(
 ) -> AnswerRun:
     """Grade every answered record whose saved grade is missing or out of date (a different
     answer, judge model or judge version); save after each. ``on_question(record, reused)``."""
-    reusable = {
-        r.grade["grade_key"]: r.grade
-        for r in saved_answers(output_dir).values()
-        if r.grade and r.grade.get("judge_version") == ANSWER_JUDGE_VERSION
-    }
+    reusable = saved_grades(output_dir)
     for record in run.records.values():
         if record.answer is None:
             continue
@@ -492,6 +517,7 @@ def grade_answers(
             reused = True
         elif key in reusable:
             record.grade = {**reusable[key], "post_coverage": post_coverage(record.cited, relevant)}
+            record.error = None
             reused = True
         else:
             try:
@@ -509,6 +535,7 @@ def grade_answers(
                     on_question(record, False)
                 continue
             record.grade = grade_record(record, judgment, relevant, judge.model)
+            record.error = None
             reusable[key] = record.grade
             reused = False
         save_run(output_dir, run)
@@ -530,7 +557,11 @@ class GeminiAnswerJudge:
         from .summaries import RETRY_TEMPERATURE, check_response
         from .text import estimate_tokens
 
-        text = f"Question: {question}\n\nSearch results:\n\n{results_text}\n\nAnswer:\n{answer}"
+        text = (
+            f"Question: {question}\n\nSearch results:\n\n{results_text}\n\n"
+            f"Valid post_id values (a result id without its #part): {', '.join(post_ids) or '(none)'}\n\n"
+            f"Answer:\n{answer}"
+        )
         tokens = estimate_tokens(JUDGE_PROMPT) + estimate_tokens(text) + JUDGE_OUTPUT_TOKENS
         problem = ""
         for _ in range(JUDGE_ATTEMPTS):
@@ -601,7 +632,7 @@ def estimate(
     for q in questions:
         answer = instructions + estimate_tokens(q.question) + results + ANSWER_OUTPUT_TOKENS
         grade = estimate_tokens(JUDGE_PROMPT) + results + ANSWER_OUTPUT_TOKENS + JUDGE_OUTPUT_TOKENS
-        total += answer + grade
+        total += answer + JUDGE_ATTEMPTS * grade  # a judgment may be asked for twice
     return Estimate(len(questions), total, total / 1_000_000 * usd_per_million)
 
 
@@ -652,6 +683,10 @@ def report_lines(run: AnswerRun, questions: Sequence[Question], model: str) -> l
     return out
 
 
+def run_exists(output_dir: Path, label: str) -> bool:
+    return run_path(output_dir, label).exists()
+
+
 def compare_lines(a: AnswerRun, b: AnswerRun, questions: Sequence[Question]) -> list[str]:
     sa, sb = scores(a, questions), scores(b, questions)
     out = [f"{'':<20} {a.label:>14} {b.label:>14} {'change':>9}"]
@@ -666,17 +701,19 @@ def compare_lines(a: AnswerRun, b: AnswerRun, questions: Sequence[Question]) -> 
 
 
 def average_row_tokens(conn: Any, schema: str) -> int:
-    """The mean size of a search result in the live index, for the estimate."""
+    """A large search result in the live index (the 95th percentile of title + text, plus the
+    result's header line), so the estimate stays an upper bound."""
     from psycopg import sql
 
     from .text import CHARS_PER_TOKEN
 
     row = conn.execute(
-        sql.SQL("SELECT coalesce(avg(length(title) + length(body)), 0) FROM {}.passages").format(
-            sql.Identifier(schema)
-        )
+        sql.SQL(
+            "SELECT coalesce(percentile_cont(0.95) WITHIN GROUP (ORDER BY length(title) + length(body)), 0) "
+            "FROM {}.passages"
+        ).format(sql.Identifier(schema))
     ).fetchone()
-    return max(1, int(float(row[0]) / CHARS_PER_TOKEN) + 30)  # plus the result's header line
+    return max(1, int(float(row[0]) / CHARS_PER_TOKEN) + 60)  # plus the header: id, kind, source, date, URL
 
 
 def run_answers(
@@ -698,9 +735,6 @@ def run_answers(
 
     s = config.search
     check_label(label)
-    if not config.gemini_api_key:
-        print_line("Error: GEMINI_API_KEY is not set; add it to .env")
-        return 1
     with db.connect(config, "reader") as conn:
         gen = db.active_generation(conn)
         if gen is None:
@@ -712,6 +746,9 @@ def run_answers(
     if dry_run:
         print_line("Dry run: nothing was searched, answered or graded")
         return 0
+    if not config.gemini_api_key:
+        print_line("Error: GEMINI_API_KEY is not set; add it to .env")
+        return 1
     if est.tokens > s.answers.max_tokens_per_run and not yes:
         print_line(
             f"Over the per-run limit (search.answers.max_tokens_per_run = {s.answers.max_tokens_per_run:,}); "
@@ -789,6 +826,8 @@ __all__ = [
     "report_lines",
     "retrieve",
     "run_answers",
+    "run_exists",
     "save_run",
     "saved_answers",
+    "saved_grades",
 ]

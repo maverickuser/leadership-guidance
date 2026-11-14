@@ -284,7 +284,7 @@ def test_estimate_is_an_upper_bound_with_cost():
 
     qs = [Question(f"q{i}", "local", "a question?", ()) for i in range(36)]
     est = estimate(qs, 10, 300, 0.75)
-    assert est.questions == 36 and 36 * 2 * (2 * 10 * 300) < est.tokens < 36 * 40_000
+    assert est.questions == 36 and 36 * 2 * (2 * 10 * 300) < est.tokens < 36 * 60_000
     assert est.usd == pytest.approx(est.tokens / 1_000_000 * 0.75)
     assert "36 answers and 36 grades" in est.line() and f"~${est.usd:.2f}" in est.line()
 
@@ -309,3 +309,35 @@ def test_report_and_compare():
     better.records["b"].grade = {**g, "overall": 3}
     lines = "\n".join(compare_lines(run, better, qs))
     assert "baseline" in lines and "posts" in lines and "+1.00" in lines  # overall 2.0 -> 3.0
+
+
+def test_the_judge_is_told_the_post_ids_and_result_ids_map_to_posts():
+    from newsletter_archive.search.answers import GeminiAnswerJudge, parse_judgment
+
+    from .fakes import FakeSDK, generate_response
+    from .test_gemini import make_client
+
+    j = parse_judgment(
+        '{"claims": [{"claim": "c", "post_id": "main/a#3", "supported": true}], "overall": 2}', ["main/a"]
+    )
+    assert j["claims"][0]["post_id"] == "main/a"  # the result id the model saw, mapped to its post
+    sdk = FakeSDK(answers=[generate_response('{"claims": [], "overall": 1}')])
+    GeminiAnswerJudge(make_client(sdk)[0], "m").judge("Q?", "answer", "[main/a#0] ...", ["main/a", "main/b"])
+    assert "Valid post_id values (a result id without its #part): main/a, main/b" in sdk.calls[0]["contents"]
+
+
+def test_grades_are_found_in_any_run_and_a_good_grade_clears_the_error(tmp_path):
+    from newsletter_archive.search.answers import grade_answers, grade_key, saved_grades
+
+    ungraded = AnswerRun("aaa", {"q1": record("q1")})
+    graded_rec = record("q1")
+    graded_rec.grade = {"grade_key": grade_key("text", "fake-judge"), "judge_version": 1, "overall": 2,
+                        "faithfulness": 1.0, "citation_precision": None, "post_coverage": None, "claims": []}  # fmt: skip
+    save_run(tmp_path, ungraded)
+    save_run(tmp_path, AnswerRun("zzz", {"q1": graded_rec}))
+    assert set(saved_grades(tmp_path)) == {grade_key("text", "fake-judge")}
+    run = AnswerRun("new", {"q1": record("q1")})
+    run.records["q1"].error = "grade: OldError"
+    judge = FakeJudge()
+    grade_answers(run, judge, lambda qid: set(), tmp_path)
+    assert judge.calls == [] and run.records["q1"].grade["overall"] == 2 and run.records["q1"].error is None
