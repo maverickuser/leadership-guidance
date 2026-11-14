@@ -87,6 +87,17 @@ class SummaryConfig:
 
 
 @dataclass(frozen=True)
+class AnswersConfig:
+    """Settings for the answer evaluation (openspec improve-search-post-selection, lld.md §1)."""
+
+    model: str = "gemini-3.8-flash"  # writes the answers
+    judge_model: str = "gemini-3.8-flash"  # grades them (chosen with the user: same Flash model)
+    thinking_level: str = "low"
+    results_per_search: int = 10  # the fixed plan runs one summaries and one passages search
+    max_tokens_per_run: int = 1_500_000  # over this, a run needs --yes
+
+
+@dataclass(frozen=True)
 class SearchConfig:
     """Settings for indexing and hybrid search. Every field can be set under `search:` in config.yaml."""
 
@@ -121,6 +132,14 @@ class SearchConfig:
     rerank_timeout_seconds: float = 10.0
     query_timeout_seconds: float = 8.0  # embedding a search query (search falls back to keywords)
     max_per_post: int = 3
+    # How results are chosen (openspec improve-search-post-selection). "rows": the first
+    # rerank_top fused rows are re-ranked (the original behaviour). "posts": rows are grouped
+    # by post first, the best rerank_posts posts are kept, and their best rerank_rows_per_post
+    # passages (plus summary) are re-ranked. The post defaults are provisional until measured.
+    selection: str = "rows"
+    post_score: str = "max"  # max | sum_top3: a post's score from its rows' fused scores
+    rerank_posts: int = 15
+    rerank_rows_per_post: int = 2
     # Searches over every newsletter show each one that has a relevant result: a newsletter
     # missing from the top gets its best result in if its re-ranker score is at least this
     # (a probability, 0-1). Measured 2026-11-11 on the two-newsletter index (837 posts, 36 eval
@@ -134,10 +153,14 @@ class SearchConfig:
     db_port: int = 5433
     db_name: str = "archive"
     summaries: SummaryConfig = field(default_factory=SummaryConfig)
+    answers: AnswersConfig = field(default_factory=AnswersConfig)
 
 
 SEARCH_FIELDS = {f.name for f in fields(SearchConfig)}
 SUMMARY_FIELDS = {f.name for f in fields(SummaryConfig)}
+ANSWERS_FIELDS = {f.name for f in fields(AnswersConfig)}
+SELECTIONS = ("rows", "posts")
+POST_SCORES = ("max", "sum_top3")
 BM25_FIELDS = {"heading", "title", "body"}
 THINKING_LEVELS = ("", "minimal", "low", "medium", "high")
 
@@ -322,6 +345,7 @@ def _parse_search(raw: Any, env_port: str | None = None) -> SearchConfig:
     if env_port and "db_port" not in values:
         values["db_port"] = env_port
     summaries = values.pop("summaries", None)
+    answers = values.pop("answers", None)
     boosts = values.pop("bm25_boosts", None)
     weights = values.pop("fusion_weights", None)
     for name, value in values.items():
@@ -334,6 +358,15 @@ def _parse_search(raw: Any, env_port: str | None = None) -> SearchConfig:
         if "thinking_level" in parsed:
             parsed["thinking_level"] = parsed["thinking_level"].strip().lower()
         values["summaries"] = SummaryConfig(**parsed)
+    if answers is not None:
+        av = _section("search.answers", answers, defaults.answers, ANSWERS_FIELDS)
+        parsed = {k: _coerce(f"search.answers.{k}", v, getattr(defaults.answers, k)) for k, v in av.items()}
+        if "thinking_level" in parsed:
+            parsed["thinking_level"] = parsed["thinking_level"].strip().lower()
+        values["answers"] = AnswersConfig(**parsed)
+    for name in ("selection", "post_score"):
+        if name in values:
+            values[name] = values[name].strip().lower()
     if boosts is not None:
         values["bm25_boosts"] = _number_map(
             "bm25_boosts", boosts, defaults.bm25_boosts, "heading, title and body"
@@ -400,6 +433,28 @@ def _validate_search(s: SearchConfig) -> None:
         raise ConfigError("search.summaries.max_tokens_per_run must be > 0")
     if s.summaries.enabled and not s.summaries.model:
         raise ConfigError("search.summaries.model must be set when summaries are enabled")
+    if s.selection not in SELECTIONS:
+        raise ConfigError(f"search.selection must be one of: {', '.join(SELECTIONS)}")
+    if s.post_score not in POST_SCORES:
+        raise ConfigError(f"search.post_score must be one of: {', '.join(POST_SCORES)}")
+    if not 1 <= s.rerank_posts <= 50:
+        raise ConfigError("search.rerank_posts must be between 1 and 50")
+    if not 1 <= s.rerank_rows_per_post <= 5:
+        raise ConfigError("search.rerank_rows_per_post must be between 1 and 5")
+    if s.rerank_posts * (s.rerank_rows_per_post + 1) > 2 * s.candidates:
+        raise ConfigError(
+            "search.rerank_posts × (rerank_rows_per_post + 1) can't exceed the combined candidates "
+            "(2 × search.candidates)"
+        )
+    a = s.answers
+    if not a.model or not a.judge_model:
+        raise ConfigError("search.answers.model and search.answers.judge_model must not be empty")
+    if a.thinking_level not in THINKING_LEVELS:
+        raise ConfigError("search.answers.thinking_level must be one of: '', minimal, low, medium, high")
+    if not 1 <= a.results_per_search <= 30:
+        raise ConfigError("search.answers.results_per_search must be between 1 and 30")
+    if a.max_tokens_per_run <= 0:
+        raise ConfigError("search.answers.max_tokens_per_run must be > 0")
     if s.summaries.thinking_level not in THINKING_LEVELS:
         raise ConfigError("search.summaries.thinking_level must be one of: '', minimal, low, medium, high")
 
@@ -607,6 +662,7 @@ __all__ = [
     "DB_WRITER_PASSWORD_ENV",
     "DEFAULTS",
     "GEMINI_KEY_ENV",
+    "AnswersConfig",
     "Config",
     "SearchConfig",
     "Secret",
