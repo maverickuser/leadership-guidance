@@ -177,3 +177,135 @@ def test_a_stray_or_broken_file_does_not_stop_reuse_from_other_runs(tmp_path):
     assert set(saved_answers(tmp_path)) == {"k1"}
     with pytest.raises(AnswerError, match="move it aside"):
         load_run(tmp_path, "broken")  # a JSON list, not a run
+
+
+# -- the answer judge, estimate and report (PR 3) -------------------------------------------------
+
+
+def test_parse_judgment_checks_the_json():
+    from newsletter_archive.search.answers import parse_judgment
+    from newsletter_archive.search.gemini import GeminiResponseError
+
+    good = '{"claims": [{"claim": "A", "post_id": "main/a", "supported": true}, {"claim": "B", "post_id": "x/zz", "supported": false}], "overall": 2}'
+    j = parse_judgment(good, ["main/a"])
+    assert j == {
+        "claims": [
+            {"claim": "A", "post_id": "main/a", "supported": True},
+            {"claim": "B", "post_id": "", "supported": False},  # a post the answer wasn't given
+        ],
+        "overall": 2,
+    }
+    assert parse_judgment("```json\n" + good + "\n```", ["main/a"])["overall"] == 2
+    for bad in ["nope", '{"claims": [], "overall": 4}', '{"claims": [], "overall": true}',
+                '{"claims": [{"claim": "A", "supported": "yes"}], "overall": 1}', '{"overall": 1}', "[]"]:  # fmt: skip
+        with pytest.raises(GeminiResponseError, match="unusable judgment"):
+            parse_judgment(bad, ["main/a"])
+
+
+def test_grade_record_scores():
+    from newsletter_archive.search.answers import grade_record
+
+    r = record("q1")
+    r.answer = "See [A](https://x.example/a) and [Z](https://elsewhere.example/z)."
+    r.url_to_post = {"https://x.example/a": "main/a"}
+    judgment = {
+        "claims": [
+            {"claim": "1", "post_id": "main/a", "supported": True},
+            {"claim": "2", "post_id": "main/a", "supported": False},
+            {"claim": "3", "post_id": "", "supported": True},  # uncited: counts as unsupported
+        ],
+        "overall": 2,
+    }
+    g = grade_record(r, judgment, {"main/a", "main/b"}, "judge-m")
+    assert g["faithfulness"] == pytest.approx(1 / 3) and g["citation_precision"] == 0.5
+    assert g["post_coverage"] == 0.5 and g["overall"] == 2 and g["judge_model"] == "judge-m"
+    assert grade_record(r, {"claims": [], "overall": 0}, set(), "m")["faithfulness"] is None
+
+
+class FakeJudge:
+    model = "fake-judge"
+
+    def __init__(self, fail_on=None):
+        self.calls = []
+        self.fail_on = fail_on
+
+    def judge(self, question, answer, results_text, post_ids):
+        self.calls.append(question)
+        if self.fail_on and self.fail_on == question:
+            from newsletter_archive.errors import ArchiveError
+
+            raise ArchiveError("judge down")
+        return {
+            "claims": [{"claim": "c", "post_id": post_ids[0] if post_ids else "", "supported": True}],
+            "overall": 3,
+        }
+
+
+def test_grading_reuses_grades_and_records_failures(tmp_path):
+    from newsletter_archive.search.answers import grade_answers
+
+    r1, r2 = record("q1"), record("q2", "k2", "other text")
+    r2.question = "second?"
+    run = AnswerRun("baseline", {"q1": r1, "q2": r2})
+    judge = FakeJudge(fail_on="second?")
+    grade_answers(run, judge, lambda qid: {"main/a"}, tmp_path)
+    assert run.records["q1"].grade["overall"] == 3 and run.records["q2"].error == "grade: ArchiveError"
+    assert len(judge.calls) == 2
+    again = FakeJudge()
+    grade_answers(run, again, lambda qid: {"main/a"}, tmp_path)
+    assert again.calls == ["second?"]  # q1's grade is current; only the failed one is tried
+    other = AnswerRun("posts", {"q1": record("q1")})
+    third = FakeJudge()
+    grade_answers(other, third, lambda qid: set(), tmp_path)
+    assert third.calls == [] and other.records["q1"].grade["overall"] == 3  # reused from baseline
+    assert other.records["q1"].grade["post_coverage"] is None  # coverage recomputed for this run
+
+
+def test_gemini_answer_judge_asks_for_json_and_retries_once():
+    from newsletter_archive.search.answers import AnswerError, GeminiAnswerJudge
+
+    from .fakes import FakeSDK, generate_response
+    from .test_gemini import make_client
+
+    good = '{"claims": [{"claim": "c", "post_id": "main/a", "supported": true}], "overall": 3}'
+    sdk = FakeSDK(answers=[generate_response("garbage"), generate_response(good)])
+    j = GeminiAnswerJudge(make_client(sdk)[0], "judge-model").judge("Q?", "answer", "[r1] ...", ["main/a"])
+    assert j["overall"] == 3 and len(sdk.calls) == 2
+    first, second = sdk.calls
+    assert first["config"].response_mime_type == "application/json" and first["config"].temperature == 0.0
+    assert "unusable" in second["config"].system_instruction and second["config"].temperature > 0
+    bad = FakeSDK(answers=[generate_response("garbage"), generate_response("still garbage")])
+    with pytest.raises(AnswerError, match="no usable judgment after 2 attempts"):
+        GeminiAnswerJudge(make_client(bad)[0], "judge-model").judge("Q?", "a", "", ["main/a"])
+
+
+def test_estimate_is_an_upper_bound_with_cost():
+    from newsletter_archive.search.answers import estimate
+
+    qs = [Question(f"q{i}", "local", "a question?", ()) for i in range(36)]
+    est = estimate(qs, 10, 300, 0.75)
+    assert est.questions == 36 and 36 * 2 * (2 * 10 * 300) < est.tokens < 36 * 40_000
+    assert est.usd == pytest.approx(est.tokens / 1_000_000 * 0.75)
+    assert "36 answers and 36 grades" in est.line() and f"~${est.usd:.2f}" in est.line()
+
+
+def test_report_and_compare():
+    from newsletter_archive.search.answers import compare_lines, report_lines
+
+    qs = [Question("a", "local", "?", ()), Question("b", "global", "?", ()), Question("c", "intent", "?", ())]
+    g = {"faithfulness": 1.0, "citation_precision": 1.0, "post_coverage": 0.5, "overall": 3}
+    ra, rb = record("a"), record("b")
+    ra.grade, rb.grade = dict(g), {**g, "post_coverage": None, "overall": 1}
+    failed = record("c", "k3", None)
+    failed.error = "answer: GeminiUnavailableError"
+    run = AnswerRun("baseline", {"a": ra, "b": rb, "c": failed})
+    text = "\n".join(report_lines(run, qs, "flash"))
+    assert "label baseline, 3 questions (2 answered, 2 graded), flash" in text
+    assert "all" in text and "global" in text and "failed: c (answer: GeminiUnavailableError)" in text
+    assert "n/a" in text  # intent has no graded answer
+    assert "not run: z" in "\n".join(report_lines(run, [*qs, Question("z", "local", "?", ())], "flash"))
+    better = AnswerRun("posts", {"a": record("a"), "b": record("b")})
+    better.records["a"].grade = {**g, "overall": 3}
+    better.records["b"].grade = {**g, "overall": 3}
+    lines = "\n".join(compare_lines(run, better, qs))
+    assert "baseline" in lines and "posts" in lines and "+1.00" in lines  # overall 2.0 -> 3.0

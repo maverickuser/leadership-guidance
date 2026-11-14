@@ -24,11 +24,11 @@
 
 ## 3. Answer judge, report and CLI (PR 3)
 
-- [ ] 3.1 `GeminiAnswerJudge`: JSON claims + overall grade, one retry, `grade_key`, faithfulness maths (lld §5.4)
-- [ ] 3.2 Cost estimate before any search or Gemini call, `--dry-run`, ceiling with `--yes`, missing-key stop, per-question failures (lld §5.7)
-- [ ] 3.3 Report per question type, `--compare A B`, `--answers` and `--label` in `scripts/eval_search.py` (lld §5.8, 5.9)
-- [ ] 3.4 README: the answer evaluation, its cost, where results are saved
-- [ ] 3.5 Tests end to end with the fakes
+- [x] 3.1 `GeminiAnswerJudge`: JSON claims + overall grade, one retry, `grade_key`, faithfulness maths (lld §5.4)
+- [x] 3.2 Cost estimate before any search or Gemini call, `--dry-run`, ceiling with `--yes`, missing-key stop, per-question failures (lld §5.7)
+- [x] 3.3 Report per question type, `--compare A B`, `--answers` and `--label` in `scripts/eval_search.py` (lld §5.8, 5.9)
+- [x] 3.4 README: the answer evaluation, its cost, where results are saved
+- [x] 3.5 Tests end to end with the fakes
 - [ ] 3.6 Live, with the user's go-ahead: dry run, then `--answers --label baseline` on today's search; record the scores in the PR
 
 ## 4. Post-level selection (PR 4)
