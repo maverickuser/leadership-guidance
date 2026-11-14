@@ -204,3 +204,58 @@ def test_no_cross_newsletter_questions_or_reranking_reports_nothing():
     assert report.source_coverage() is None and report.suggested_source_min_score() is None
     text = "\n".join(report.lines())
     assert "source coverage" not in text and "suggested" not in text
+
+
+# openspec improve-search-post-selection, lld §4
+def test_breadth_and_never_scored_share():
+    def outcome_with(n_posts, found, unscored, reranked=True):
+        o = outcome("q", "local", True, {"keyword": (1.0, 1.0)}, reranked=reranked)
+        o.returned_posts, o.found_by_combined, o.unscored = n_posts, tuple(found), tuple(unscored)
+        return o
+
+    report = Report(
+        [
+            outcome_with(4, ["a", "b"], ["b"]),
+            outcome_with(6, ["c"], []),
+            outcome_with(2, ["d"], ["d"], reranked=False),  # not re-ranked: not counted
+        ]
+    )
+    assert report.breadth() == 4 and report.unscored_share() == pytest.approx(1 / 3)
+    text = "\n".join(report.lines())
+    assert "breadth: median 4 distinct posts returned (limit 10)" in text
+    assert "not re-ranked: 33% of expected posts found by the combined stage were never scored" in text
+    data = report.to_dict()
+    assert data["breadth_median_posts"] == 4 and data["unscored_share"] == pytest.approx(1 / 3)
+    assert data["questions"][0]["returned_posts"] == 4 and data["questions"][0]["unscored"] == ["b"]
+    assert Report().breadth() is None and Report().unscored_share() is None
+
+
+def test_search_overrides_are_applied_and_checked(tmp_path):
+    from types import SimpleNamespace
+
+    from newsletter_archive.errors import ConfigError
+    from newsletter_archive.search.evaluate import with_search_overrides
+
+    from ..conftest import make_config
+
+    cfg = make_config(tmp_path)
+    none = SimpleNamespace(
+        rerank_top=None, selection=None, post_score=None, rerank_posts=None, rows_per_post=None
+    )
+    assert with_search_overrides(cfg, none) is cfg
+    args = SimpleNamespace(
+        rerank_top=None, selection="posts", post_score="sum_top3", rerank_posts=10, rows_per_post=3
+    )
+    s = with_search_overrides(cfg, args).search
+    assert (s.selection, s.post_score, s.rerank_posts, s.rerank_rows_per_post) == ("posts", "sum_top3", 10, 3)
+    with pytest.raises(ConfigError, match="rerank_posts must be between"):
+        with_search_overrides(cfg, SimpleNamespace(**{**vars(args), "rerank_posts": 99}))
+
+
+def test_variants_for():
+    from newsletter_archive.search.evaluate import EvalFileError, variants_for
+
+    assert variants_for(False, False) == (True, False)
+    assert variants_for(True, False) == (False,) and variants_for(False, True) == (True,)
+    with pytest.raises(EvalFileError, match="not both"):
+        variants_for(True, True)
