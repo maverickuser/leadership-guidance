@@ -35,6 +35,7 @@ Offline tests and local tools are always fine. Get a yes from the user before an
 ```bash
 python3 -m venv .venv && source .venv/bin/activate
 pip install -r requirements-dev.lock && pip install --no-deps -e .
+pre-commit install
 docker compose up -d --wait db           # optional locally: enables the `db` tests
 
 pytest -m "slow or not slow"
