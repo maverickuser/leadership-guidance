@@ -137,3 +137,43 @@ def test_gemini_answerer_sends_the_prompt_with_the_answer_instruction():
     cut = FakeSDK(answers=[generate_response("half", finish="MAX_TOKENS")] * 3)
     with pytest.raises(SummaryResponseError, match="stopped early"):
         GeminiAnswerer(make_client(cut)[0], "answer-model").answer("Question: why?")
+
+
+@pytest.mark.parametrize(
+    "answer, url",
+    [
+        ("[t](https://x.example/p/b_(c))", "https://x.example/p/b_(c)"),
+        ("[t](<https://x.example/p/a>)", "https://x.example/p/a"),
+        ('[t](https://x.example/p/a "a title")', "https://x.example/p/a"),
+        ("[t]( https://x.example/p/a )", "https://x.example/p/a"),
+        ("[[x] y](https://x.example/p/a)", "https://x.example/p/a"),
+        ("see [t][1].\n\n[1]: https://x.example/p/a", "https://x.example/p/a"),
+        ("[t](https://x.example:443/p/a)", "https://x.example/p/a"),
+    ],
+)
+def test_every_markdown_link_form_counts(answer, url):
+    from newsletter_archive.search.answers import link_urls
+
+    found = link_urls(answer)
+    assert len(found) == 1 and normalize_url(found[0]) == normalize_url(url)
+    assert citations(answer, {normalize_url(url): "main/a"}).posts == ("main/a",)
+
+
+def test_links_that_are_not_web_links_are_ignored():
+    from newsletter_archive.search.answers import link_urls
+
+    assert link_urls("[mail](mailto:a@b.c) [rel](/p/a) [unclosed](https://x.example/p/a") == [
+        "https://x.example/p/a"
+    ]
+    assert link_urls("text](https://x.example/p/x) no opening bracket but still a target") == [
+        "https://x.example/p/x"
+    ]
+
+
+def test_a_stray_or_broken_file_does_not_stop_reuse_from_other_runs(tmp_path):
+    save_run(tmp_path, AnswerRun("baseline", {"q1": record("q1")}))
+    (tmp_path / "eval-answers" / "My Notes.json").write_text("{}")
+    (tmp_path / "eval-answers" / "broken.json").write_text("[]")
+    assert set(saved_answers(tmp_path)) == {"k1"}
+    with pytest.raises(AnswerError, match="move it aside"):
+        load_run(tmp_path, "broken")  # a JSON list, not a run

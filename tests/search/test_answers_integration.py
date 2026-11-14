@@ -111,3 +111,33 @@ def test_a_failed_search_is_recorded_too(cfg):
     assert (
         run.records["bar-raiser"].error == "search: ArchiveError" and run.records["bar-raiser"].answer is None
     )
+
+
+def test_a_reused_answer_does_not_carry_the_other_runs_grade(cfg):
+    from newsletter_archive.search.answers import load_run, save_run
+
+    answer_questions(make_service(cfg), QUESTIONS, FakeAnswerer(), cfg.output_dir, "baseline", 5)
+    base = load_run(cfg.output_dir, "baseline")
+    for r in base.records.values():
+        r.grade = {"overall": 3, "grade_key": "old"}
+    save_run(cfg.output_dir, base)
+    again = answer_questions(make_service(cfg), QUESTIONS, FakeAnswerer(), cfg.output_dir, "posts-test", 5)
+    assert all(r.answer and r.grade is None for r in again.records.values())
+
+
+def test_an_unusable_question_or_unexpected_error_is_recorded_not_raised(cfg):
+    long = Question("too-long", "local", "x " * 2500, ())  # over the ask prompt's 4,000 characters
+    run = answer_questions(
+        make_service(cfg), [long, QUESTIONS[0]], FakeAnswerer(), cfg.output_dir, "baseline", 5
+    )
+    assert run.records["too-long"].answer is None and run.records["too-long"].error  # recorded, not raised
+    assert run.records["bar-raiser"].answer
+
+    svc = make_service(cfg)
+
+    def broken(*a, **k):
+        raise RuntimeError("unexpected")
+
+    svc.search = broken
+    run = answer_questions(svc, QUESTIONS[:1], FakeAnswerer(), cfg.output_dir, "other", 5)
+    assert run.records["bar-raiser"].error == "search: RuntimeError"
