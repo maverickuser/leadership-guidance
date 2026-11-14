@@ -86,3 +86,86 @@ def represent_sources(
             continue
         top[top.index(victim)] = best
     return sorted(top, key=lambda p: position[p])
+
+
+# -- post-level selection (openspec improve-search-post-selection, lld §2) ------------------------
+
+POST_SCORE_TOP = 3  # sum_top3: a post's score is the sum of its 3 best rows' fused scores
+
+
+@dataclass(frozen=True)
+class PostGroup:
+    """One post's fused rows: its score, its passages (best first) and its summary row."""
+
+    post_id: str
+    score: float
+    passages: tuple[str, ...]
+    summary: str | None
+    best_rank: int  # 1-based position of the post's best row in the fused list (tie-break)
+
+
+def group_by_post(
+    fused: Sequence[Fused],
+    post_of: Callable[[str], str],
+    is_summary: Callable[[str], bool],
+    mode: str = "max",
+) -> list[PostGroup]:
+    """The fused rows grouped by post, best post first. ``mode`` "max" scores a post by its best
+    row, "sum_top3" by the sum of its 3 best rows (rewarding posts with several matching parts).
+    Ties: the post whose best row comes first, then the post id."""
+    if mode not in ("max", "sum_top3"):
+        raise ValueError(f"unknown post score {mode!r}")
+    rows: dict[str, list[tuple[int, Fused]]] = {}
+    for i, f in enumerate(fused, start=1):
+        rows.setdefault(post_of(f.passage_id), []).append((i, f))
+    groups = []
+    for post, items in rows.items():
+        best = sorted((f.score for _, f in items), reverse=True)
+        score = best[0] if mode == "max" else sum(best[:POST_SCORE_TOP])
+        passages = tuple(f.passage_id for _, f in items if not is_summary(f.passage_id))
+        summary = next((f.passage_id for _, f in items if is_summary(f.passage_id)), None)
+        groups.append(PostGroup(post, score, passages, summary, items[0][0]))
+    return sorted(groups, key=lambda g: (-g.score, g.best_rank, g.post_id))
+
+
+def rerank_batch(groups: Sequence[PostGroup], rows_per_post: int, with_summaries: bool) -> list[str]:
+    """The rows to re-rank: each group's best ``rows_per_post`` passages, then its summary
+    (when ``with_summaries``), in group order."""
+    out: list[str] = []
+    for g in groups:
+        out += g.passages[:rows_per_post]
+        if with_summaries and g.summary is not None:
+            out.append(g.summary)
+    return list(dict.fromkeys(out))
+
+
+def select_across_posts(
+    ranked: Sequence[str],
+    post_of: Callable[[str], str],
+    is_summary: Callable[[str], bool],
+    max_passages: int = 3,
+    max_summaries: int = 1,
+) -> list[str]:
+    """Every allowed item in pick order: first each post's best item (in ``ranked`` order), then
+    each post's next-best item, and so on, with at most ``max_passages`` passages and
+    ``max_summaries`` summaries per post. Not cut to a limit, so callers can look below it."""
+    queues: dict[str, list[str]] = {}
+    for pid in ranked:
+        queues.setdefault(post_of(pid), []).append(pid)
+    position = {pid: i for i, pid in enumerate(ranked)}
+    taken: dict[str, list[int]] = {post: [0, 0] for post in queues}  # passages, summaries
+    out: list[str] = []
+    while True:
+        round_items: list[str] = []
+        for post, queue in queues.items():
+            while queue:
+                pid = queue.pop(0)
+                kind = 1 if is_summary(pid) else 0
+                cap = max_summaries if kind else max_passages
+                if taken[post][kind] < cap:
+                    taken[post][kind] += 1
+                    round_items.append(pid)
+                    break
+        if not round_items:
+            return out
+        out += sorted(round_items, key=lambda p: position[p])
