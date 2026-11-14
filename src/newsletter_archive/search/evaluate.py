@@ -132,6 +132,9 @@ class Outcome:
     rankings: dict[str, tuple[str, ...]] = field(default_factory=dict)  # stage -> posts, best first
     hits: tuple[str, ...] = ()  # passage and summary ids search found, best first
     expected_scores: tuple[float, ...] = ()  # re-ranker scores of returned results from expected posts
+    returned_posts: int = 0  # distinct posts in the returned results
+    found_by_combined: tuple[str, ...] = ()  # expected posts among the combined stage's top 10 posts
+    unscored: tuple[str, ...] = ()  # of those, the ones with no row in the re-rank batch
 
 
 def source_of(post_id: str) -> str:
@@ -178,6 +181,18 @@ class Report:
 
     def _cross_newsletter(self) -> list[Outcome]:
         return [o for o in self.outcomes_for(True) if len(_sources(o.question.expected)) > 1]
+
+    def breadth(self) -> float | None:
+        """The median number of distinct posts returned per question (with summaries)."""
+        counts = [o.returned_posts for o in self.outcomes_for(True)]
+        return statistics.median(counts) if counts else None
+
+    def unscored_share(self) -> float | None:
+        """Of the expected posts the combined stage put in its top 10, the share that had no row
+        in the re-rank batch (re-ranked searches with summaries only)."""
+        rows = [o for o in self.outcomes_for(True) if o.reranked]
+        found = sum(len(o.found_by_combined) for o in rows)
+        return sum(len(o.unscored) for o in rows) / found if found else None
 
     def suggested_source_min_score(self) -> float | None:
         """lld §9.3: the lowest re-ranker score among returned results from expected posts in
@@ -241,6 +256,15 @@ class Report:
                     else "not needed (local and intent ≥ 0.8)"
                 )
             )
+        breadth = self.breadth()
+        if breadth is not None:
+            out.append(f"breadth: median {breadth:g} distinct posts returned (limit {K})")
+        unscored = self.unscored_share()
+        if unscored is not None:
+            out.append(
+                f"not re-ranked: {unscored:.0%} of expected posts found by the combined stage "
+                "were never scored"
+            )
         coverage = self.source_coverage()
         if coverage is not None:
             out.append(
@@ -274,6 +298,8 @@ class Report:
             },
             "by_type": {t: {st: cell(self.score(st, True, t)) for st in ROWS} for t in TYPES},
             "contextual_retrieval_needed": self.needs_contextual_retrieval(),
+            "breadth_median_posts": self.breadth(),
+            "unscored_share": self.unscored_share(),
             "unknown_expected": self.unknown_expected,
             "questions": [
                 {
@@ -282,6 +308,8 @@ class Report:
                     "seconds": round(o.seconds, 2),
                     "scores": {st: {"recall_at_10": r, "rr": m} for st, (r, m) in o.scores.items()},
                     "missing": list(o.missing),
+                    "returned_posts": o.returned_posts,
+                    "unscored": list(o.unscored),
                 }
                 for o in self.outcomes
             ],
@@ -340,6 +368,10 @@ def evaluate(
             expected_scores = (
                 tuple(r.score for r in resp.results if r.post.id in q.expected) if resp.reranked else ()
             )
+            combined_top = post_ranking(trace["combined"], post_of)[:K]
+            found = tuple(e for e in q.expected if e in combined_top)
+            batch_posts = {post_of[p] for p in trace.get("batch", []) if p in post_of}
+            unscored = tuple(e for e in found if e not in batch_posts) if resp.reranked else ()
             outcome = Outcome(
                 q,
                 summaries,
@@ -351,6 +383,9 @@ def evaluate(
                 rankings,
                 hits,
                 expected_scores,
+                len({r.post.id for r in resp.results}),
+                found,
+                unscored,
             )
             report.outcomes.append(outcome)
             if on_question:
@@ -475,6 +510,31 @@ def gate_for(config: Config) -> Callable[[db.Generation, db.Generation], tuple[f
     return quality_gate(reader_service(config), load_questions(eval_path(config)))
 
 
+def variants_for(passages_only: bool, summaries_only: bool) -> tuple[bool, ...]:
+    """Which variants to run: with summaries (True), passages only (False), or both."""
+    if passages_only and summaries_only:
+        raise EvalFileError("use --passages-only or --summaries-only, not both")
+    return (False,) if passages_only else (True,) if summaries_only else (True, False)
+
+
+def with_search_overrides(config: Config, args: Any) -> Config:
+    """The config with the command line's search overrides applied and checked."""
+    from dataclasses import replace
+
+    changes = {
+        name: value
+        for name, value in (
+            ("rerank_top", getattr(args, "rerank_top", None)),
+            ("selection", getattr(args, "selection", None)),
+            ("post_score", getattr(args, "post_score", None)),
+            ("rerank_posts", getattr(args, "rerank_posts", None)),
+            ("rerank_rows_per_post", getattr(args, "rows_per_post", None)),
+        )
+        if value is not None
+    }
+    return config.with_overrides(search=replace(config.search, **changes)) if changes else config
+
+
 def _answers_main(args: Any) -> int:  # pragma: no cover - real Gemini, model and database
     """`--answers` and `--compare` (openspec improve-search-post-selection, lld §5.9)."""
     import sys
@@ -485,7 +545,7 @@ def _answers_main(args: Any) -> int:  # pragma: no cover - real Gemini, model an
     from .rerank import Reranking, qwen_loader
 
     try:
-        config = load_config(args.config, args.config.parent / ".env")
+        config = with_search_overrides(load_config(args.config, args.config.parent / ".env"), args)
         questions = load_questions(args.file or eval_path(config))
         if args.compare:
             if args.answers:
@@ -532,7 +592,6 @@ def main(argv: Sequence[str] | None = None) -> int:  # pragma: no cover - real G
     import argparse
     import json
     import sys
-    from dataclasses import replace
 
     from ..config import load_config
     from .rerank import Reranking, qwen_loader
@@ -542,8 +601,13 @@ def main(argv: Sequence[str] | None = None) -> int:  # pragma: no cover - real G
     parser.add_argument("--file", type=Path, help=f"questions file (default: <output_dir>/{EVAL_FILE})")
     parser.add_argument("--generation", type=int, help="score this index version instead of the live one")
     parser.add_argument("--rerank-top", type=int, help="override search.rerank_top")
+    parser.add_argument("--selection", choices=("rows", "posts"), help="override search.selection")
+    parser.add_argument("--post-score", choices=("max", "sum_top3"), help="override search.post_score")
+    parser.add_argument("--rerank-posts", type=int, help="override search.rerank_posts")
+    parser.add_argument("--rows-per-post", type=int, help="override search.rerank_rows_per_post")
     parser.add_argument("--no-rerank", action="store_true", help="skip the re-ranker")
     parser.add_argument("--passages-only", action="store_true", help="skip the with-summaries variant")
+    parser.add_argument("--summaries-only", action="store_true", help="skip the passages-only variant")
     parser.add_argument("--json", type=Path, help="also write the full report as JSON")
     parser.add_argument(
         "--judge",
@@ -569,8 +633,7 @@ def main(argv: Sequence[str] | None = None) -> int:  # pragma: no cover - real G
 
     try:
         config = load_config(args.config, args.config.parent / ".env")
-        if args.rerank_top:
-            config = replace(config, search=replace(config.search, rerank_top=args.rerank_top))
+        config = with_search_overrides(config, args)
         questions = load_questions(args.file or eval_path(config))
         reranker = None
         if not args.no_rerank:
@@ -594,7 +657,7 @@ def main(argv: Sequence[str] | None = None) -> int:  # pragma: no cover - real G
             print(f"  {o.question.id:<24} {'summaries' if o.summaries else 'passages':<9} "
                   f"recall@10 {r[0] if r else 0:.2f}  {o.seconds:.1f}s", file=sys.stderr)  # fmt: skip
 
-        variants = (False,) if args.passages_only else (True, False)
+        variants = variants_for(args.passages_only, args.summaries_only)
         report = evaluate(service, questions, generation=generation, variants=variants, on_question=progress)
         report.model = generation.embedding_model
     except ArchiveError as e:
