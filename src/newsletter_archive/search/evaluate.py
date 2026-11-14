@@ -153,6 +153,7 @@ class Report:
     generation: int | None = None
     model: str = ""
     rerank_top: int = 0
+    selection: str = ""  # e.g. "rows (rerank_top 20)" or "posts (max, 15 posts x 2 rows)"
     unknown_expected: dict[str, list[str]] = field(default_factory=dict)  # question id -> post ids
 
     def outcomes_for(self, summaries: bool, qtype: str | None = None) -> list[Outcome]:
@@ -217,7 +218,8 @@ class Report:
         n = len({o.question.id for o in self.outcomes})
         out = [
             f"Search evaluation: {n} questions, generation {self.generation} ({self.model}), "
-            f"rerank_top {self.rerank_top}, post-level recall@{K} and MRR",
+            f"selection {self.selection or f'rows (rerank_top {self.rerank_top})'}, "
+            f"post-level recall@{K} and MRR",
             "",
             f"{'stage':<10} {'with summaries':>22} {'passages only':>22}",
             f"{'':<10} {'recall@10':>11} {'MRR':>10} {'recall@10':>11} {'MRR':>10}",
@@ -292,6 +294,7 @@ class Report:
             "generation": self.generation,
             "model": self.model,
             "rerank_top": self.rerank_top,
+            "selection": self.selection,
             "overall": {
                 ("with_summaries" if s else "passages_only"): {st: cell(self.score(st, s)) for st in ROWS}
                 for s in (True, False)
@@ -326,7 +329,13 @@ def evaluate(
     clock: Callable[[], float] = time.monotonic,
 ) -> Report:
     """Run every question in each variant (summaries on / off) through the service."""
-    report = Report(rerank_top=service.s.rerank_top)
+    s = service.s
+    selection = (
+        f"posts ({s.post_score}, {s.rerank_posts} posts x {s.rerank_rows_per_post} rows)"
+        if s.selection == "posts"
+        else f"rows (rerank_top {s.rerank_top})"
+    )
+    report = Report(rerank_top=s.rerank_top, selection=selection)
     known: set[str] | None = None
     for q in questions:
         for summaries in variants:
@@ -371,7 +380,12 @@ def evaluate(
             combined_top = post_ranking(trace["combined"], post_of)[:K]
             found = tuple(e for e in q.expected if e in combined_top)
             batch_posts = {post_of[p] for p in trace.get("batch", []) if p in post_of}
-            unscored = tuple(e for e in found if e not in batch_posts) if resp.reranked else ()
+            # Only when both lists were fused: with keyword search alone, "combined" is just keyword.
+            unscored = (
+                tuple(e for e in found if e not in batch_posts) if resp.reranked and ran["combined"] else ()
+            )
+            if not ran["combined"]:
+                found = ()
             outcome = Outcome(
                 q,
                 summaries,

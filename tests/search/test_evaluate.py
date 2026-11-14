@@ -111,7 +111,7 @@ def test_report_tables_rules_and_json():
     )
     assert report.best_stage() == "reranked" and report.needs_contextual_retrieval() is True
     text = "\n".join(report.lines())
-    assert "generation 2 (m), rerank_top 20" in text and "reranked" in text and "n/a" in text
+    assert "generation 2 (m), selection rows (rerank_top 20)" in text and "reranked" in text and "n/a" in text
     assert "latency per search: median 1.0s, p90 3.0s" in text
     assert "warning: 1 searches ran without semantic search or re-ranking" in text
     assert "contextual retrieval: needed" in text and "q2 (intent): p" in text
@@ -259,3 +259,9 @@ def test_variants_for():
     assert variants_for(True, False) == (False,) and variants_for(False, True) == (True,)
     with pytest.raises(EvalFileError, match="not both"):
         variants_for(True, True)
+
+
+def test_a_run_without_semantic_search_is_not_counted_as_never_scored():
+    o = outcome("q", "local", True, {"keyword": (1.0, 1.0)}, semantic=False, reranked=True)
+    o.found_by_combined, o.unscored = (), ()
+    assert Report([o]).unscored_share() is None
