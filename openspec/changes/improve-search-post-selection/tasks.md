@@ -16,11 +16,11 @@
 
 ## 2. Answer generation and storage (PR 2)
 
-- [ ] 2.1 `search/answers.py`: the fixed plan (summaries + passages search), the prompt from `ask_message` plus rendered results, `AnswerRecord`, `answer_key` (lld §5.1, 5.2, 5.6)
-- [ ] 2.2 Citations from the answer's links, URL normalizing, cited-but-not-retrieved; citation precision and post coverage maths; relevant posts = expected ∪ judge grades 2–3 (lld §5.3, 5.5)
-- [ ] 2.3 `eval-answers/<label>.json` atomic save after each question, reuse across runs and labels
-- [ ] 2.4 `GeminiAnswerer` (thin adapter, `pragma: no cover` only on the SDK call) and a fake for tests
-- [ ] 2.5 Tests incl. `hypothesis` on URL normalizing; logs carry no question or answer text
+- [x] 2.1 `search/answers.py`: the fixed plan (summaries + passages search), the prompt from `ask_message` plus rendered results, `AnswerRecord`, `answer_key` (lld §5.1, 5.2, 5.6)
+- [x] 2.2 Citations from the answer's links, URL normalizing, cited-but-not-retrieved; citation precision and post coverage maths; relevant posts = expected ∪ judge grades 2–3 (lld §5.3, 5.5)
+- [x] 2.3 `eval-answers/<label>.json` atomic save after each question, reuse across runs and labels
+- [x] 2.4 `GeminiAnswerer` (thin adapter, `pragma: no cover` only on the SDK call) and a fake for tests
+- [x] 2.5 Tests incl. `hypothesis` on URL normalizing; logs carry no question or answer text
 
 ## 3. Answer judge, report and CLI (PR 3)
 
