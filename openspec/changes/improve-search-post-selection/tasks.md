@@ -9,10 +9,10 @@
 
 ## 1. Settings (PR 1)
 
-- [ ] 1.1 `SearchConfig`: `selection` (rows | posts, default rows), `post_score` (max | sum_top3), `rerank_posts` (15, 1–50), `rerank_rows_per_post` (2, 1–5), with validation and the batch-size check against `2 × candidates` (lld §1)
-- [ ] 1.2 `AnswersConfig` under `search.answers` (model, judge_model, thinking_level, results_per_search, max_tokens_per_run), parsed like `search.summaries`
-- [ ] 1.3 Tests: defaults, ranges, unknown values, the batch-size error, nested parsing
-- [ ] 1.4 README search-settings table rows (marked as not active until `selection: posts`)
+- [x] 1.1 `SearchConfig`: `selection` (rows | posts, default rows), `post_score` (max | sum_top3), `rerank_posts` (15, 1–50), `rerank_rows_per_post` (2, 1–5), with validation and the batch-size check against `2 × candidates` (lld §1)
+- [x] 1.2 `AnswersConfig` under `search.answers` (model, judge_model, thinking_level, results_per_search, max_tokens_per_run), parsed like `search.summaries`
+- [x] 1.3 Tests: defaults, ranges, unknown values, the batch-size error, nested parsing
+- [x] 1.4 README search-settings table rows (marked as not active until `selection: posts`)
 
 ## 2. Answer generation and storage (PR 2)
 

@@ -195,6 +195,26 @@ def test_search_overrides_and_nested_sections(tmp_path):
         ("search:\n  bm25_boosts: {body: 0}\n", "boosts values must be positive numbers"),
         ("search:\n  fusion_weights: {semantic: .nan}\n", "weights values must be positive numbers"),
         ("search:\n  rerank_top: 101\n", "rerank_top can't exceed"),
+        ("search:\n  selection: chunks\n", "selection must be one of: rows, posts"),
+        ("search:\n  post_score: mean\n", "post_score must be one of: max, sum_top3"),
+        ("search:\n  rerank_posts: 0\n", "rerank_posts must be between 1 and 50"),
+        ("search:\n  rerank_posts: 51\n", "rerank_posts must be between 1 and 50"),
+        ("search:\n  rerank_rows_per_post: 6\n", "rerank_rows_per_post must be between 1 and 5"),
+        (
+            "search:\n  selection: posts\n  candidates: 20\n  rerank_top: 20\n",
+            "rerank_posts × \\(rerank_rows_per_post \\+ 1\\) can't exceed",
+        ),
+        ("search:\n  answers: {judge_model: '   '}\n", "judge_model must not be empty"),
+        ("search:\n  answers: yes\n", "answers must be a mapping"),
+        ("search:\n  answers: {mode: x}\n", "unknown search.answers"),
+        (
+            "search:\n  answers: {model: ''}\n",
+            "answers.model and search.answers.judge_model must not be empty",
+        ),
+        ("search:\n  answers: {thinking_level: extreme}\n", "answers.thinking_level must be one of"),
+        ("search:\n  answers: {results_per_search: 31}\n", "results_per_search must be between 1 and 30"),
+        ("search:\n  answers: {max_tokens_per_run: 0}\n", "answers.max_tokens_per_run must be > 0"),
+        ("search:\n  answers: {results_per_search: 2.5}\n", "whole number"),
         ("search:\n  source_min_score: 1.5\n", "source_min_score must be between 0 and 1"),
         ("search:\n  source_min_score: -0.1\n", "source_min_score must be between 0 and 1"),
         ("search:\n  default_limit: 40\n", "default_limit must be <="),
@@ -279,3 +299,43 @@ def test_fusion_weights(tmp_path):
         path.write_text(SOURCES_YAML + f"search:\n  fusion_weights: {bad}\n")
         with pytest.raises(ConfigError, match=message):
             load_config(path)
+
+
+# openspec improve-search-post-selection, lld §1
+def test_post_selection_and_answer_settings(tmp_path):
+    d = load_config(tmp_path / "missing.yaml", tmp_path / ".env", overrides=SITE).search
+    assert (d.selection, d.post_score, d.rerank_posts, d.rerank_rows_per_post) == ("rows", "max", 15, 2)
+    a = d.answers
+    assert (a.model, a.judge_model, a.thinking_level, a.results_per_search, a.max_tokens_per_run) == (
+        "gemini-3.8-flash",
+        "gemini-3.8-flash",
+        "low",
+        10,
+        1_500_000,
+    )
+    p = write(
+        tmp_path / "config.yaml",
+        "search:\n  selection: ' POSTS '\n  post_score: SUM_TOP3\n  rerank_posts: 20\n"
+        "  rerank_rows_per_post: 3\n  answers: {judge_model: gemini-x-pro, thinking_level: ' High ',"
+        " results_per_search: 5}\n",
+    )
+    s = load_config(p, tmp_path / ".env", overrides=SITE).search
+    assert (s.selection, s.post_score, s.rerank_posts, s.rerank_rows_per_post) == ("posts", "sum_top3", 20, 3)
+    assert (
+        s.answers.model,
+        s.answers.judge_model,
+        s.answers.thinking_level,
+        s.answers.results_per_search,
+    ) == (
+        "gemini-3.8-flash",
+        "gemini-x-pro",
+        "high",
+        5,
+    )
+
+
+def test_small_candidates_stay_valid_in_rows_mode(tmp_path):
+    # The post batch check applies only to selection: posts, so configs valid before still load.
+    for text in ("search:\n  candidates: 10\n", "search:\n  candidates: 5\n  rerank_top: 5\n"):
+        p = write(tmp_path / "config.yaml", text)
+        assert load_config(p, tmp_path / ".env", overrides=SITE).search.selection == "rows"
