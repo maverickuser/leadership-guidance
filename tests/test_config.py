@@ -201,9 +201,10 @@ def test_search_overrides_and_nested_sections(tmp_path):
         ("search:\n  rerank_posts: 51\n", "rerank_posts must be between 1 and 50"),
         ("search:\n  rerank_rows_per_post: 6\n", "rerank_rows_per_post must be between 1 and 5"),
         (
-            "search:\n  candidates: 20\n  rerank_top: 20\n",
+            "search:\n  selection: posts\n  candidates: 20\n  rerank_top: 20\n",
             "rerank_posts × \\(rerank_rows_per_post \\+ 1\\) can't exceed",
         ),
+        ("search:\n  answers: {judge_model: '   '}\n", "judge_model must not be empty"),
         ("search:\n  answers: yes\n", "answers must be a mapping"),
         ("search:\n  answers: {mode: x}\n", "unknown search.answers"),
         (
@@ -331,3 +332,10 @@ def test_post_selection_and_answer_settings(tmp_path):
         "high",
         5,
     )
+
+
+def test_small_candidates_stay_valid_in_rows_mode(tmp_path):
+    # The post batch check applies only to selection: posts, so configs valid before still load.
+    for text in ("search:\n  candidates: 10\n", "search:\n  candidates: 5\n  rerank_top: 5\n"):
+        p = write(tmp_path / "config.yaml", text)
+        assert load_config(p, tmp_path / ".env", overrides=SITE).search.selection == "rows"

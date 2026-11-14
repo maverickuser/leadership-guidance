@@ -361,8 +361,11 @@ def _parse_search(raw: Any, env_port: str | None = None) -> SearchConfig:
     if answers is not None:
         av = _section("search.answers", answers, defaults.answers, ANSWERS_FIELDS)
         parsed = {k: _coerce(f"search.answers.{k}", v, getattr(defaults.answers, k)) for k, v in av.items()}
+        for name in ("thinking_level", "model", "judge_model"):
+            if name in parsed:
+                parsed[name] = parsed[name].strip()
         if "thinking_level" in parsed:
-            parsed["thinking_level"] = parsed["thinking_level"].strip().lower()
+            parsed["thinking_level"] = parsed["thinking_level"].lower()
         values["answers"] = AnswersConfig(**parsed)
     for name in ("selection", "post_score"):
         if name in values:
@@ -441,7 +444,8 @@ def _validate_search(s: SearchConfig) -> None:
         raise ConfigError("search.rerank_posts must be between 1 and 50")
     if not 1 <= s.rerank_rows_per_post <= 5:
         raise ConfigError("search.rerank_rows_per_post must be between 1 and 5")
-    if s.rerank_posts * (s.rerank_rows_per_post + 1) > 2 * s.candidates:
+    # Only when the posts mode is on: an existing rows-mode config with few candidates stays valid.
+    if s.selection == "posts" and s.rerank_posts * (s.rerank_rows_per_post + 1) > 2 * s.candidates:
         raise ConfigError(
             "search.rerank_posts × (rerank_rows_per_post + 1) can't exceed the combined candidates "
             "(2 × search.candidates)"
