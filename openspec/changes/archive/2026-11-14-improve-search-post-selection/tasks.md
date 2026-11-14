@@ -49,7 +49,7 @@
 - [x] 6.1 Set `post_score`, `rerank_posts`, `rerank_rows_per_post` to the measured choice, with the measurement in `config.py` comments; default `selection: posts`
 - [x] 6.2 Live, with the user's go-ahead: `--answers --label posts-<choice>` and `--compare baseline posts-<choice>`; record both in the PR
 - [x] 6.3 README: how results are chosen now, the new defaults, how to switch back (`selection: rows`)
-- [ ] 6.4 After merge: sync the delta specs into `openspec/specs/` and archive this change
+- [x] 6.4 After merge: sync the delta specs into `openspec/specs/` and archive this change
 
 ## Every PR (definition of done)
 
