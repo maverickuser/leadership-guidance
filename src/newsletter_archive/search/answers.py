@@ -105,11 +105,12 @@ def answer_prompt(question: str, retrieved: Retrieved) -> str:
 
 
 def normalize_url(url: str) -> str:
-    """Scheme and host lowercased, default port dropped; query, fragment and trailing slash
-    dropped (post URLs in the index never carry a query: discovery normalizes them)."""
+    """Scheme and host lowercased, a leading ``www.`` and the default port dropped; query, fragment
+    and trailing slash dropped (post URLs in the index never carry a query: discovery normalizes
+    them). Only for matching an answer's links to posts; crawling keeps the exact host."""
     parts = urlsplit(url.strip())
     scheme = parts.scheme.lower()
-    host = (parts.hostname or "").lower()
+    host = (parts.hostname or "").lower().removeprefix("www.")
     if parts.port and (scheme, parts.port) not in (("http", 80), ("https", 443)):
         host += f":{parts.port}"
     return f"{scheme}://{host}{parts.path.rstrip('/')}"
@@ -157,13 +158,15 @@ class Citations:
 
 
 def citations(answer: str, url_to_post: Mapping[str, str]) -> Citations:
-    """The posts an answer links to. Each distinct post or unknown URL counts once."""
+    """The posts an answer links to. Each distinct post or unknown URL counts once. The keys of
+    ``url_to_post`` are matched with the current rules, so runs saved earlier recount correctly."""
+    lookup = {normalize_url(url): post for url, post in url_to_post.items()}
     posts: dict[str, None] = {}
     unknown: dict[str, None] = {}
     for url in link_urls(answer):
         key = normalize_url(url)
-        if key in url_to_post:
-            posts.setdefault(url_to_post[key], None)
+        if key in lookup:
+            posts.setdefault(lookup[key], None)
         else:
             unknown.setdefault(key, None)
     return Citations(tuple(posts), tuple(unknown))
@@ -478,6 +481,17 @@ def grade_key(answer: str, judge_model: str) -> str:
     return _sha(answer, ANSWER_JUDGE_VERSION, judge_model)
 
 
+def recount(grade: Mapping[str, Any], record: AnswerRecord, relevant: Iterable[str]) -> dict[str, Any]:
+    """A reused grade with the scores computed from the answer's links made again with the current
+    rules; the judge's claims and overall grade are kept."""
+    cited = record.cited
+    return {
+        **grade,
+        "citation_precision": citation_precision(cited),
+        "post_coverage": post_coverage(cited, relevant),
+    }
+
+
 def grade_record(
     record: AnswerRecord, judgment: dict[str, Any], relevant: Iterable[str], judge_model: str
 ) -> dict[str, Any]:
@@ -514,9 +528,10 @@ def grade_answers(
         key = grade_key(record.answer, judge.model)
         relevant = relevant_of(record.question_id)
         if record.grade and record.grade.get("grade_key") == key:
+            record.grade = recount(record.grade, record, relevant)
             reused = True
         elif key in reusable:
-            record.grade = {**reusable[key], "post_coverage": post_coverage(record.cited, relevant)}
+            record.grade = recount(reusable[key], record, relevant)
             record.error = None
             reused = True
         else:
@@ -822,6 +837,7 @@ __all__ = [
     "normalize_url",
     "parse_judgment",
     "post_coverage",
+    "recount",
     "relevant_posts",
     "report_lines",
     "retrieve",
