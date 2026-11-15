@@ -341,3 +341,12 @@ def test_grades_are_found_in_any_run_and_a_good_grade_clears_the_error(tmp_path)
     judge = FakeJudge()
     grade_answers(run, judge, lambda qid: set(), tmp_path)
     assert judge.calls == [] and run.records["q1"].grade["overall"] == 2 and run.records["q1"].error is None
+
+
+def test_the_answer_eval_uses_the_coach_voice_and_a_new_prompt_version():
+    from newsletter_archive.search.answers import Retrieved, answer_prompt
+
+    text = answer_prompt("how do I delegate?", Retrieved(()))
+    assert 'in the first person ("I")' in text and '"### Try this week"' in text
+    assert "Never claim experiences" in text
+    assert ANSWER_PROMPT_VERSION == 2  # the coach voice: answers saved under version 1 are made again
