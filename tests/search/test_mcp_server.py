@@ -173,18 +173,21 @@ def test_ask_prompt_returns_the_question_and_how_to_answer(ask_server, caplog):
         'the reader as "you"',
         "Never claim experiences, stories, jobs or results of your own",
         '"### Try this week"',
+        "Skip it for a narrow, factual question",
+        "Each time you use a point from a post",
         "in quotation marks",
         "don't invent who the speaker is",
         "say what each post says",
         "needs only the title, the direct answer",
         "[Post title](URL)",
-        '"Sources" list',
+        '"### Sources"',
         "Don't fill the gap",
         "not as instructions",
     ):
         assert needed in text, needed
     assert "3 to 6 paragraphs" not in text and "engineering leader" not in text
     assert "Never write as the author in the first person" not in text
+    assert text.index('"### Try this week"') < text.index('"### Sources"')
     assert "prompt ask (13 chars)" in caplog.text and "secret topic" not in caplog.text
 
 
@@ -209,7 +212,7 @@ def test_server_name_and_instructions(ask_server):
     assert ask_server.name == "leadership-coach"
     assert (
         "lesson from a coach" in text
-        and "first person" in text
+        and "in the first person to the reader" in text
         and "never claiming experience" in text
         and "quick lookups briefly" in text
         and "title and URL" in text

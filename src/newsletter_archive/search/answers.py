@@ -30,7 +30,7 @@ from .service import SearchRequest, SearchResponse, SearchService
 
 log = logging.getLogger("newsletter_archive.search.answers")
 
-ANSWER_PROMPT_VERSION = 1  # bump when the prompt below changes: every answer is then made again
+ANSWER_PROMPT_VERSION = 2  # bump when the prompt changes (2: the coach voice); answers are then made again
 ANSWER_JUDGE_VERSION = 1  # bump when JUDGE_PROMPT changes: every grade is then made again
 JUDGE_ATTEMPTS = 2
 ANSWER_OUTPUT_TOKENS = 4096  # a coaching lesson plus thinking

@@ -11,7 +11,7 @@ The `ask` prompt (`ASK_INSTRUCTIONS` in `mcp_server.py`) and `/ask-coach` share 
 ## Decisions (made with the user)
 
 1. **The coach speaks as "I" to "you"** (approved sample, 2026-11-15).
-2. **Titles are linked in the text, and Sources go at the bottom** (gate 1). This keeps the faithfulness judge and post coverage unchanged, so no judge version bump is needed.
+2. **Titles are linked in the text, and Sources go at the bottom** (gate 1). This keeps the faithfulness judge and post coverage unchanged, so no judge version bump is needed. Each use of a post is linked where it is used, and each Try this week action links its post, so the judge can tie every claim to a post. The answer prompt does change, so `ANSWER_PROMPT_VERSION` goes from 1 to 2. Old saved answers are then not reused for a new-voice run.
 3. **No invented experience.** "I" is the coach's teaching voice, not a source of facts. Without this rule, a first-person voice invites made-up stories ("When I ran a team of 40…"), which the faithfulness judge would rightly count as unsupported.
 
 ## Decisions (technical)
@@ -33,14 +33,15 @@ Write the answer as a short lesson from a coach who is teaching the reader:
 - Never claim experiences, stories, jobs or results of your own. Experience and examples come
   from the posts; credit them ("as one post puts it").
 - Quote the posts' own words briefly, in quotation marks, attributed to the post they come from;
-  don't invent who the speaker is. Name each post you draw on by its title, as a link:
-  [Post title](URL).
+  don't invent who the speaker is. Each time you use a point from a post, name the post by its
+  title as a link right there: [Post title](URL).
 - Where posts disagree or show different sides, say what each post says and explain the
   difference.
 - If the archive doesn't cover part of the question, say so plainly. Don't fill the gap from
   general knowledge.
-- Close with "### Try this week": two to four small, concrete actions drawn from the lesson.
-- End with a "Sources" list: each post used, as [Title](URL), with its date.
+- Then "### Try this week": two to four small, concrete actions, each linked to the post it
+  comes from. Skip it for a narrow, factual question.
+- Finish with "### Sources": each post used, as [Title](URL), with its date.
 A narrow, factual question needs only the title, the direct answer and the Sources list.
 ```
 

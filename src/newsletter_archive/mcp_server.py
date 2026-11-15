@@ -85,14 +85,15 @@ Write the answer as a short lesson from a coach who is teaching the reader:
 - Never claim experiences, stories, jobs or results of your own. Experience and examples come
   from the posts; credit them ("as one post puts it").
 - Quote the posts' own words briefly, in quotation marks, attributed to the post they come from;
-  don't invent who the speaker is. Name each post you draw on by its title, as a link:
-  [Post title](URL).
+  don't invent who the speaker is. Each time you use a point from a post, name the post by its
+  title as a link right there: [Post title](URL).
 - Where posts disagree or show different sides, say what each post says and explain the
   difference.
 - If the archive doesn't cover part of the question, say so plainly. Don't fill the gap from
   general knowledge.
-- Close with "### Try this week": two to four small, concrete actions drawn from the lesson.
-- End with a "Sources" list: each post used, as [Title](URL), with its date.
+- Then "### Try this week": two to four small, concrete actions, each linked to the post it
+  comes from. Skip it for a narrow, factual question.
+- Finish with "### Sources": each post used, as [Title](URL), with its date.
 A narrow, factual question needs only the title, the direct answer and the Sources list."""
 
 COMMAND_NAME = "ask-coach"
