@@ -1,0 +1,40 @@
+## MODIFIED Requirements
+
+### Requirement: Grade each answer
+An LLM judge SHALL grade each answer against the passages it was given and the question's relevant posts (its expected posts plus posts the retrieval judge graded 2 or 3). For each answer it SHALL report:
+- **faithfulness:** the share of the answer's claims that the passage cited for them supports;
+- **citation precision:** the share of citations that point at a post the answer's searches returned; a link matches a post's URL regardless of case, a trailing slash, the query, the fragment and a leading `www.` in the host;
+- **post coverage:** the share of the question's relevant posts that the answer draws on;
+- **overall grade:** 0 to 3 for how well the answer serves the question.
+The report SHALL give the mean of each, overall and per question type.
+
+#### Scenario: Unsupported claim
+- **WHEN** an answer states a claim and cites a post whose passages do not say it
+- **THEN** that claim counts as unsupported in the answer's faithfulness
+
+#### Scenario: Citation to a post never retrieved
+- **WHEN** an answer cites a post that none of its searches returned
+- **THEN** that citation counts against citation precision
+
+#### Scenario: Narrow answer
+- **WHEN** a question has 8 relevant posts and the answer draws on 3 of them
+- **THEN** its post coverage is 3/8
+
+#### Scenario: Link with or without www
+- **WHEN** a returned post's URL is `https://www.scarletink.com/a` and the answer links `https://scarletink.com/a`
+- **THEN** the link counts as a citation of that post, for citation precision and post coverage
+
+### Requirement: Saved answers and grades
+Answers and grades SHALL be saved in the user's data folder, never in the repository, and reused: an answer SHALL be generated again only when its question, the answering instructions' version, the model, or the search results it would receive have changed, and a grade SHALL be computed again only when its answer or the judge's version or model has changed. When a saved grade is reused, the scores computed from the answer's links (citation precision and post coverage) SHALL be recomputed with the current rules, keeping the judge's claims and overall grade. Each saved run SHALL be labelled, so two runs (for example before and after a search change) can be compared side by side.
+
+#### Scenario: Re-run without changes
+- **WHEN** the user runs the answer evaluation twice with nothing changed
+- **THEN** the second run makes no Gemini calls and prints the same scores
+
+#### Scenario: Compare two runs
+- **WHEN** the user has a run labelled `baseline` and a run labelled `post-selection`
+- **THEN** the report shows each score for both runs and the difference
+
+#### Scenario: A fix to link matching
+- **WHEN** link matching changes and the user re-runs a saved label with nothing else changed
+- **THEN** no Gemini calls are made, and citation precision and post coverage reflect the new matching

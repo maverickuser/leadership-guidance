@@ -350,3 +350,54 @@ def test_the_answer_eval_uses_the_coach_voice_and_a_new_prompt_version():
     assert 'in the first person ("I")' in text and '"### Try this week"' in text
     assert "Never claim experiences" in text
     assert ANSWER_PROMPT_VERSION == 2  # the coach voice: answers saved under version 1 are made again
+
+
+# spec: answer-evaluation / Grade each answer (Link with or without www)
+def test_a_link_with_or_without_www_cites_the_same_post():
+    stored = {"https://www.scarletink.com/a": "main/a", "https://pe.example.org/p/b": "pe/b"}
+    answer = "See [A](https://scarletink.com/a/) and [B](https://www.pe.example.org/p/b)."
+    c = citations(answer, stored)  # keys saved before the fix still match
+    assert c.posts == ("main/a", "pe/b") and c.total == 2
+    assert normalize_url("https://WWW.Example.com/x") == normalize_url("https://example.com/x")
+    assert normalize_url("https://wwwx.example.com/x") == "https://wwwx.example.com/x"  # only a "www." label
+
+
+# spec: answer-evaluation / Saved answers and grades (A fix to link matching)
+def test_a_reused_grade_recounts_links_but_keeps_the_judgment(tmp_path):
+    from newsletter_archive.search.answers import grade_answers
+
+    r = AnswerRecord(
+        "q1", "question?", "k1", "m", ANSWER_PROMPT_VERSION, ["r1"],
+        {"r1": "main/a"}, {"https://www.scarletink.com/a": "main/a"}, "Read [A](https://scarletink.com/a).",
+    )  # fmt: skip
+    run = AnswerRun("coach", {"q1": r})
+    grade_answers(run, FakeJudge(), lambda qid: {"main/a"}, tmp_path)
+    claims = run.records["q1"].grade["claims"]
+    run.records["q1"].grade.update(
+        citation_precision=0.0, post_coverage=0.0, overall=2
+    )  # as an older run saved it
+    again = FakeJudge()
+    grade_answers(run, again, lambda qid: {"main/a"}, tmp_path)
+    g = run.records["q1"].grade
+    assert again.calls == [] and g["citation_precision"] == 1.0 and g["post_coverage"] == 1.0
+    assert g["overall"] == 2 and g["claims"] == claims  # the judge's part is kept
+
+
+def test_a_grade_borrowed_from_another_run_is_recounted(tmp_path):
+    from newsletter_archive.search.answers import grade_answers
+
+    def coach_record():
+        return AnswerRecord(
+            "q1", "question?", "k1", "m", ANSWER_PROMPT_VERSION, ["r1"],
+            {"r1": "main/a"}, {"https://www.scarletink.com/a": "main/a"}, "Read [A](https://scarletink.com/a).",
+        )  # fmt: skip
+
+    old = AnswerRun("old", {"q1": coach_record()})
+    grade_answers(old, FakeJudge(), lambda qid: {"main/a"}, tmp_path)
+    old.records["q1"].grade.update(citation_precision=0.0, post_coverage=0.0)
+    save_run(tmp_path, old)  # a stale grade, saved under another label
+    new = AnswerRun("new", {"q1": coach_record()})
+    judge = FakeJudge()
+    grade_answers(new, judge, lambda qid: {"main/a"}, tmp_path)
+    g = new.records["q1"].grade
+    assert judge.calls == [] and g["citation_precision"] == 1.0 and g["post_coverage"] == 1.0
