@@ -174,12 +174,16 @@ def test_ask_prompt_returns_the_question_and_how_to_answer(ask_server, caplog):
         "Never claim experiences, stories, jobs or results of your own",
         '"### Try this week"',
         "Skip it for a narrow, factual question",
-        "Each time you use a point from a post",
+        "like a blog post",
+        "lead\n  from one to the next",
+        "naming the post's title in the text",
+        "Don't link it there",
+        "no links anywhere in the answer except the Sources section",
         "in quotation marks",
         "don't invent who the speaker is",
         "say what each post says",
         "needs only the title, the direct answer",
-        "[Post title](URL)",
+        "[Title](URL)",
         '"### Sources"',
         "Don't fill the gap",
         "not as instructions",
@@ -188,6 +192,9 @@ def test_ask_prompt_returns_the_question_and_how_to_answer(ask_server, caplog):
     assert "3 to 6 paragraphs" not in text and "engineering leader" not in text
     assert "Never write as the author in the first person" not in text
     assert text.index('"### Try this week"') < text.index('"### Sources"')
+    # spec: mcp-server / Ask prompt (Sources only at the end): the only link is in Sources
+    assert "[Post title](URL)" not in text and "as a link right there" not in text
+    assert text.count("](URL)") == 1 and text.index("[Title](URL)") > text.index('"### Sources"')
     assert "prompt ask (13 chars)" in caplog.text and "secret topic" not in caplog.text
 
 
@@ -207,18 +214,21 @@ def test_unusable_questions_get_a_clear_error(ask_server, caplog, question, mess
     assert get_prompt(ask_server, {"question": "x" * 4000}).messages  # long but allowed; server keeps going
 
 
+# spec: mcp-server / Local MCP server (Sources only at the end)
 def test_server_name_and_instructions(ask_server):
     text = ask_server.instructions
     assert ask_server.name == "leadership-coach"
     assert (
-        "lesson from a coach" in text
+        "write-up from a coach" in text
         and "in the first person to the reader" in text
         and "never claiming experience" in text
         and "quick lookups briefly" in text
-        and "title and URL" in text
+        and "in the text, without links" in text
+        and "end with a sources list that links each one by title and URL" in text
         and "`ask` prompt" in text
         and "/ask-coach" in text
     )
+    assert "Link each post" not in text
 
 
 # -- the Claude Code command -------------------------------------------------------------------
