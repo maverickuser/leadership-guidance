@@ -39,7 +39,7 @@ from mcp_types import INVALID_PARAMS, CallToolResult, TextContent, ToolAnnotatio
 from pydantic import Field
 
 from . import __version__
-from .config import Config
+from .config import Config, is_local_model
 from .errors import ArchiveError
 from .search.service import (
     ArchiveOverview,
@@ -452,8 +452,8 @@ def serve(config: Config, verbose: bool = False) -> None:  # pragma: no cover - 
     path = setup_logging(config, verbose, stream=sys.stderr, prefix="mcp")
     try:
         log.info("MCP server %s starting (log: %s)", __version__, path)
-        if not config.gemini_api_key:
-            log.warning("GEMINI_API_KEY is not set: searches will use keywords only")
+        if not config.gemini_api_key and not is_local_model(config.search.embedding_model):
+            log.warning("GEMINI_API_KEY is not set: searches of a Gemini index will use keywords only")
         service, close = make_service(config)
         try:
             server, live = build_server(service)

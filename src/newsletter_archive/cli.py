@@ -337,7 +337,7 @@ def index(
     verbose: Verbose = False,
     config: ConfigPath = Path("config.yaml"),
 ) -> None:
-    """Build or update the search store from data/posts/ (needs the database and GEMINI_API_KEY)."""
+    """Build or update the search store (needs the database; GEMINI_API_KEY for summaries)."""
     problem = _index_flag_problem(limit, retry_failed, refresh, no_swap, swap, rollback, force)
     if problem:
         typer.echo(f"Error: {problem}", err=True)

@@ -84,7 +84,7 @@ If a run says *"your cookie looks expired"*, it names the newsletter and the `.e
 archive discover            # stage 1: sitemap + categories -> manifest.json
 archive fetch               # stage 2: download post pages -> raw/
 archive extract             # stages 3-4: raw/ -> posts/{slug}.json (no network)
-archive index               # build or update the search store (needs the database and GEMINI_API_KEY)
+archive index               # build or update the search store (needs the database; GEMINI_API_KEY for summaries)
 archive run                 # all of the above, in order
 archive mcp                 # the search server for Claude Code / Claude Desktop (see Search)
 archive migrate --source ID # one-time: move an old single-newsletter archive (see below)
@@ -290,6 +290,8 @@ The `search` tool takes:
 A search takes about 5–8 seconds. If the embedding model is still loading or missing (or Gemini is unreachable, for a Gemini index), results come from keywords only. If the re-ranker isn't installed or is busy, results keep their combined order. Either way, the response says so. The server listens on no network port. It logs to `../leadership-coach-datasets/logs/mcp-*.log` and to stderr, never the query text, passage text or any key. It picks up index updates without a restart.
 
 ### The embedding model (local)
+
+**Upgrading an install that already has a Gemini index:** the default is now the local model, so `archive index` (and the weekly `archive run`) stops with "a new index version is needed" until you either set `search.embedding_model: gemini-embedding-2` in `config.yaml` to stay on Gemini, or put the model folder in place and build the local version (see [Index versions](#index-versions)).
 
 Passages and queries are embedded on your Mac by a local model, so searching sends nothing anywhere and needs no API key. The default is a Qwen3-Embedding-0.6B fine-tuned on this archive (`local:qwen3-embedding-0.6b-archive-v5`). Its weights are private: they live outside the repo and are never uploaded.
 
