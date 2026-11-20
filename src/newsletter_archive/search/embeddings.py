@@ -190,11 +190,18 @@ class GeminiEmbedder:
 
 LOCAL_MAX_TOKENS = 2048  # passages are capped well below this; over it is an error, never cut
 WEIGHTS_FILE = "model.safetensors"
+# Everything that changes the vectors: the weights, the model config and the tokenizer (it adds
+# the end-of-text token that last-token pooling reads).
+HASHED_FILES = (WEIGHTS_FILE, "config.json", "tokenizer.json", "tokenizer_config.json")
 LOCAL_MODULES = ("torch", "transformers")
 
 
 class LocalModelError(ArchiveError):
     """The local embedding model can't be used (missing folder, missing packages, other weights)."""
+
+
+class LocalEmbeddingError(EmbeddingError):
+    """The local model failed on one batch (out of memory, busy GPU): that post fails, the run goes on."""
 
 
 def check_model_folder(folder: Path, name: str) -> None:
@@ -213,11 +220,17 @@ def check_model_folder(folder: Path, name: str) -> None:
 
 
 def weights_sha256(folder: Path) -> str:
-    """sha256 of the model's weights file, read in 1 MB blocks (~3 s for 1.2 GB)."""
+    """sha256 over the files that shape the vectors (HASHED_FILES that exist), each with its name,
+    read in 1 MB blocks (~3 s for 1.2 GB of weights)."""
     digest = hashlib.sha256()
-    with (folder / WEIGHTS_FILE).open("rb") as f:
-        for block in iter(partial(f.read, 1 << 20), b""):
-            digest.update(block)
+    for name in HASHED_FILES:
+        path = folder / name
+        if not path.is_file():
+            continue
+        digest.update(name.encode() + b"\0")
+        with path.open("rb") as f:
+            for block in iter(partial(f.read, 1 << 20), b""):
+                digest.update(block)
     return digest.hexdigest()
 
 
@@ -320,7 +333,10 @@ class LocalEmbedder:
 
     def embed(self, texts: Sequence[str]) -> list[np.ndarray]:
         def encode(batch: list[str]) -> Any:
-            return on_gpu(self._encode, batch)  # never at the same time as the re-ranker
+            try:
+                return on_gpu(self._encode, batch)  # never at the same time as the re-ranker
+            except RuntimeError as e:  # torch errors (e.g. MPS out of memory) and GpuBusyError
+                raise LocalEmbeddingError(f"the local embedding model failed: {e}") from None
 
         return embed_in_batches(texts, encode, self._count_tokens, self.dim, self.batch_size)
 

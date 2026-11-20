@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import hashlib
 import threading
 
 import numpy as np
@@ -52,9 +51,16 @@ def test_folder_without_weights_is_not_a_model(tmp_path):
         check_model_folder(tmp_path, NAME)
 
 
-def test_weights_hash_reads_the_whole_file(tmp_path):
-    data = b"x" * (3 << 20) + b"tail"
-    assert weights_sha256(model_folder(tmp_path, data)) == hashlib.sha256(data).hexdigest()
+def test_weights_hash_covers_weights_config_and_tokenizer(tmp_path):
+    folder = model_folder(tmp_path, b"x" * (3 << 20) + b"tail")
+    before = weights_sha256(folder)
+    assert len(before) == 64 and weights_sha256(folder) == before
+    (folder / "model.safetensors").write_bytes(b"x" * (3 << 20) + b"TAIL")
+    after_weights = weights_sha256(folder)
+    (folder / "tokenizer.json").write_text("{}")
+    after_tokenizer = weights_sha256(folder)
+    (folder / "config.json").write_text('{"a": 1}')
+    assert len({before, after_weights, after_tokenizer, weights_sha256(folder)}) == 4
 
 
 def test_vectors_come_back_in_input_order_and_normalised():
@@ -121,7 +127,35 @@ def test_local_embedder_checks_the_folder_and_runs_under_the_gpu_lock(tmp_path):
     emb = FakeLocal(NAME, model_folder(tmp_path), 4, batch_size=1)
     out = emb.embed(["one", "two words"])
     assert len(out) == 2 and emb.lock_held == [True, True]
-    assert emb.weights_sha256() == hashlib.sha256(b"weights").hexdigest()
+    assert emb.weights_sha256() == weights_sha256(emb.folder)
+
+
+class FailingLocal(FakeLocal):
+    def _encode(self, batch):
+        raise RuntimeError("MPS backend out of memory")
+
+
+def test_a_model_failure_fails_the_batch_not_the_run(tmp_path):
+    """A torch error becomes an EmbeddingError (a GeminiError), which the indexer turns into one failed post."""
+    from newsletter_archive.search.embeddings import LocalEmbeddingError
+    from newsletter_archive.search.gemini import GeminiError
+
+    emb = FailingLocal(NAME, model_folder(tmp_path), 4)
+    with pytest.raises(LocalEmbeddingError, match="out of memory") as e:
+        emb.embed(["x"])
+    assert isinstance(e.value, GeminiError)
+
+
+def test_a_busy_gpu_gives_up_after_the_wait():
+    with gpu.GPU_LOCK, pytest.raises(gpu.GpuBusyError, match=r"busy for over 0\.05s"):
+        gpu.on_gpu(lambda _: None, None, wait=0.05)
+    assert gpu.on_gpu(lambda x: x + 1, 1) == 2 and not gpu.GPU_LOCK.locked()
+
+
+def test_the_lock_is_released_when_the_work_fails():
+    with pytest.raises(ValueError):
+        gpu.on_gpu(lambda _: (_ for _ in ()).throw(ValueError("boom")), None)
+    assert not gpu.GPU_LOCK.locked()
 
 
 # spec: search-indexing / Local embedding model (Embedder and re-ranker share the GPU)

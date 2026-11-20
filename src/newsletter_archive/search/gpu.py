@@ -13,12 +13,23 @@ from collections.abc import Callable
 from typing import TypeVar
 
 GPU_LOCK = threading.Lock()
+# A re-ranking that timed out keeps running (and holding the lock) in its worker thread. If the
+# GPU hangs there, waiting without a limit would hang every later search; give up instead.
+GPU_WAIT_SECONDS = 30.0
 
 T = TypeVar("T")
 A = TypeVar("A")
 
 
-def on_gpu(fn: Callable[[A], T], arg: A) -> T:
-    """Run one forward pass while holding ``GPU_LOCK``."""
-    with GPU_LOCK:
+class GpuBusyError(RuntimeError):
+    """The GPU stayed busy longer than GPU_WAIT_SECONDS."""
+
+
+def on_gpu(fn: Callable[[A], T], arg: A, wait: float = GPU_WAIT_SECONDS) -> T:
+    """Run one forward pass while holding ``GPU_LOCK``; GpuBusyError if it isn't free in time."""
+    if not GPU_LOCK.acquire(timeout=wait):
+        raise GpuBusyError(f"the GPU was busy for over {wait:g}s (a stuck re-ranking?)")
+    try:
         return fn(arg)
+    finally:
+        GPU_LOCK.release()
