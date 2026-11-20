@@ -1,18 +1,19 @@
-"""Embeddings with gemini-embedding-2, plus a content-addressed cache in Postgres.
+"""Embeddings (gemini-embedding-2, or a local model), plus a content-addressed cache in Postgres.
 
 Verified against the API (PR 3): each text must be its own ``Content`` (a plain list of strings
 is embedded as ONE input); at most 100 texts per request; vectors come back L2-normalised;
 over-long input is silently truncated and the Developer API can't turn that off, so every input
 is capped at ``MAX_EMBED_CHARS`` characters before sending (chunking keeps passages under it).
 
-The model takes no task type: the task goes in the text (``EMBED_INPUT_VERSION``).
+The model takes no task type: the task goes in the text (``EMBED_INPUT_VERSION``). A local
+Qwen3-Embedding model (``local:<name>``) has its own format (``LOCAL_FORMAT``).
 """
 
 from __future__ import annotations
 
 import hashlib
 import logging
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
 from functools import partial
 from typing import Any, Protocol
@@ -21,8 +22,10 @@ import numpy as np
 import psycopg
 from pgvector.psycopg import register_vector
 
+from ..config import is_local_model
 from .gemini import GeminiClient, GeminiError, GeminiResponseError
 from .text import MAX_EMBED_CHARS, estimate_tokens
+from .versions import EMBED_INPUT_VERSION
 
 log = logging.getLogger("newsletter_archive.search.embeddings")
 
@@ -41,20 +44,61 @@ class EmbeddingResponseError(GeminiResponseError, EmbeddingError):
     """The API returned embeddings we can't use."""
 
 
-# --- input formats (EMBED_INPUT_VERSION = 1) ---------------------------------------------------
+# --- input formats ------------------------------------------------------------------------------
+# Each embedding model family has its own text format, versioned so the post fingerprint changes
+# (and posts are re-embedded) only when the format of the model being written changes.
+
+LOCAL_QUERY_INSTRUCTION = "Given a question, find passages from a leadership newsletter that answer it"
 
 
 def passage_input(title: str, heading: str | None, body: str) -> str:
+    """Gemini passage format (EMBED_INPUT_VERSION = 1)."""
     text = f"{heading}\n{body}" if heading else body
     return f"title: {title} | text: {text}"
 
 
 def summary_input(title: str, summary: str) -> str:
+    """Gemini summary format (EMBED_INPUT_VERSION = 1)."""
     return f"title: {title} | text: Summary\n{summary}"
 
 
 def query_input(query: str) -> str:
+    """Gemini query format (EMBED_INPUT_VERSION = 1)."""
     return f"task: search result | query: {query}"
+
+
+def local_passage_input(title: str, heading: str | None, body: str) -> str:
+    """Local Qwen3-Embedding passage: title, heading and text on their own lines, no instruction
+    (model card: documents get none). The format the fine-tuned model was trained and measured on."""
+    return "\n".join(part for part in (title, heading, body) if part)
+
+
+def local_summary_input(title: str, summary: str) -> str:
+    return f"{title}\n{summary}"
+
+
+def local_query_input(query: str) -> str:
+    """Local Qwen3-Embedding query: the archive instruction it was fine-tuned with."""
+    return f"Instruct: {LOCAL_QUERY_INSTRUCTION}\nQuery:{query}"
+
+
+@dataclass(frozen=True)
+class InputFormat:
+    """How one model family's inputs are written. ``version`` goes into the post fingerprint."""
+
+    version: int | str
+    passage: Callable[[str, str | None, str], str]
+    summary: Callable[[str, str], str]
+    query: Callable[[str], str]
+
+
+GEMINI_FORMAT = InputFormat(EMBED_INPUT_VERSION, passage_input, summary_input, query_input)
+LOCAL_FORMAT = InputFormat("local-1", local_passage_input, local_summary_input, local_query_input)
+
+
+def input_format(model: str) -> InputFormat:
+    """The input format for an embedding model name (``local:<name>`` or a Gemini model)."""
+    return LOCAL_FORMAT if is_local_model(model) else GEMINI_FORMAT
 
 
 def check_input(text: str) -> None:

@@ -15,7 +15,7 @@ import json
 import logging
 import time
 from collections.abc import Callable, Sequence
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -38,8 +38,7 @@ from .embeddings import (
     EmbeddingInputError,
     EmbeddingResponseError,
     check_input,
-    passage_input,
-    summary_input,
+    input_format,
     text_key,
 )
 from .fingerprint import post_fingerprint
@@ -306,6 +305,7 @@ class Indexer:
                 self.model, self.dim = gen.embedding_model, gen.embedding_dim
             else:
                 self.model, self.dim = self.s.embedding_model, self.s.embedding_dimension
+            self._fingerprint_for_model(loaded)
             report.generation = gen.generation if gen else 0
             stored = self._stored(gen) if gen else {}
             failures = self._failures() if self.track_failures else {}
@@ -396,6 +396,16 @@ class Indexer:
         fetched = {pid: p.fetched_at for pid, p in posts.items()}
         return _Loaded(prepared, load_failed, left_out, set(posts), fetched, boilerplate)
 
+    def _fingerprint_for_model(self, loaded: _Loaded) -> None:
+        """Fingerprints include the embedding input format of the version being written. _load
+        uses the configured model's; when this run writes a version built with another model
+        (the live Gemini version while a local one waits), recompute them for that model."""
+        if input_format(self.model).version == input_format(self.s.embedding_model).version:
+            return
+        for pid, p in loaded.prepared.items():
+            fp = post_fingerprint(p.post, p.sections, self.s, self.model)
+            loaded.prepared[pid] = replace(p, fingerprint=fp)
+
     def _target(self, report: IndexReport) -> db.Generation | None:
         """The generation to update; None when the first build still has to create one.
 
@@ -447,7 +457,8 @@ class Indexer:
         return chunk_sections(p.sections, self.s.chunk_words, self.s.chunk_overlap_words)
 
     def _inputs(self, p: Prepared, chunks: list[Chunk]) -> list[str]:
-        return [passage_input(p.post.title, c.heading, c.text) for c in chunks]
+        passage = input_format(self.model).passage
+        return [passage(p.post.title, c.heading, c.text) for c in chunks]
 
     def _estimate(self, loaded: _Loaded, plan: Plan, inputs: dict[str, list[str]]) -> Estimate:
         """Tokens and cost for what isn't cached yet. Read-only: a dry run changes nothing."""
@@ -566,7 +577,7 @@ class Indexer:
             elif summarizer is not None:
                 report.summaries_failed[pid] = "summary calls stopped for this run"
             if summary is not None:
-                texts.append(summary_input(p.post.title, summary[0]))
+                texts.append(input_format(self.model).summary(p.post.title, summary[0]))
             if summary_only and summary is None:
                 continue
             try:

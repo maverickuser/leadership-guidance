@@ -14,13 +14,17 @@ from collections.abc import Sequence
 from typing import Any
 
 from ..config import SearchConfig
+from .embeddings import input_format
 from .models import Post, Section
-from .versions import CHUNKER_VERSION, EMBED_INPUT_VERSION, SUMMARY_PROMPT_VERSION
+from .versions import CHUNKER_VERSION, SUMMARY_PROMPT_VERSION
 
 
 def fingerprint_payload(
-    post: Post, clean_sections: Sequence[Section], search: SearchConfig
+    post: Post, clean_sections: Sequence[Section], search: SearchConfig, model: str | None = None
 ) -> dict[str, Any]:
+    """``model`` is the embedding model of the index version being written (default: the
+    configured one). Only its input format version is included, so a Gemini version's
+    fingerprints stay the same whatever model the config names."""
     summaries = search.summaries
     return {
         "post_id": post.id,
@@ -37,7 +41,7 @@ def fingerprint_payload(
         "chunker_version": CHUNKER_VERSION,
         "chunk_words": search.chunk_words,
         "chunk_overlap_words": search.chunk_overlap_words,
-        "embed_input_version": EMBED_INPUT_VERSION,
+        "embed_input_version": input_format(model or search.embedding_model).version,
         "summaries": (
             {
                 "model": summaries.model,
@@ -54,6 +58,8 @@ def canonical_json(value: Any) -> str:
     return json.dumps(value, sort_keys=True, ensure_ascii=False, separators=(",", ":"))
 
 
-def post_fingerprint(post: Post, clean_sections: Sequence[Section], search: SearchConfig) -> str:
-    payload = canonical_json(fingerprint_payload(post, clean_sections, search))
+def post_fingerprint(
+    post: Post, clean_sections: Sequence[Section], search: SearchConfig, model: str | None = None
+) -> str:
+    payload = canonical_json(fingerprint_payload(post, clean_sections, search, model))
     return hashlib.sha256(payload.encode("utf-8")).hexdigest()
