@@ -60,7 +60,7 @@ def test_the_plan_is_a_summaries_search_then_a_passages_search(cfg):
     got = retrieve(make_service(cfg), "bar raiser", 5)
     assert [{r.kind for r in resp.results} for resp in got.responses] == [{"summary"}, {"passage"}]
     prompt = answer_prompt("what does a bar raiser do?", got)
-    assert prompt.startswith("Question: what does a bar raiser do?")  # the MCP `ask` text itself
+    assert prompt.startswith("Question: what does a bar raiser do?")  # the eval's v2 instructions
     assert "Search results:" in prompt and "https://www.example.com/hiring/" in prompt
 
 
