@@ -167,10 +167,55 @@ def test_local_queries_are_verified_and_rollback_goes_back_to_gemini(cfg, fake_m
         Indexer(old, conn, lambda m, d: FakeEmbedder(model=m, dim=d), lambda: FakeSummarizer()).run(
             IndexOptions()
         )
-    index_archive(cfg, IndexOptions(refresh=True, force=True))  # local version, swapped in
+    keyed = replace(cfg, gemini_api_key=old.gemini_api_key)  # the live version is Gemini
+    index_archive(keyed, IndexOptions(refresh=True, force=True))  # local version, swapped in
     svc, gemini_seen = service(cfg, LocalModels(cfg, check="verify"))
     assert svc.search(SearchRequest.create("post")).semantic and gemini_seen == []
     index_archive(old, IndexOptions(rollback=True))
     svc._generation = None
     assert svc.search(SearchRequest.create("post")).semantic
     assert [e.model for e in gemini_seen] == ["gemini-fake"]
+
+
+# -- review fixes ------------------------------------------------------------------------------
+
+
+def build_gemini_version(cfg):
+    from newsletter_archive.search.indexer import Indexer
+
+    from .test_indexer_integration import FakeSummarizer
+
+    old = replace(cfg, search=replace(cfg.search, embedding_model="gemini-fake", embedding_dimension=8))
+    with db.connect(cfg, "writer") as conn:
+        Indexer(old, conn, lambda m, d: FakeEmbedder(model=m, dim=d), lambda: FakeSummarizer()).run(
+            IndexOptions()
+        )
+
+
+def test_a_live_gemini_version_needs_the_key_before_anything_runs(cfg, fake_model):
+    """The quality gate embeds the live version's queries with Gemini; without the key it must not
+    mistake the failures for a retired model and swap unchecked. A weekly run needs it too."""
+    from newsletter_archive.search.gemini import MissingGeminiKeyError
+
+    clean(cfg)
+    write_archive(cfg, [record(f"post-{i}", i) for i in range(2)])
+    build_gemini_version(cfg)
+    with db.connect(cfg, "reader") as conn:
+        before = db.list_generations(conn)
+    for options in (IndexOptions(), IndexOptions(refresh=True), IndexOptions(swap=True)):
+        with pytest.raises(MissingGeminiKeyError):
+            index_archive(cfg, options)
+    with db.connect(cfg, "reader") as conn:
+        assert db.list_generations(conn) == before
+    assert index_archive(cfg, IndexOptions(refresh=True, dry_run=True)).status == "dry-run"
+
+
+def test_preload_live_loads_the_live_versions_model(cfg, fake_model, monkeypatch):
+    clean(cfg)
+    write_archive(cfg, [record("post-0", 0)])
+    index_archive(cfg, IndexOptions())  # live version: local:test-model
+    loaded = []
+    renamed = replace(cfg, search=replace(cfg.search, embedding_model="local:next-model"))
+    local = LocalModels(renamed, lambda m, f, d, b: loaded.append(m) or FakeEmbedder(model=m, dim=d))
+    local.preload_live().join(5)
+    assert loaded == [LOCAL]

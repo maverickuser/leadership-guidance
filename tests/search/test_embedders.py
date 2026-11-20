@@ -95,3 +95,60 @@ def test_preload_loads_in_the_background(tmp_path):
 def test_fakes_without_a_weights_hash_skip_the_check(tmp_path):
     cfg = config(tmp_path)
     assert LocalModels(cfg, Loader(), check="verify").get(LOCAL, 8, 1).model == LOCAL
+
+
+# -- review fixes ------------------------------------------------------------------------------
+
+
+def test_a_query_during_the_load_does_not_wait(tmp_path):
+    import threading
+
+    from newsletter_archive.search.embedders import LocalModelLoading
+
+    cfg = config(tmp_path)
+    started, release = threading.Event(), threading.Event()
+
+    def slow_loader(model, folder, dim, batch):
+        started.set()
+        release.wait(5)
+        return FakeEmbedder(model=model, dim=dim)
+
+    local = LocalModels(cfg, slow_loader)
+    thread = local.preload(LOCAL, 8)
+    started.wait(5)
+    with pytest.raises(LocalModelLoading, match="still loading"):
+        local.get(LOCAL, 8, 1, wait=False)
+    release.set()
+    thread.join(5)
+    assert local.get(LOCAL, 8, 1, wait=False).model == LOCAL
+
+
+def test_refused_weights_are_not_reloaded_on_every_query(tmp_path, monkeypatch):
+    cfg = config(tmp_path)
+    loader = Loader()
+    local = LocalModels(cfg, loader, check="verify")
+
+    def refuse(embedder):
+        raise LocalModelError("the weights differ")
+
+    monkeypatch.setattr(local, "_verify", refuse)
+    for _ in range(3):
+        with pytest.raises(LocalModelError, match="differ"):
+            local.get(LOCAL, 8, 1, wait=False)
+    assert len(loader.calls) == 1
+
+
+def test_preload_live_falls_back_to_the_configured_model_without_a_database(tmp_path, monkeypatch):
+    from newsletter_archive.search import db
+
+    def down(*a, **k):
+        raise OSError("database down")
+
+    monkeypatch.setattr(db, "connect", down)
+    loader = Loader()
+    local_cfg = config(tmp_path, embedding_model=LOCAL, embedding_dimension=8)
+    LocalModels(local_cfg, loader).preload_live().join(5)
+    assert [c[0] for c in loader.calls] == [LOCAL]
+    assert (
+        LocalModels(config(tmp_path), Loader()).preload_live() is None
+    )  # Gemini configured: nothing to load

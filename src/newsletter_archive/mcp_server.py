@@ -408,7 +408,6 @@ def make_service(config: Config) -> tuple[SearchService, Callable[[], None]]:  #
     background. Returns (service, close)."""
     from psycopg_pool import ConnectionPool
 
-    from .config import is_local_model
     from .search import db
     from .search.embedders import LocalModels, embedder_for
     from .search.rerank import Reranking, qwen_loader
@@ -426,8 +425,7 @@ def make_service(config: Config) -> tuple[SearchService, Callable[[], None]]:  #
     pool.open(wait=False)  # never blocks start-up; a stopped database fails each search instead
     try:
         local = LocalModels(config, check="verify")
-        if is_local_model(s.embedding_model):
-            local.preload(s.embedding_model, s.embedding_dimension)
+        local.preload_live()
         reranking = Reranking(qwen_loader(s.reranker_model, config.output_dir), s.rerank_timeout_seconds)
         service = SearchService(
             config,

@@ -915,12 +915,29 @@ __all__ = [
 ]
 
 
+def _needs_gemini(conn: psycopg.Connection, config: Config, options: IndexOptions) -> bool:
+    """Whether this run calls Gemini: summaries, a Gemini model in the config, a live Gemini
+    version (a plain run updates it; a swap's quality gate embeds its queries), or a rollback to
+    a Gemini version (it is caught up first)."""
+    s = config.search
+    if s.summaries.enabled or not is_local_model(s.embedding_model):
+        return True
+    try:
+        gens = [db.active_generation(conn)]
+        if options.rollback:
+            gens.append(db.latest_retired(conn))
+    except psycopg.errors.UndefinedTable:  # a fresh database: nothing built yet
+        conn.rollback()
+        return False
+    return any(g is not None and not is_local_model(g.embedding_model) for g in gens)
+
+
 def index_archive(config: Config, options: IndexOptions, on_post: PostCallback = _no_callback) -> IndexReport:
     """Run ``archive index``: real Gemini clients (created only when needed), writer connection.
 
     Raises:
-        MissingGeminiKeyError: no key, the run needs Gemini (summaries or a Gemini embedding
-            model) and isn't a dry run (nothing is changed).
+        MissingGeminiKeyError: no key, the run needs Gemini (summaries, a Gemini model, or a
+            live or rollback-target Gemini version) and isn't a dry run (nothing is changed).
         LocalModelError: the local model is missing, can't load, or its weights changed.
         DatabaseError, IndexBusyError, ModelChangedError, SpendingCeilingError, VerifyError.
     """
@@ -929,9 +946,6 @@ def index_archive(config: Config, options: IndexOptions, on_post: PostCallback =
     from .summaries import GeminiSummarizer
 
     s = config.search
-    needs_key = s.summaries.enabled or not is_local_model(s.embedding_model)
-    if not options.dry_run and needs_key and not config.gemini_api_key:
-        raise MissingGeminiKeyError()
     # the indexer records each local model's weights hash on first use (Indexer._index)
     embedder = embedder_for(config, for_queries=False, local=LocalModels(config))
 
@@ -946,6 +960,8 @@ def index_archive(config: Config, options: IndexOptions, on_post: PostCallback =
         return GeminiSummarizer(client, s.summaries.model, s.summaries.thinking_level)
 
     with db.connect(config, "writer") as conn:
+        if not options.dry_run and not config.gemini_api_key and _needs_gemini(conn, config, options):
+            raise MissingGeminiKeyError()  # before anything is read or written
         if not (options.refresh or options.swap or options.rollback):
             return Indexer(config, conn, embedder, summarizer, on_post).run(options)
         from .evaluate import gate_for

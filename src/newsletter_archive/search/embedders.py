@@ -15,7 +15,7 @@ from collections.abc import Callable
 from typing import Any
 
 from ..config import Config, is_local_model
-from .embeddings import Embedder, LocalEmbedder, verify_weights
+from .embeddings import Embedder, LocalEmbedder, LocalModelError, verify_weights
 
 log = logging.getLogger("newsletter_archive.search.embedders")
 
@@ -25,6 +25,10 @@ LocalLoader = Callable[[str, Any, int, int], Embedder]
 
 def _load_local(model: str, folder: Any, dim: int, batch_size: int) -> Embedder:  # pragma: no cover
     return LocalEmbedder(model, folder, dim, batch_size)
+
+
+class LocalModelLoading(LocalModelError):
+    """A query arrived while the model is still loading (the search runs on keywords meanwhile)."""
 
 
 class LocalModels:
@@ -39,17 +43,35 @@ class LocalModels:
         self.check = check
         self._lock = threading.Lock()
         self._loaded: dict[tuple[str, int], Embedder] = {}
+        self._refused: dict[tuple[str, int], LocalModelError] = {}
 
-    def get(self, model: str, dim: int, batch_size: int) -> Embedder:
-        with self._lock:
-            key = (model, dim)
+    def get(self, model: str, dim: int, batch_size: int, wait: bool = True) -> Embedder:
+        """The shared embedder, loading it on first use. ``wait=False`` (queries) raises
+        LocalModelLoading instead of waiting while another thread loads. Weights that fail the
+        hash check are refused for the life of the process, without reloading them each time."""
+        key = (model, dim)
+        if key in self._refused:
+            raise self._refused[key]
+        if key in self._loaded:
+            return self._loaded[key]
+        if not self._lock.acquire(blocking=wait):
+            raise LocalModelLoading(f"the local embedding model {model} is still loading")
+        try:
+            if key in self._refused:
+                raise self._refused[key]
             if key not in self._loaded:
                 folder = self.config.local_model_dir(model)
                 embedder = (self.loader or _load_local)(model, folder, dim, batch_size)
                 if self.check == "verify":
-                    self._verify(embedder)
+                    try:
+                        self._verify(embedder)
+                    except LocalModelError as e:
+                        self._refused[key] = e
+                        raise
                 self._loaded[key] = embedder
             return self._loaded[key]
+        finally:
+            self._lock.release()
 
     def _verify(self, embedder: Embedder) -> None:
         from . import db
@@ -72,6 +94,22 @@ class LocalModels:
         thread.start()
         return thread
 
+    def preload_live(self) -> threading.Thread | None:
+        """Preload the live version's model when it is local (the MCP server at start-up), else
+        the configured one when that is local. Never blocks start-up."""
+        from . import db
+
+        s = self.config.search
+        model, dim = s.embedding_model, s.embedding_dimension
+        try:
+            with db.connect(self.config, "reader") as conn:
+                live = db.active_generation(conn)
+            if live is not None:
+                model, dim = live.embedding_model, live.embedding_dim
+        except Exception as e:  # database down or empty: fall back to the config
+            log.info("live index version unknown at start-up (%s); preloading the configured model", e)
+        return self.preload(model, dim) if is_local_model(model) else None
+
 
 def embedder_for(
     config: Config,
@@ -90,7 +128,7 @@ def embedder_for(
 
     def make(model: str, dim: int) -> Embedder:
         if is_local_model(model):
-            return local.get(model, dim, batch)
+            return local.get(model, dim, batch, wait=not for_queries)
         if not gemini_made:
             gemini_made.append(gemini or _gemini_factory(config, for_queries))
         return gemini_made[0](model, dim)
