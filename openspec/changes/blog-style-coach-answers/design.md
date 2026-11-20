@@ -40,7 +40,7 @@ The research steps stay word for word. The writing part changes to:
 The coach voice lines (first person, "you", never claiming experience, posts disagreeing, gaps said plainly) are unchanged.
 
 ### 3. New `SERVER_INSTRUCTIONS`
-"...Name the posts you draw on in the text, without links, and end with a sources list that links each one by title and URL..." The rest stays. The `ask` prompt's description ("lesson from a coach") stays as it is.
+"...Name the posts you draw on in the text, without links, and end with a sources list that links each one by title and URL..." The rest stays. The `search` tool's description ("Always cite the post title and URL") and the `ask` prompt's and command's descriptions ("lesson from a coach") are brought in line, so no text an agent sees asks for inline links.
 
 ### 4. The command file
 No code change. `--install-command` already rewrites a file it wrote before. The README tells the user to run it again after this update.

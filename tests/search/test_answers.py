@@ -357,6 +357,9 @@ def test_the_answer_eval_keeps_the_version_2_instructions():
     assert text == f"Question: how do I delegate?\n\n{ANSWER_INSTRUCTIONS}\n\nSearch results:\n\n(no results)"
     assert 'in the first person ("I")' in text and '"### Try this week"' in text
     assert "Never claim experiences" in text and "[Post title](URL)" in text  # inline links, for citations
+    from newsletter_archive import mcp_server
+
+    assert ANSWER_INSTRUCTIONS != mcp_server.ASK_INSTRUCTIONS  # the live prompt moved on; the eval did not
 
 
 # spec: answer-evaluation / Grade each answer (Link with or without www)

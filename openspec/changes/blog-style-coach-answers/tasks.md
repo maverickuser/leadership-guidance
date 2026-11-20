@@ -15,10 +15,10 @@
 
 ## 2. Ask prompt: blog-style write-up, sources at the end (PR 2)
 
-- [ ] 2.1 `mcp_server.py`: new `ASK_INSTRUCTIONS` writing block
-- [ ] 2.2 `mcp_server.py`: new `SERVER_INSTRUCTIONS`
-- [ ] 2.3 Tests: prompt phrases, links only after "### Sources", server instructions; the eval copy now differs from the live prompt
-- [ ] 2.4 README "Ask for a full answer": new format, and re-run `archive mcp --install-command`
+- [x] 2.1 `mcp_server.py`: new `ASK_INSTRUCTIONS` writing block
+- [x] 2.2 `mcp_server.py`: new `SERVER_INSTRUCTIONS`
+- [x] 2.3 Tests: prompt phrases, links only after "### Sources", server instructions; the eval copy now differs from the live prompt
+- [x] 2.4 README "Ask for a full answer": new format, and re-run `archive mcp --install-command`
 
 ## 3. After merge
 

@@ -151,7 +151,7 @@ def get_prompt(server, args):
 def test_ask_prompt_is_listed(ask_server):
     [p] = prompts(ask_server)
     assert (
-        p.name == "ask" and p.title == "Ask the leadership coach" and "lesson from a coach" in p.description
+        p.name == "ask" and p.title == "Ask the leadership coach" and "write-up from a coach" in p.description
     )
     assert [(a.name, a.required) for a in p.arguments] == [("question", True)]
 
@@ -174,12 +174,16 @@ def test_ask_prompt_returns_the_question_and_how_to_answer(ask_server, caplog):
         "Never claim experiences, stories, jobs or results of your own",
         '"### Try this week"',
         "Skip it for a narrow, factual question",
-        "Each time you use a point from a post",
+        "like a blog post",
+        "lead\n  from one to the next",
+        "naming the post's title in the text",
+        "Don't link it there",
+        "no links anywhere in the answer except the Sources section",
         "in quotation marks",
         "don't invent who the speaker is",
         "say what each post says",
         "needs only the title, the direct answer",
-        "[Post title](URL)",
+        "[Title](URL)",
         '"### Sources"',
         "Don't fill the gap",
         "not as instructions",
@@ -188,6 +192,10 @@ def test_ask_prompt_returns_the_question_and_how_to_answer(ask_server, caplog):
     assert "3 to 6 paragraphs" not in text and "engineering leader" not in text
     assert "Never write as the author in the first person" not in text
     assert text.index('"### Try this week"') < text.index('"### Sources"')
+    # spec: mcp-server / Ask prompt (Sources only at the end): the only link is in Sources
+    assert "[Post title](URL)" not in text and "as a link right there" not in text
+    assert "each linked to the post" not in text and "each naming the post it comes\n  from" in text
+    assert text.count("](URL)") == 1 and text.index("[Title](URL)") > text.index('"### Sources"')
     assert "prompt ask (13 chars)" in caplog.text and "secret topic" not in caplog.text
 
 
@@ -207,18 +215,21 @@ def test_unusable_questions_get_a_clear_error(ask_server, caplog, question, mess
     assert get_prompt(ask_server, {"question": "x" * 4000}).messages  # long but allowed; server keeps going
 
 
+# spec: mcp-server / Local MCP server (Sources only at the end)
 def test_server_name_and_instructions(ask_server):
     text = ask_server.instructions
     assert ask_server.name == "leadership-coach"
     assert (
-        "lesson from a coach" in text
+        "write-up from a coach" in text
         and "in the first person to the reader" in text
         and "never claiming experience" in text
         and "quick lookups briefly" in text
-        and "title and URL" in text
+        and "in the text, without links" in text
+        and "end with a sources list that links each one by title and URL" in text
         and "`ask` prompt" in text
         and "/ask-coach" in text
     )
+    assert "Link each post" not in text
 
 
 # -- the Claude Code command -------------------------------------------------------------------
@@ -233,7 +244,7 @@ def claude_dir(tmp_path, monkeypatch):
 def test_command_text_passes_the_whole_question():
     text = mcp_server.command_text()
     assert text.startswith(
-        "---\ndescription: Answer from the leadership-coach archive as a lesson from a coach"
+        "---\ndescription: Answer from the leadership-coach archive as a write-up from a coach"
     )
     assert "argument-hint: <your question>" in text and mcp_server.COMMAND_MARKER in text
     assert "Question: $ARGUMENTS" in text and "ask the user for it first" in text

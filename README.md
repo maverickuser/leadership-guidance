@@ -265,7 +265,7 @@ Then ask, for example: *"Using the newsletter archive, how should I give feedbac
 
 ### Ask for a full answer
 
-This has Claude research the question (post summaries first, then passages from the best posts) and answer as a short lesson from a coach: written in the first person to you, with a title and short sections, quoting and linking each post it draws on, a few things to try this week, and a sources list. The coach never claims experience of its own; examples come from the posts. It also says where posts disagree or where the archive is silent.
+This has Claude research the question (post summaries first, then passages from the best posts) and answer as a short write-up from a coach, like a blog post: written in the first person to you, with a title and a few connected sections, naming and quoting the posts it draws on, a few things to try this week, and a sources list at the end. The links are only in that sources list, so the text reads straight through. The coach never claims experience of its own; examples come from the posts. It also says where posts disagree or where the archive is silent.
 
 - **Claude Code:** install the `/ask-coach` command once:
 
@@ -275,7 +275,7 @@ This has Claude research the question (post summaries first, then passages from 
 
   Then, in a new session: `/ask-coach how do I give implicit feedback?`
 
-  It writes `~/.claude/commands/ask-coach.md` (or under `$CLAUDE_CONFIG_DIR`). Run it again after updating this project to pick up new instructions. It never replaces a file of that name that it didn't write, unless you add `--force`.
+  It writes `~/.claude/commands/ask-coach.md` (or under `$CLAUDE_CONFIG_DIR`). Run it again after updating this project to pick up new instructions (for example, after the switch to sources only at the end). It never replaces a file of that name that it didn't write, unless you add `--force`.
 - **Claude Desktop:** pick **ask** from the leadership-coach prompts in the chat box menu, then type your question.
 
 Why a separate command for Claude Code? Its built-in command for a server prompt (`/mcp__leadership-coach__ask`) passes only the first word of your question. The instructions only shape the answer: they don't search by themselves and cost nothing extra.
