@@ -22,7 +22,9 @@ RECORD = {
 }
 POST = Post.from_record(RECORD)
 SECTIONS = list(POST.sections)
-SEARCH = SearchConfig()
+SEARCH = SearchConfig(
+    embedding_model="gemini-embedding-2", embedding_dimension=3072
+)  # the live index's model
 
 
 def fp(post=POST, sections=SECTIONS, search=SEARCH):

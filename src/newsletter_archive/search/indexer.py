@@ -86,6 +86,14 @@ class ModelChangedError(IndexError_):
             f"The search store was built with {active.embedding_model} ({active.embedding_dim} dimensions) "
             f"but the config asks for {model} ({dim}); a new index version is needed: "
             "run `archive index --refresh`"
+            + (
+                " (put the model folder in place first, see README: The embedding model; "
+                "`--refresh --no-swap` then `--swap` checks quality before switching). "
+                f"To keep {active.embedding_model} instead, set search.embedding_model: "
+                f"{active.embedding_model} in config.yaml"
+                if is_local_model(model) and not is_local_model(active.embedding_model)
+                else ""
+            )
         )
 
 

@@ -219,3 +219,21 @@ def test_preload_live_loads_the_live_versions_model(cfg, fake_model, monkeypatch
     local = LocalModels(renamed, lambda m, f, d, b: loaded.append(m) or FakeEmbedder(model=m, dim=d))
     local.preload_live().join(5)
     assert loaded == [LOCAL]
+
+
+def test_model_changed_message_names_both_ways_out(cfg, fake_model):
+    """An install with a live Gemini index whose config now defaults to the local model."""
+    from newsletter_archive.search.indexer import ModelChangedError
+
+    from ..conftest import TEST_GEMINI_KEY
+
+    clean(cfg)
+    write_archive(cfg, [record("post-0", 0)])
+    build_gemini_version(cfg)
+    from newsletter_archive.config import Secret
+
+    with pytest.raises(ModelChangedError) as e:
+        index_archive(replace(cfg, gemini_api_key=Secret(TEST_GEMINI_KEY)), IndexOptions())
+    msg = str(e.value)
+    assert "put the model folder in place first" in msg and "--refresh --no-swap" in msg
+    assert "set search.embedding_model: gemini-fake in config.yaml" in msg

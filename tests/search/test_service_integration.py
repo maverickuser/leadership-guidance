@@ -76,6 +76,9 @@ def test_no_database_tables_yet(cfg):
 
 
 def test_hybrid_results_have_every_field(cfg):
+    # an exact-phrase query should lead with the keyword match; the fake embedder's vectors are
+    # noise, so weigh keywords as before the use-local-embeddings default change
+    cfg = replace(cfg, search=replace(cfg.search, fusion_weights={"keyword": 1.0, "semantic": 2.0}))
     build(cfg)
     resp = ask(service(cfg, reranker=FakeReranker()), '"bar raiser"', limit=5)
     assert resp.semantic and resp.reranked and resp.notes == []

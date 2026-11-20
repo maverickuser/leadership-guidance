@@ -102,11 +102,14 @@ class SearchConfig:
     """Settings for indexing and hybrid search. Every field can be set under `search:` in config.yaml."""
 
     enabled: bool = True  # false: `archive run` skips the index stage (archive only)
-    # "gemini-…" embeds through the Gemini API; "local:<name>" runs a local Qwen3-Embedding model
-    # from local_model_path (openspec use-local-embeddings). Left out of config.yaml, the
-    # dimension follows the model: 3,072 for Gemini, 1,024 for a local Qwen3-Embedding-0.6B.
-    embedding_model: str = "gemini-embedding-2"
-    embedding_dimension: int = 3072
+    # "local:<name>" runs a local Qwen3-Embedding model from local_model_path; "gemini-…" embeds
+    # through the Gemini API (openspec use-local-embeddings). Left out of config.yaml, the
+    # dimension follows the model: 1,024 for a local Qwen3-Embedding-0.6B, 3,072 for Gemini.
+    # Measured 20 Nov 2026 (recall@10 with candidates 100 and keyword weight 0.25): the
+    # fine-tuned local model 0.83 on 191 unseen-post questions / 0.85 on 36 human questions,
+    # gemini-embedding-2 0.87 / 0.86. No API calls, no cost, no key needed to index or search.
+    embedding_model: str = "local:qwen3-embedding-0.6b-archive-v5"
+    embedding_dimension: int = 1024
     local_model_path: str = ""  # the local model's folder; "" = {output_dir}/models/<name>
     local_batch_size: int = 8  # texts per local forward pass
     embed_batch_size: int = 50
@@ -129,9 +132,11 @@ class SearchConfig:
     mass_delete_fraction: float = 0.10
     quality_gate_max_recall_drop: float = 2.0
     bm25_boosts: dict[str, float] = field(default_factory=lambda: {"heading": 2.0, "title": 1.5, "body": 1.0})
-    # RRF weight per list; semantic 2 measured best on the evaluation (PR 10)
-    fusion_weights: dict[str, float] = field(default_factory=lambda: {"keyword": 1.0, "semantic": 2.0})
-    candidates: int = 50
+    # RRF weight per list and candidates per list. Keyword 0.25 (was 1) and 100 candidates (was
+    # 50), measured 20 Nov 2026: Gemini unseen 0.86 -> 0.87, human 0.84 -> 0.86; local model
+    # 0.80 -> 0.83, human flat 0.85. Keyword hits were pushing meaning matches out of the top 10.
+    fusion_weights: dict[str, float] = field(default_factory=lambda: {"keyword": 0.25, "semantic": 2.0})
+    candidates: int = 100
     rerank_top: int = 20  # ~0.22 s per pair on Apple MPS (measured in PR 8)
     reranker_model: str = "Qwen/Qwen3-Reranker-0.6B"
     # posts mode re-ranks about 40 passages (~6.3 s measured on Apple MPS); 20 s leaves room for a

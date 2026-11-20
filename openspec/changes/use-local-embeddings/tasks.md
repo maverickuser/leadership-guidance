@@ -32,9 +32,9 @@
 
 ## 4. Switch the defaults and document (PR 4)
 
-- [ ] 4.1 **Changed defaults:** `embedding_model: local:qwen3-embedding-0.6b-archive-v5`, `candidates: 100`, `fusion_weights: {keyword: 0.25, semantic: 2.0}`, with the measurements in the config comments
-- [ ] 4.2 README: local embeddings setup (where the model folder goes, offline, private), the switch steps, rollback; `config.example.yaml`
-- [ ] 4.3 Tests updated for the new defaults; the hybrid-search scenario where keyword matches don't crowd out meaning matches
+- [x] 4.1 **Changed defaults:** `embedding_model: local:qwen3-embedding-0.6b-archive-v5`, `candidates: 100`, `fusion_weights: {keyword: 0.25, semantic: 2.0}`, with the measurements in the config comments
+- [x] 4.2 README: local embeddings setup (where the model folder goes, offline, private), the switch steps, rollback; `config.example.yaml`
+- [x] 4.3 Tests updated for the new defaults; the hybrid-search scenario where keyword matches don't crowd out meaning matches
 - [ ] 4.4 After merge, with the user's go-ahead: copy the model, `--refresh --no-swap` (dry run first), `--swap` with the gate, check the side-by-side and p90 (lld §10)
 
 ## Every PR (definition of done)

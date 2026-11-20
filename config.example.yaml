@@ -29,15 +29,16 @@ user_agent: "newsletter-archive/0.1 (personal archive; one request every 2s)"
 
 # Search (optional; these are the defaults). See openspec/changes/archive/2026-11-10-add-hybrid-search/lld.md.
 # search:
-#   embedding_model: gemini-embedding-2
-#   embedding_dimension: 3072
+#   embedding_model: local:qwen3-embedding-0.6b-archive-v5   # or gemini-embedding-2 (API, 3072 dims)
+#   embedding_dimension: 1024                                # follows the model when left out
+#   local_model_path: ../leadership-coach-datasets/models/qwen3-embedding-0.6b-archive-v5
 #   chunk_words: 300
 #   chunk_overlap_words: 50
-#   candidates: 50
+#   candidates: 100
 #   rerank_top: 20
-#   rerank_timeout_seconds: 10
+#   rerank_timeout_seconds: 20
 #   query_timeout_seconds: 8
-#   fusion_weights: {keyword: 1, semantic: 2}
+#   fusion_weights: {keyword: 0.25, semantic: 2}
 #   db_host: 127.0.0.1
 #   db_port: 5433
 #   db_name: archive
