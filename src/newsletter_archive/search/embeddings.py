@@ -13,9 +13,11 @@ from __future__ import annotations
 
 import hashlib
 import logging
+import os
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
 from functools import partial
+from pathlib import Path
 from typing import Any, Protocol
 
 import numpy as np
@@ -23,7 +25,9 @@ import psycopg
 from pgvector.psycopg import register_vector
 
 from ..config import is_local_model
+from ..errors import ArchiveError
 from .gemini import GeminiClient, GeminiError, GeminiResponseError
+from .gpu import on_gpu
 from .text import MAX_EMBED_CHARS, estimate_tokens
 from .versions import EMBED_INPUT_VERSION
 
@@ -180,6 +184,148 @@ class GeminiEmbedder:
             contents=[types.Content(parts=[types.Part(text=t)]) for t in batch],
             config=types.EmbedContentConfig(output_dimensionality=self.dim),
         )
+
+
+# --- local model (openspec use-local-embeddings, lld §4) ---------------------------------------
+
+LOCAL_MAX_TOKENS = 2048  # passages are capped well below this; over it is an error, never cut
+WEIGHTS_FILE = "model.safetensors"
+LOCAL_MODULES = ("torch", "transformers")
+
+
+class LocalModelError(ArchiveError):
+    """The local embedding model can't be used (missing folder, missing packages, other weights)."""
+
+
+def check_model_folder(folder: Path, name: str) -> None:
+    """Raise LocalModelError unless ``folder`` looks like a saved model (config and weights)."""
+    if not folder.is_dir():
+        raise LocalModelError(
+            f"local embedding model {name} not found at {folder}. Set search.local_model_path "
+            "in config.yaml or copy the model there."
+        )
+    missing = [f for f in ("config.json", WEIGHTS_FILE) if not (folder / f).is_file()]
+    if missing:
+        raise LocalModelError(
+            f"{folder} is not a saved model (missing {', '.join(missing)}). Set search.local_model_path "
+            "to the folder holding the model."
+        )
+
+
+def weights_sha256(folder: Path) -> str:
+    """sha256 of the model's weights file, read in 1 MB blocks (~3 s for 1.2 GB)."""
+    digest = hashlib.sha256()
+    with (folder / WEIGHTS_FILE).open("rb") as f:
+        for block in iter(partial(f.read, 1 << 20), b""):
+            digest.update(block)
+    return digest.hexdigest()
+
+
+def verify_weights(conn: psycopg.Connection, name: str, sha256: str, record: bool) -> None:
+    """Check the weights against the hash first recorded for ``name`` (``public.embedding_models``).
+    ``record`` (the indexer, writer role) stores it on first use; a reader (the MCP server) needs
+    it to be there already."""
+    select = "SELECT weights_sha256 FROM public.embedding_models WHERE name = %s"
+    row = conn.execute(select, (name,)).fetchone()
+    if row is None and record:
+        conn.execute(
+            "INSERT INTO public.embedding_models (name, weights_sha256) VALUES (%s, %s) "
+            "ON CONFLICT DO NOTHING",
+            (name, sha256),
+        )
+        row = conn.execute(select, (name,)).fetchone()
+    if row is None:
+        raise LocalModelError(f"no index has been built with {name} yet; run `archive index` first")
+    if row[0] != sha256:
+        raise LocalModelError(
+            f"the weights in the model folder differ from the ones {name} was indexed with; "
+            "give new weights a new name (search.embedding_model: local:<new name>) and run "
+            "`archive index --refresh`"
+        )
+
+
+def embed_in_batches(
+    texts: Sequence[str],
+    encode: Callable[[list[str]], Any],
+    count_tokens: Callable[[str], int],
+    dim: int,
+    batch_size: int,
+    max_tokens: int = LOCAL_MAX_TOKENS,
+) -> list[np.ndarray]:
+    """The model-independent part of local embedding: check every input first (nothing runs if
+    one is unsafe), run similar lengths together (less padding), validate each vector and
+    return them in input order. ``encode`` maps a batch of texts to one vector per text."""
+    for text in texts:
+        check_input(text)
+        n = count_tokens(text)
+        if n > max_tokens:
+            raise EmbeddingInputError(
+                f"embedding input is {n} tokens, over the local model's {max_tokens}-token cap; "
+                "it would be truncated, so it was not embedded"
+            )
+    order = sorted(range(len(texts)), key=lambda i: len(texts[i]))
+    out: list[np.ndarray | None] = [None] * len(texts)
+    for start in range(0, len(order), max(1, batch_size)):
+        idx = order[start : start + max(1, batch_size)]
+        vectors = list(encode([texts[i] for i in idx]))
+        if len(vectors) != len(idx):
+            raise EmbeddingResponseError(f"asked for {len(idx)} embeddings, got {len(vectors)}")
+        for i, v in zip(idx, vectors, strict=True):
+            out[i] = validate_vector(v, dim)
+    return [v for v in out if v is not None]
+
+
+class LocalEmbedder:
+    """A local Qwen3-Embedding model (``local:<name>``) on Apple MPS, CPU fallback. Loaded
+    offline from its folder only: never downloaded, nothing sent anywhere. Last-token pooling
+    with left padding, float16 on MPS, as the model was fine-tuned and measured."""
+
+    def __init__(self, model: str, folder: Path, dim: int, batch_size: int = 8) -> None:
+        check_model_folder(folder, model)
+        self.model, self.dim, self.batch_size, self.folder = model, dim, batch_size, folder
+        self._load()
+
+    def _load(self) -> None:  # pragma: no cover - needs torch and the model; checked with -m model
+        os.environ.setdefault("HF_HUB_OFFLINE", "1")
+        os.environ.setdefault("HF_HUB_DISABLE_TELEMETRY", "1")
+        try:
+            import torch
+            from transformers import AutoModel, AutoTokenizer
+        except ModuleNotFoundError as e:
+            hint = " (install it with: pip install -e '.[rerank]')" if e.name in LOCAL_MODULES else ""
+            raise LocalModelError(f"the local embedding model needs {e.name}{hint}") from None
+        self.torch = torch
+        self.device = "mps" if torch.backends.mps.is_available() else "cpu"
+        dtype = torch.float16 if self.device == "mps" else torch.float32
+        try:
+            self.tokenizer = AutoTokenizer.from_pretrained(
+                self.folder, padding_side="left", local_files_only=True
+            )
+            net = AutoModel.from_pretrained(self.folder, dtype=dtype, local_files_only=True)
+        except (OSError, ValueError) as e:
+            msg = f"could not load the local embedding model from {self.folder}: {e}"
+            raise LocalModelError(msg) from None
+        self.net = net.to(self.device).eval()
+        log.info("local embedding model %s loaded on %s", self.model, self.device)
+
+    def _count_tokens(self, text: str) -> int:  # pragma: no cover - real tokenizer
+        return len(self.tokenizer(text, add_special_tokens=True)["input_ids"])
+
+    def _encode(self, batch: list[str]) -> Any:  # pragma: no cover - real model
+        torch = self.torch
+        enc = self.tokenizer(batch, padding=True, return_tensors="pt").to(self.device)
+        with torch.no_grad():
+            hidden = self.net(**enc).last_hidden_state[:, -1]
+            return hidden.float().cpu().numpy()
+
+    def embed(self, texts: Sequence[str]) -> list[np.ndarray]:
+        def encode(batch: list[str]) -> Any:
+            return on_gpu(self._encode, batch)  # never at the same time as the re-ranker
+
+        return embed_in_batches(texts, encode, self._count_tokens, self.dim, self.batch_size)
+
+    def weights_sha256(self) -> str:
+        return weights_sha256(self.folder)
 
 
 def _to_array(value: Any) -> np.ndarray:

@@ -25,7 +25,7 @@ def writer(db_config):
 def test_migrations_apply_once(db_config):
     with db.connect(db_config, "writer") as conn:
         assert db.current_version(conn) == 0
-        assert db.apply_migrations(conn) == [1, 2]
+        assert db.apply_migrations(conn) == [1, 2, 3]
         assert db.apply_migrations(conn) == []
         assert db.current_version(conn) == db.latest_version()
         tables = {
@@ -214,7 +214,7 @@ def test_migration_002_adds_source_to_an_existing_generation(db_config):
                 (f"{post_id}#0", post_id, vec),
             )
         conn.commit()
-        assert db.apply_migrations(conn) == [2]
+        assert db.apply_migrations(conn) == [2, 3]
         conn.commit()
         rows = conn.execute(f"SELECT post_id, source FROM {gen.schema}.passages ORDER BY post_id").fetchall()
         assert rows == [
