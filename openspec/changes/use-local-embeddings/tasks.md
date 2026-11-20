@@ -23,12 +23,12 @@
 
 ## 3. Wiring: one embedder factory (PR 3)
 
-- [ ] 3.1 `search/embedders.py` with `embedder_for(config, for_queries=...)`; a shared, lazily loaded local embedder (lld §5)
-- [ ] 3.2 Indexer, MCP server, eval `reader_service` and the quality gate use it; the MCP server loads the model in the background at start-up
-- [ ] 3.3 `GEMINI_API_KEY` is required only when a Gemini embedder or the summarizer is built
-- [ ] 3.4 Dry run reports local embeddings at $0 and skips the embedding ceiling for local models (lld §6)
-- [ ] 3.5 Degraded modes: missing or mismatched model gives a clear index error, and search falls back to keywords with a note (lld §7)
-- [ ] 3.6 Tests: dispatch with fakes; index without a key; dry-run output; `db` end-to-end: build a local version, swap, search, roll back to a Gemini version (queries go through the Gemini path)
+- [x] 3.1 `search/embedders.py` with `embedder_for(config, for_queries=...)`; a shared, lazily loaded local embedder (lld §5)
+- [x] 3.2 Indexer, MCP server, eval `reader_service` and the quality gate use it; the MCP server loads the model in the background at start-up
+- [x] 3.3 `GEMINI_API_KEY` is required only when a Gemini embedder or the summarizer is built
+- [x] 3.4 Dry run reports local embeddings at $0 and skips the embedding ceiling for local models (lld §6)
+- [x] 3.5 Degraded modes: missing or mismatched model gives a clear index error, and search falls back to keywords with a note (lld §7)
+- [x] 3.6 Tests: dispatch with fakes; index without a key; dry-run output; `db` end-to-end: build a local version, swap, search, roll back to a Gemini version (queries go through the Gemini path)
 
 ## 4. Switch the defaults and document (PR 4)
 
