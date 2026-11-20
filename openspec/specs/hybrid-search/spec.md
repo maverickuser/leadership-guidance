@@ -4,7 +4,7 @@
 Searching the archive by keywords and by meaning together, combining the results, re-ranking them and returning passages and post summaries with their sources.
 ## Requirements
 ### Requirement: Hybrid retrieval
-For each query the system SHALL run BM25 keyword search and semantic search over all passages and post summaries, take the top `search.candidates` (default 50) from each, and combine them into one candidate list in which passages found by both methods rank above passages found by only one at similar positions. Combining SHALL be deterministic: the same query against the same store always gives the same order.
+For each query the system SHALL run BM25 keyword search and semantic search over all passages and post summaries, take the top `search.candidates` (default 100) from each, and combine them into one candidate list with reciprocal-rank fusion weighted by `search.fusion_weights` (default keyword 0.25, semantic 2.0), so that passages found by both methods rank above passages found by only one at similar positions. Combining SHALL be deterministic: the same query against the same store always gives the same order.
 
 #### Scenario: Semantic match without shared words
 - **WHEN** the query is "how to handle an underperforming engineer" and a post discusses "coaching a struggling team member" without those words
@@ -13,6 +13,10 @@ For each query the system SHALL run BM25 keyword search and semantic search over
 #### Scenario: Exact term match
 - **WHEN** the query is "bar raiser"
 - **THEN** passages containing the exact phrase are among the candidates even if their meaning vectors are not the closest
+
+#### Scenario: Keyword matches do not crowd out meaning matches
+- **WHEN** a post matches the query's meaning at semantic rank 8 and ten other passages share common words with the query
+- **THEN** that post stays among the first 10 posts of the combined list
 
 ### Requirement: Safe keyword queries
 Any query text SHALL be accepted for keyword search without causing a query-syntax error: punctuation and search-operator words SHALL be treated as ordinary text, and text in double quotes SHALL be matched as a phrase.
