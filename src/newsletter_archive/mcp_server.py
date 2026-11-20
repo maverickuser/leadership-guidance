@@ -403,13 +403,15 @@ def pooled_connect(
 
 
 def make_service(config: Config) -> tuple[SearchService, Callable[[], None]]:  # pragma: no cover - real deps
-    """The real service: read-only pool, Gemini query embedder, Qwen3 re-ranker loading in the
+    """The real service: read-only pool, the query embedder for each index version's model (a
+    local model starts loading in the background now), Qwen3 re-ranker loading in the
     background. Returns (service, close)."""
     from psycopg_pool import ConnectionPool
 
+    from .config import is_local_model
     from .search import db
+    from .search.embedders import LocalModels, embedder_for
     from .search.rerank import Reranking, qwen_loader
-    from .search.service import gemini_query_embedder
 
     s = config.search
     pool = ConnectionPool(
@@ -423,9 +425,15 @@ def make_service(config: Config) -> tuple[SearchService, Callable[[], None]]:  #
     )
     pool.open(wait=False)  # never blocks start-up; a stopped database fails each search instead
     try:
+        local = LocalModels(config, check="verify")
+        if is_local_model(s.embedding_model):
+            local.preload(s.embedding_model, s.embedding_dimension)
         reranking = Reranking(qwen_loader(s.reranker_model, config.output_dir), s.rerank_timeout_seconds)
         service = SearchService(
-            config, pooled_connect(pool, config), gemini_query_embedder(config), reranking
+            config,
+            pooled_connect(pool, config),
+            embedder_for(config, for_queries=True, local=local),
+            reranking,
         )
     except BaseException:
         pool.close()

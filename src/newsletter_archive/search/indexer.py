@@ -25,7 +25,7 @@ import psycopg
 from pgvector import HalfVector
 from psycopg import sql
 
-from ..config import Config
+from ..config import Config, is_local_model
 from ..errors import ArchiveError
 from ..schema import validate_post
 from ..store import load_manifest
@@ -40,6 +40,7 @@ from .embeddings import (
     check_input,
     input_format,
     text_key,
+    verify_weights,
 )
 from .fingerprint import post_fingerprint
 from .gemini import CircuitOpenError, GeminiAuthError, GeminiError
@@ -481,13 +482,14 @@ class Indexer:
             embed_tokens=embed_tokens + summaries_needed * SUMMARY_EMBED_TOKENS,
             summaries=summaries_needed,
             summary_tokens=summary_tokens,
-            embed_usd_per_million=self.s.embed_usd_per_million_tokens,
+            embed_usd_per_million=0.0 if is_local_model(self.model) else self.s.embed_usd_per_million_tokens,
+            local_embedding=is_local_model(self.model),
             summary_usd_per_million=self.s.summary_usd_per_million_tokens,
         )
 
     def _check_ceiling(self, estimate: Estimate, yes: bool) -> None:
         over = []
-        if estimate.embed_tokens > self.s.max_embed_tokens_per_run:
+        if not estimate.local_embedding and estimate.embed_tokens > self.s.max_embed_tokens_per_run:
             over.append(f"embedding ~{estimate.embed_tokens:,} > {self.s.max_embed_tokens_per_run:,} tokens")
         if estimate.summary_tokens > self.s.summaries.max_tokens_per_run:
             over.append(
@@ -538,6 +540,10 @@ class Indexer:
                 f"embedder uses {raw.model} ({raw.dim}) but generation {gen.generation} "
                 f"needs {self.model} ({self.dim})"
             )
+        sha = getattr(raw, "weights_sha256", None)
+        if is_local_model(self.model) and sha is not None:
+            # first use records the weights; later runs refuse other weights under this name
+            verify_weights(self.conn, self.model, sha(), record=True)
         embedder = CachedEmbedder(raw, EmbeddingCache(self.conn, raw.model, raw.dim))
         summarizer: CachedSummarizer | None = None
         if self.summarizer_factory is not None:
@@ -913,26 +919,21 @@ def index_archive(config: Config, options: IndexOptions, on_post: PostCallback =
     """Run ``archive index``: real Gemini clients (created only when needed), writer connection.
 
     Raises:
-        MissingGeminiKeyError: no key and the run isn't a dry run (nothing is changed).
+        MissingGeminiKeyError: no key, the run needs Gemini (summaries or a Gemini embedding
+            model) and isn't a dry run (nothing is changed).
+        LocalModelError: the local model is missing, can't load, or its weights changed.
         DatabaseError, IndexBusyError, ModelChangedError, SpendingCeilingError, VerifyError.
     """
-    from .embeddings import GeminiEmbedder
+    from .embedders import LocalModels, embedder_for
     from .gemini import GeminiClient, MissingGeminiKeyError
     from .summaries import GeminiSummarizer
 
     s = config.search
-    if not options.dry_run and not config.gemini_api_key:
+    needs_key = s.summaries.enabled or not is_local_model(s.embedding_model)
+    if not options.dry_run and needs_key and not config.gemini_api_key:
         raise MissingGeminiKeyError()
-
-    def embedder(model: str, dim: int) -> GeminiEmbedder:
-        client = GeminiClient(
-            config.gemini_api_key,
-            rpm=s.embed_rpm,
-            tpm=s.embed_tpm,
-            breaker_failures=s.circuit_breaker_failures,
-            timeout_seconds=s.gemini_timeout_seconds,
-        )
-        return GeminiEmbedder(client, model, dim, s.embed_batch_size)
+    # the indexer records each local model's weights hash on first use (Indexer._index)
+    embedder = embedder_for(config, for_queries=False, local=LocalModels(config))
 
     def summarizer() -> GeminiSummarizer:
         client = GeminiClient(

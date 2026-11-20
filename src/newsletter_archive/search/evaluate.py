@@ -502,10 +502,12 @@ def memoized(factory: Callable[[str, int], QueryEmbedder]) -> Callable[[str, int
 
 def reader_service(config: Config, reranker: Scorer | None = None) -> SearchService:
     """A search service for evaluation: one reused reader connection (single-threaded; reopened
-    if it drops) and the real Gemini query embedder with each query embedded once."""
+    if it drops) and the query embedder for each version's model (local or Gemini, so the
+    quality gate compares a local candidate with a Gemini live version fairly), each query
+    embedded once."""
     from contextlib import nullcontext
 
-    from .service import gemini_query_embedder
+    from .embedders import embedder_for
 
     held: list[psycopg.Connection] = []
 
@@ -514,7 +516,7 @@ def reader_service(config: Config, reranker: Scorer | None = None) -> SearchServ
             held[:] = [db.connect(config, "reader")]
         return nullcontext(held[0])
 
-    return SearchService(config, connect, memoized(gemini_query_embedder(config)), reranker)
+    return SearchService(config, connect, memoized(embedder_for(config, for_queries=True)), reranker)
 
 
 def gate_for(config: Config) -> Callable[[db.Generation, db.Generation], tuple[float, float] | None] | None:

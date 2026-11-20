@@ -122,6 +122,7 @@ class Estimate:
     summary_tokens: int
     embed_usd_per_million: float
     summary_usd_per_million: float
+    local_embedding: bool = False  # a local model: embedding costs nothing and has no ceiling
 
     @property
     def cost_usd(self) -> float:
@@ -131,9 +132,17 @@ class Estimate:
         ) / 1_000_000
 
     def line(self) -> str:
-        return (
-            f"to embed: {self.passages - self.passages_cached} of {self.passages} passages "
-            f"({self.passages_cached} cached), ~{self.embed_tokens:,} tokens; "
+        if self.local_embedding:
+            embed = (
+                f"to embed locally: {self.passages - self.passages_cached} of {self.passages} passages "
+                f"({self.passages_cached} cached), $0; "
+            )
+        else:
+            embed = (
+                f"to embed: {self.passages - self.passages_cached} of {self.passages} passages "
+                f"({self.passages_cached} cached), ~{self.embed_tokens:,} tokens; "
+            )
+        return embed + (
             f"summaries to write: {self.summaries}, ~{self.summary_tokens:,} tokens; "
             f"estimated cost ~${self.cost_usd:.2f}"
         )
