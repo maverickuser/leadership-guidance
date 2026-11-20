@@ -132,8 +132,8 @@ def tool_description(overview: ArchiveOverview | None, default_limit: int = 10, 
         'For broad questions ("what does the newsletter say about hiring?") always start with '
         'kind: "summaries" (it finds far more of the relevant posts), then search passages of the '
         "most relevant posts for quotes. For specific questions search passages directly. "
-        "Put exact phrases in double quotes. Always cite the "
-        "post title and URL.\n"
+        "Put exact phrases in double quotes. Keep each post's title and URL: in the answer, name "
+        "posts by title in the text and link them only in a sources list at the end.\n"
         f"Arguments: query (required), limit (1-{max_limit}, default {default_limit}), category (one or "
         "more category names), since / until (YYYY-MM-DD, inclusive), kind (all | passages | summaries), "
         "source (one or more newsletter ids; leave it out to search every newsletter)."
@@ -300,7 +300,7 @@ def build_server(
         name=ASK_PROMPT_NAME,
         title="Ask the leadership coach",
         description=(
-            "Answer a question from the archive as a short lesson from a coach, with links to the posts used."
+            "Answer a question from the archive as a short write-up from a coach, with sources at the end."
         ),
     )
     def ask(question: Annotated[str, Field(description="Your question for the archive.")]) -> str:
@@ -341,7 +341,7 @@ def command_text() -> str:
     """``/ask-coach``: the whole question ($ARGUMENTS) plus the ``ask`` prompt's instructions."""
     return (
         "---\n"
-        f"description: Answer from the {SERVER_NAME} archive as a lesson from a coach, with sources\n"
+        f"description: Answer from the {SERVER_NAME} archive as a write-up from a coach, with sources\n"
         "argument-hint: <your question>\n"
         "---\n"
         f"{COMMAND_MARKER}\n"

@@ -59,7 +59,7 @@ Write the answer as a short write-up, like a blog post from a coach teaching the
 A narrow, factual question needs only the title, the direct answer and the Sources list.
 ```
 
-`ask_message`, the prompt's description and the command file code are unchanged.
+The `ask` prompt's description and the command file's description say "write-up from a coach" with sources at the end. The `search` tool's description changes "Always cite the post title and URL" to keeping each post's title and URL, naming posts in the text and linking them only in a closing sources list, so it doesn't contradict the server instructions. `ask_message` and the command file code are unchanged.
 
 ## 4. Errors and secrets
 

@@ -151,7 +151,7 @@ def get_prompt(server, args):
 def test_ask_prompt_is_listed(ask_server):
     [p] = prompts(ask_server)
     assert (
-        p.name == "ask" and p.title == "Ask the leadership coach" and "lesson from a coach" in p.description
+        p.name == "ask" and p.title == "Ask the leadership coach" and "write-up from a coach" in p.description
     )
     assert [(a.name, a.required) for a in p.arguments] == [("question", True)]
 
@@ -194,6 +194,7 @@ def test_ask_prompt_returns_the_question_and_how_to_answer(ask_server, caplog):
     assert text.index('"### Try this week"') < text.index('"### Sources"')
     # spec: mcp-server / Ask prompt (Sources only at the end): the only link is in Sources
     assert "[Post title](URL)" not in text and "as a link right there" not in text
+    assert "each linked to the post" not in text and "each naming the post it comes\n  from" in text
     assert text.count("](URL)") == 1 and text.index("[Title](URL)") > text.index('"### Sources"')
     assert "prompt ask (13 chars)" in caplog.text and "secret topic" not in caplog.text
 
@@ -243,7 +244,7 @@ def claude_dir(tmp_path, monkeypatch):
 def test_command_text_passes_the_whole_question():
     text = mcp_server.command_text()
     assert text.startswith(
-        "---\ndescription: Answer from the leadership-coach archive as a lesson from a coach"
+        "---\ndescription: Answer from the leadership-coach archive as a write-up from a coach"
     )
     assert "argument-hint: <your question>" in text and mcp_server.COMMAND_MARKER in text
     assert "Question: $ARGUMENTS" in text and "ask the user for it first" in text
