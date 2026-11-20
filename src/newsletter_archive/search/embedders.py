@@ -16,6 +16,7 @@ from typing import Any
 
 from ..config import Config, is_local_model
 from .embeddings import Embedder, LocalEmbedder, LocalModelError, verify_weights
+from .gpu import MODEL_LOAD_LOCK
 
 log = logging.getLogger("newsletter_archive.search.embedders")
 
@@ -61,7 +62,8 @@ class LocalModels:
                 raise self._refused[key]
             if key not in self._loaded:
                 folder = self.config.local_model_dir(model)
-                embedder = (self.loader or _load_local)(model, folder, dim, batch_size)
+                with MODEL_LOAD_LOCK:  # never while the re-ranker loads (transformers imports)
+                    embedder = (self.loader or _load_local)(model, folder, dim, batch_size)
                 if self.check == "verify":
                     try:
                         self._verify(embedder)

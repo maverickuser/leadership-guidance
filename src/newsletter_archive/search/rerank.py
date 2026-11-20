@@ -21,7 +21,7 @@ from concurrent.futures import TimeoutError as FutureTimeout
 from pathlib import Path
 from typing import Any, Protocol
 
-from .gpu import on_gpu
+from .gpu import MODEL_LOAD_LOCK, on_gpu
 
 log = logging.getLogger("newsletter_archive.search.rerank")
 
@@ -160,7 +160,8 @@ class Reranking:
 
     def _load(self, load: Callable[[], Reranker]) -> None:
         try:
-            self._model = load()
+            with MODEL_LOAD_LOCK:  # never while the local embedder loads (transformers imports)
+                self._model = load()
         except ModuleNotFoundError as e:
             hint = "; install it with: pip install -e '.[rerank]'" if e.name in OPTIONAL_MODULES else ""
             self._error = f"{e}{hint}"

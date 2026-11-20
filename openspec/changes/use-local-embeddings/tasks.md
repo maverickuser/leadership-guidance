@@ -35,7 +35,13 @@
 - [x] 4.1 **Changed defaults:** `embedding_model: local:qwen3-embedding-0.6b-archive-v5`, `candidates: 100`, `fusion_weights: {keyword: 0.25, semantic: 2.0}`, with the measurements in the config comments
 - [x] 4.2 README: local embeddings setup (where the model folder goes, offline, private), the switch steps, rollback; `config.example.yaml`
 - [x] 4.3 Tests updated for the new defaults; the hybrid-search scenario where keyword matches don't crowd out meaning matches
-- [ ] 4.4 After merge, with the user's go-ahead: copy the model, `--refresh --no-swap` (dry run first), `--swap` with the gate, check the side-by-side and p90 (lld §10)
+- [x] 4.4 After merge, with the user's go-ahead: copy the model, `--refresh --no-swap` (dry run first), `--swap` with the gate, check the side-by-side and p90 (lld §10)
+
+## 5. Fix found in the rollout (PR 5)
+
+- [x] 5.1 Load the local embedder and the re-ranker one at a time (`MODEL_LOAD_LOCK`): loaded together at MCP start-up, the re-ranker failed every time ("cannot import name 'AutoModelForCausalLM' from 'transformers'"), so searches weren't re-ranked
+- [x] 5.2 The index summary line says "Embeddings:", not "Gemini:", since embedding is now local
+- [x] 5.3 Test: both loads hold the lock; checked with the real models (3 of 3 starts re-rank)
 
 ## Every PR (definition of done)
 
