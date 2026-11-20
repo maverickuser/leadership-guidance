@@ -150,5 +150,8 @@ def test_preload_live_falls_back_to_the_configured_model_without_a_database(tmp_
     LocalModels(local_cfg, loader).preload_live().join(5)
     assert [c[0] for c in loader.calls] == [LOCAL]
     assert (
-        LocalModels(config(tmp_path), Loader()).preload_live() is None
+        LocalModels(
+            config(tmp_path, embedding_model="gemini-embedding-2", embedding_dimension=3072), Loader()
+        ).preload_live()
+        is None
     )  # Gemini configured: nothing to load

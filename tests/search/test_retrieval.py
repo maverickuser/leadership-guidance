@@ -79,3 +79,21 @@ def test_rrf_weights_favour_a_list():
     assert rrf(lists)[0].passage_id == "both"
     weighted = rrf({"keyword": ["k"], "semantic": ["s"]}, weights={"semantic": 2.0})
     assert [f.passage_id for f in weighted] == ["s", "k"] and weighted[0].score == pytest.approx(2 / 61)
+
+
+# spec: hybrid-search / Hybrid retrieval (Keyword matches do not crowd out meaning matches)
+def test_default_weights_keep_a_meaning_match_in_the_top_10():
+    """The answer is semantic rank 8. Ten passages that share common words with the query (keyword
+    ranks 1-10) are weak meaning matches (semantic ranks 25-34). At keyword weight 1 their
+    two-list bonus lifts all ten above the answer; at the default 0.25 none of them passes it."""
+    from newsletter_archive.config import SearchConfig
+
+    semantic = [f"sem-{i}" for i in range(1, 8)] + ["answer"] + [f"sem-{i}" for i in range(9, 41)]
+    keyword = semantic[24:34]
+    lists = {"keyword": keyword, "semantic": semantic}
+
+    def top10(weights):
+        return [f.passage_id for f in rrf(lists, weights=weights)][:10]
+
+    assert "answer" in top10(SearchConfig().fusion_weights)
+    assert "answer" not in top10({"keyword": 1.0, "semantic": 2.0})  # what the previous default did

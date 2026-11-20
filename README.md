@@ -214,7 +214,7 @@ Manifest statuses: `discovered → fetched → ok | partial`, or `failed` with `
 
 ## Search (MCP server)
 
-Claude Code, Claude Desktop or any MCP client can search your archive through a local MCP server. It uses hybrid search: keywords (BM25) plus meaning (Gemini embeddings), re-ranked by a small local model. The server only returns archive data, passages and one stored summary per post. Your agent writes the answer and cites the post URLs.
+Claude Code, Claude Desktop or any MCP client can search your archive through a local MCP server. It uses hybrid search: keywords (BM25) plus meaning (a local embedding model, see below), re-ranked by a small local model. The server only returns archive data, passages and one stored summary per post. Your agent writes the answer and cites the post URLs.
 
 ### Set up (once)
 
@@ -226,15 +226,15 @@ Claude Code, Claude Desktop or any MCP client can search your archive through a 
 
    Its data lives in `../leadership-coach-datasets/postgres/`, outside the repo.
 
-2. In `.env`, add `GEMINI_API_KEY` (from [Google AI Studio](https://aistudio.google.com/apikey)) and three database passwords of your choice (see `.env.example`).
-3. Install the local re-ranker (optional, ~1.2 GB download on first use, Apple Silicon or CPU):
+2. In `.env`, add three database passwords of your choice (see `.env.example`), and `GEMINI_API_KEY` (from [Google AI Studio](https://aistudio.google.com/apikey)) for post summaries and `archive ask`. Embedding needs no key with the local model.
+3. Install the local models' packages (the re-ranker downloads ~1.2 GB on first use; Apple Silicon or CPU), and put the embedding model's folder in place (see [The embedding model](#the-embedding-model-local)):
 
    ```bash
    pip install -e '.[rerank]'
    ```
 
-   Without it, search still works but isn't re-ranked.
-4. Build the index: `archive index --dry-run` shows the cost, then run `archive index` (add `--yes` if it says the estimate is over the per-run limit). For about 250 posts, the first build takes ~20 minutes and costs about $1.30. Later runs only process new or changed posts, and the weekly `archive run` keeps the index up to date.
+   Without the packages, search runs on keywords only.
+4. Build the index: `archive index --dry-run` shows the cost, then run `archive index` (add `--yes` if it says the estimate is over the per-run limit). Embedding is local and free; the cost is the post summaries. The first build of about 840 posts takes ~35 minutes for the embeddings. Later runs only process new or changed posts, and the weekly `archive run` keeps the index up to date.
 
 ### Connect your agent
 
@@ -287,18 +287,27 @@ The `search` tool takes:
 - `since` and `until` (`YYYY-MM-DD`)
 - `kind` (`all`, `passages` or `summaries`)
 
-A search takes about 5 seconds. If Gemini is unreachable, results come from keywords only. If the re-ranker isn't installed or is busy, results keep their combined order. Either way, the response says so. The server listens on no network port. It logs to `../leadership-coach-datasets/logs/mcp-*.log` and to stderr, never the query text, passage text or any key. It picks up index updates without a restart.
+A search takes about 5–8 seconds. If the embedding model is still loading or missing (or Gemini is unreachable, for a Gemini index), results come from keywords only. If the re-ranker isn't installed or is busy, results keep their combined order. Either way, the response says so. The server listens on no network port. It logs to `../leadership-coach-datasets/logs/mcp-*.log` and to stderr, never the query text, passage text or any key. It picks up index updates without a restart.
+
+### The embedding model (local)
+
+Passages and queries are embedded on your Mac by a local model, so searching sends nothing anywhere and needs no API key. The default is a Qwen3-Embedding-0.6B fine-tuned on this archive (`local:qwen3-embedding-0.6b-archive-v5`). Its weights are private: they live outside the repo and are never uploaded.
+
+- **Where it goes:** put the model folder (with `config.json`, `model.safetensors` and the tokenizer files) at `../leadership-coach-datasets/models/qwen3-embedding-0.6b-archive-v5/`, or point `search.local_model_path` at it. It loads offline only and is never downloaded. It needs the re-ranker's packages: `pip install -e '.[rerank]'`.
+- **New weights need a new name.** The first index run records a hash of the model's files; later runs and the MCP server refuse different files under the same name. Name new weights `local:<new name>` and run `archive index --refresh`.
+- **Quality:** measured on 20 Nov 2026, recall@10 0.83 on 191 questions about posts it never trained on and 0.85 on the 36 human eval questions (Gemini: 0.87 and 0.86).
+- **Gemini instead:** set `embedding_model: gemini-embedding-2` and run `archive index --refresh`. An index built with Gemini is always searched with Gemini, so `--rollback` to one keeps working (it needs `GEMINI_API_KEY`).
 
 ### What is sent to Gemini
 
-- **Indexing:** each passage's text, plus its post title and section heading, is sent for embedding. Each post's cleaned text is sent once to write its summary. Both results are cached, so unchanged text is never sent again.
-- **Searching:** only your query text is sent, for embedding.
-- Your cookie and member details are never sent. The re-ranker runs on your machine.
+- **Indexing:** each post's cleaned text is sent once to write its summary (cached, so unchanged text is never sent again). With a Gemini embedding model, passages are sent for embedding too.
+- **Searching:** nothing, with the local model. With a Gemini index, only your query text is sent, for embedding.
+- Your cookie and member details are never sent. The embedding model (when local) and the re-ranker run on your machine.
 - **Use a paid Gemini plan** when a newsletter's `robots.txt` says `ai-train=no` (The Pragmatic Engineer does). Google's paid-tier terms don't use your prompts or content to train its models; the free tier's do.
 
 ### Index versions
 
-Changing `search.embedding_model` needs a new index version. `archive index --refresh` builds one beside the live one and then switches to it.
+Changing `search.embedding_model` needs a new index version. `archive index --refresh` builds one beside the live one and then switches to it. Switching from Gemini to the local model: `archive index --refresh --no-swap --dry-run` (shows the local embeddings, $0), then `archive index --refresh --no-swap` (about 35 minutes on Apple Silicon), then `archive index --swap` (the quality check embeds the eval questions with Gemini for the live version, under 1¢).
 - `--no-swap`: build without switching; `--swap` switches later.
 - `--rollback`: go back to the previous version.
 - `--force`: switch even if the quality check fails.
@@ -356,15 +365,16 @@ A run costs a fraction of a cent (query embeddings only). While the file exists,
 | Setting | Default | |
 |---|---|---|
 | `enabled` | `true` | `false` skips indexing in `archive run` |
-| `embedding_model` / `embedding_dimension` | `gemini-embedding-2` / `3072` | changing either needs `archive index --refresh` |
+| `embedding_model` / `embedding_dimension` | `local:qwen3-embedding-0.6b-archive-v5` / `1024` | `local:<name>` or `gemini-embedding-2` (3072); the dimension follows the model when left out; changing either needs `archive index --refresh` |
+| `local_model_path` / `local_batch_size` | `../leadership-coach-datasets/models/<name>` / `8` | the local model's folder, and texts per forward pass when indexing |
 | `summaries.enabled` / `summaries.model` | `true` / `gemini-3.8-flash` | one summary per post, written at index time |
 | `max_embed_tokens_per_run` / `summaries.max_tokens_per_run` | `1500000` each | spending ceilings; `--yes` goes over them |
 | `chunk_words` / `chunk_overlap_words` | `300` / `50` | passage size |
-| `candidates` | `50` | results taken from each of keyword and semantic search |
+| `candidates` | `100` | results taken from each of keyword and semantic search (was 50; with keyword weight 0.25 it measured +1 point for Gemini and +3 for the local model) |
 | `rerank_top` / `rerank_timeout_seconds` | `20` / `20` | `rerank_top` applies only to `selection: rows` (the passages re-ranked there). Re-ranking takes ~0.15 s per passage on Apple Silicon (measured), about 6–7 s for the `posts` default; past the timeout a search returns unranked results with a note |
 | `query_timeout_seconds` | `8` | after this, search uses keywords only |
 | `bm25_boosts` | heading `2`, title `1.5`, body `1` | |
-| `fusion_weights` | keyword `1`, semantic `2` | how much each list counts when combining (semantic 2 scored best) |
+| `fusion_weights` | keyword `0.25`, semantic `2` | how much each list counts when combining (keyword was 1; at 0.25, keyword hits stop pushing meaning matches out of the top 10) |
 | `max_per_post` | `3` | passages per post in one result list (plus one summary) |
 | `selection` | `posts` | how results are chosen. `posts` groups passages by post and re-ranks the best 3 passages of the best 10 posts, so a search returns results from about 10 posts instead of 4 (measured: recall@10 0.71 → 0.84, nDCG@10 0.71 → 0.90, answers cite 57% → 70% of the relevant posts, p90 search 5.3 s → 7.4 s). Set `rows` to switch back to re-ranking the first `rerank_top` passages |
 | `post_score` / `rerank_posts` / `rerank_rows_per_post` | `max` / `10` / `3` | for `selection: posts`: how a post is scored from its passages (`max` = its best passage; `sum_top3` found slightly more posts but ranked them worse), how many posts are re-ranked, and how many passages of each (plus its summary). More rows per post costs ~0.15 s each |
@@ -382,6 +392,7 @@ pytest                 # unit + integration tests; network and DNS are blocked e
 pytest -m slow         # the real-clock spacing test (CI runs everything)
 pytest -m db           # search-database tests (need `docker compose up -d --wait db`; skipped otherwise)
 ARCHIVE_API_TESTS=1 pytest -m api   # opt-in checks against the real Gemini API (needs GEMINI_API_KEY; never in CI)
+ARCHIVE_MODEL_TESTS=1 pytest -m model   # opt-in check of the real local embedding model (needs the model folder; never in CI)
 ruff check . && ruff format --check . && mypy   # lint, format, strict types (CI "lint" job)
 python scripts/check_safety.py   # what CI runs to keep secrets and content out of the repo
 ```

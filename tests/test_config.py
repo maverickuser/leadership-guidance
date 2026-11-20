@@ -149,8 +149,11 @@ def test_secret_never_shows_value(cfg):
 def test_search_defaults(tmp_path):
     cfg = load_config(tmp_path / "missing.yaml", tmp_path / ".env", overrides=SITE)
     s = cfg.search
-    assert (s.embedding_model, s.embedding_dimension) == ("gemini-embedding-2", 3072)
-    assert (s.chunk_words, s.chunk_overlap_words, s.candidates, s.rerank_top) == (300, 50, 50, 20)
+    # use-local-embeddings: the local model, 100 candidates and keyword weight 0.25 are the defaults
+    assert (s.embedding_model, s.embedding_dimension) == ("local:qwen3-embedding-0.6b-archive-v5", 1024)
+    assert (s.chunk_words, s.chunk_overlap_words, s.candidates, s.rerank_top) == (300, 50, 100, 20)
+    assert s.fusion_weights == {"keyword": 0.25, "semantic": 2.0}
+    assert cfg.local_model_dir() == cfg.output_dir / "models" / "qwen3-embedding-0.6b-archive-v5"
     assert s.bm25_boosts == {"heading": 2.0, "title": 1.5, "body": 1.0}
     assert (s.db_host, s.db_port, s.db_name) == ("127.0.0.1", 5433, "archive")
     assert s.summaries.enabled and s.summaries.max_tokens_per_run == 1_500_000
@@ -194,7 +197,7 @@ def test_search_overrides_and_nested_sections(tmp_path):
         ("search:\n  bm25_boosts: [2]\n", "bm25_boosts must map"),
         ("search:\n  bm25_boosts: {body: 0}\n", "boosts values must be positive numbers"),
         ("search:\n  fusion_weights: {semantic: .nan}\n", "weights values must be positive numbers"),
-        ("search:\n  rerank_top: 101\n", "rerank_top can't exceed"),
+        ("search:\n  rerank_top: 201\n", "rerank_top can't exceed"),
         ("search:\n  selection: chunks\n", "selection must be one of: rows, posts"),
         ("search:\n  post_score: mean\n", "post_score must be one of: max, sum_top3"),
         ("search:\n  rerank_posts: 0\n", "rerank_posts must be between 1 and 50"),
@@ -285,7 +288,7 @@ def test_fusion_weights(tmp_path):
 
     path = tmp_path / "config.yaml"
     path.write_text(SOURCES_YAML + "search:\n  fusion_weights: {semantic: 3}\n")
-    assert load_config(path).search.fusion_weights == {"keyword": 1.0, "semantic": 3.0}
+    assert load_config(path).search.fusion_weights == {"keyword": 0.25, "semantic": 3.0}
     for bad, message in (
         ("{semantic: 0}", "must be positive numbers"),
         ("{semantic: .nan}", "must be positive numbers"),
