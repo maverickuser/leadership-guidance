@@ -16,10 +16,10 @@
 
 ## 2. Local embedder, GPU lock and weights check (PR 2)
 
-- [ ] 2.1 `search/gpu.py` with `GPU_LOCK`; the re-ranker's forward pass takes it (lld §4)
-- [ ] 2.2 `LocalEmbedder`: offline load, MPS/CPU, last-token pooling, over-long input rejected, vectors validated, input order kept (lld §4)
-- [ ] 2.3 Migration `003_embedding_models.sql` and `weights_sha256()`; the writer records the hash on first use and refuses a mismatch; the reader checks it (lld §4)
-- [ ] 2.4 Unit tests with a fake encoder (order, too long, non-finite, lock never re-entered); `db` tests for the migration, reader grant and hash check; opt-in `model` marker and real-model test
+- [x] 2.1 `search/gpu.py` with `GPU_LOCK`; the re-ranker's forward pass takes it (lld §4)
+- [x] 2.2 `LocalEmbedder`: offline load, MPS/CPU, last-token pooling, over-long input rejected, vectors validated, input order kept (lld §4)
+- [x] 2.3 Migration `003_embedding_models.sql` and `weights_sha256()`; the writer records the hash on first use and refuses a mismatch; the reader checks it (lld §4)
+- [x] 2.4 Unit tests with a fake encoder (order, too long, non-finite, lock never re-entered); `db` tests for the migration, reader grant and hash check; opt-in `model` marker and real-model test
 
 ## 3. Wiring: one embedder factory (PR 3)
 

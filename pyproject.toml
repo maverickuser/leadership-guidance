@@ -75,6 +75,7 @@ markers = [
     "slow: uses the real clock (seconds of waiting)",
     "db: needs the search database (docker compose up -d --wait db); skipped when it isn't running",
     "api: calls the real Gemini API; skipped unless ARCHIVE_API_TESTS=1",
+    "model: loads the real local embedding model; skipped unless ARCHIVE_MODEL_TESTS=1",
 ]
 addopts = '-m "not slow"'
 

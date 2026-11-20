@@ -21,6 +21,8 @@ from concurrent.futures import TimeoutError as FutureTimeout
 from pathlib import Path
 from typing import Any, Protocol
 
+from .gpu import on_gpu
+
 log = logging.getLogger("newsletter_archive.search.rerank")
 
 INSTRUCTION = "Given a question, find passages from a leadership newsletter that answer it"
@@ -96,7 +98,8 @@ class Qwen3Reranker:  # pragma: no cover - needs torch and the model; checked li
         batch = self.tokenizer.pad(inputs, padding=True, return_tensors="pt", max_length=MAX_TOKENS)
         batch = {k: v.to(self.device) for k, v in batch.items()}
         with torch.no_grad():
-            logits = self.model(**batch).logits[:, -1, :]
+            # never at the same time as the local embedder
+            logits = on_gpu(lambda b: self.model(**b).logits[:, -1, :], batch)
             pair = torch.stack([logits[:, self.no], logits[:, self.yes]], dim=1).float()
             return [float(x) for x in torch.nn.functional.log_softmax(pair, dim=1)[:, 1].exp().tolist()]
 
