@@ -155,3 +155,25 @@ def test_preload_live_falls_back_to_the_configured_model_without_a_database(tmp_
         ).preload_live()
         is None
     )  # Gemini configured: nothing to load
+
+
+# spec: search-indexing / Local embedding model (the embedder and the re-ranker load one at a time)
+def test_the_embedder_and_the_reranker_load_one_at_a_time(tmp_path):
+    """Two threads importing transformers at once broke the re-ranker's load (20 Nov 2026)."""
+    from newsletter_archive.search.gpu import MODEL_LOAD_LOCK
+    from newsletter_archive.search.rerank import FakeReranker, Reranking
+
+    held = []
+
+    def loader(model, folder, dim, batch):
+        held.append(("embedder", MODEL_LOAD_LOCK.locked()))
+        return FakeEmbedder(model=model, dim=dim)
+
+    def load_reranker():
+        held.append(("reranker", MODEL_LOAD_LOCK.locked()))
+        return FakeReranker()
+
+    LocalModels(config(tmp_path), loader).get(LOCAL, 8, 1)
+    reranking = Reranking(load_reranker, 1.0)
+    assert reranking.wait_loaded(5)
+    assert held == [("embedder", True), ("reranker", True)] and not MODEL_LOAD_LOCK.locked()

@@ -171,7 +171,7 @@ class IndexReport:
             f"Index summary (generation {self.generation}, {self.mode}): indexed={len(self.indexed)} "
             f"unchanged={self.unchanged} removed={len(self.removed)} failed={len(self.failed)} "
             f"skipped={len(self.skipped)} passages={self.passages} summaries={self.summaries}",
-            f"Gemini: inputs embedded={self.embedded} cache hits={self.cache_hits} "
+            f"Embeddings: inputs embedded={self.embedded} cache hits={self.cache_hits} "
             f"tokens sent={self.tokens_sent:,}; boilerplate paragraphs removed={self.boilerplate_paragraphs}",
         ]
         if self.estimate:

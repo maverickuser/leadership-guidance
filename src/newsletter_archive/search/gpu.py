@@ -13,6 +13,10 @@ from collections.abc import Callable
 from typing import TypeVar
 
 GPU_LOCK = threading.Lock()
+# Loading a model imports transformers lazily, and two threads importing it at once fail
+# ("cannot import name 'AutoModelForCausalLM' from 'transformers'": measured 3 of 3 times when
+# the MCP server loaded the embedder and the re-ranker together, 20 Nov 2026). Load one at a time.
+MODEL_LOAD_LOCK = threading.Lock()
 # A re-ranking that timed out keeps running (and holding the lock) in its worker thread. If the
 # GPU hangs there, waiting without a limit would hang every later search; give up instead.
 GPU_WAIT_SECONDS = 30.0
