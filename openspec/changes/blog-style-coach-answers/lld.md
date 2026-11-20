@@ -3,8 +3,8 @@
 ## 1. Measured facts
 
 - Today's `ASK_INSTRUCTIONS` is 1,986 characters, SHA-256 `5676230a60588cc80801f0c54812315f740c0cf47f64f93233acd9533e4dad1b` (measured on `main` at d39eeb2). The frozen eval copy must hash to this.
-- Saved answers are keyed by `_sha(question, ANSWER_PROMPT_VERSION, model, thinking_level, sorted(result_ids))` (`answers.py:199`). The prompt text isn't in the key, so the pinned hash is what guarantees the reused answers came from the same text.
-- `answer_prompt` is the only caller of `mcp_server.ask_message` outside the MCP server (`answers.py:99`).
+- Saved answers are keyed by `_sha(question, ANSWER_PROMPT_VERSION, model, thinking_level, sorted(result_ids))` (`_sha` in `answer_key`). The prompt text isn't in the key, so the pinned hash is what guarantees the reused answers came from the same text.
+- `answer_prompt` was the only caller of `mcp_server.ask_message` outside the MCP server.
 
 ## 2. `search/answers.py`
 

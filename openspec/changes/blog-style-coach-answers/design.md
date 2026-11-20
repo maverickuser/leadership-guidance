@@ -23,7 +23,7 @@ The answer eval relies on those inline links. Citation precision is computed fro
 - The rule lives in the repo's prompt text, not in a separate Claude Code skill. One source keeps the MCP prompt and the command the same, and the command works from any folder (2026-11-20).
 
 ### 1. The eval gets its own frozen copy of the v2 text
-`answers.py` holds `ANSWER_INSTRUCTIONS_V2`, a byte-for-byte copy of today's `ASK_INSTRUCTIONS`, and `answer_prompt` builds `Question: {question}\n\n{ANSWER_INSTRUCTIONS_V2}` itself. `ANSWER_PROMPT_VERSION` stays 2. A test pins the copy's SHA-256 so nobody edits it without bumping the version.
+`answers.py` holds `ANSWER_INSTRUCTIONS`, a byte-for-byte copy of today's `ASK_INSTRUCTIONS`, and `answer_prompt` builds `Question: {question}\n\n{ANSWER_INSTRUCTIONS}` itself. `ANSWER_PROMPT_VERSION` stays 2. A test pins the copy's SHA-256 so nobody edits it without bumping the version.
 
 *Alternative:* keep using `ask_message` and accept v3. That makes every saved answer stale and the scores not comparable, which the user declined.
 
