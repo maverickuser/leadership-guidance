@@ -346,7 +346,7 @@ The stages are keyword only, semantic only, combined, and re-ranked. Options:
 
 The judge only advises: you decide what goes in the file, and the swap check below keeps using your lists. The first run makes about one request per question per 12 posts (a few cents); delete the grades file to grade everything again.
 
-**Answer evaluation (`--answers`).** This checks the answers, not just the search. For each question it runs a summaries search and a passages search, the way the `ask` prompt starts, and has Gemini (`search.answers.model`) write the answer from the `ask` instructions and those results. A second Gemini call (`search.answers.judge_model`) lists the answer's claims and checks each against the passages it cites. The report gives, overall and per question type:
+**Answer evaluation (`--answers`).** This checks the answers, not just the search. For each question it runs a summaries search and a passages search, the way the `ask` prompt starts, and has Gemini (`search.answers.model`) write the answer from those results and the version 2 `ask` instructions, which link each post inline so citations can be checked. The eval keeps that version even when the live `ask` prompt changes, so runs stay comparable. A second Gemini call (`search.answers.judge_model`) lists the answer's claims and checks each against the passages it cites. The report gives, overall and per question type:
 - **faithfulness:** the share of claims that the cited passages support
 - **citations:** the share of linked posts that the searches actually returned
 - **coverage:** the share of the question's relevant posts (your expected ones plus the judge's grade 2–3 posts) that the answer draws on

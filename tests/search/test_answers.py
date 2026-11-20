@@ -343,13 +343,20 @@ def test_grades_are_found_in_any_run_and_a_good_grade_clears_the_error(tmp_path)
     assert judge.calls == [] and run.records["q1"].grade["overall"] == 2 and run.records["q1"].error is None
 
 
-def test_the_answer_eval_uses_the_coach_voice_and_a_new_prompt_version():
-    from newsletter_archive.search.answers import Retrieved, answer_prompt
+# spec: answer-evaluation / Generate answers (The live prompt changes)
+def test_the_answer_eval_keeps_the_version_2_instructions():
+    import hashlib
 
-    text = answer_prompt("how do I delegate?", Retrieved(()))
+    from newsletter_archive.search.answers import ANSWER_INSTRUCTIONS, Retrieved, answer_prompt
+
+    # The text the saved v2 answers were made from. Changing it means bumping ANSWER_PROMPT_VERSION.
+    digest = hashlib.sha256(ANSWER_INSTRUCTIONS.encode()).hexdigest()
+    assert digest == "5676230a60588cc80801f0c54812315f740c0cf47f64f93233acd9533e4dad1b"
+    assert ANSWER_PROMPT_VERSION == 2
+    text = answer_prompt("  how do I delegate?  ", Retrieved(()))
+    assert text == f"Question: how do I delegate?\n\n{ANSWER_INSTRUCTIONS}\n\nSearch results:\n\n(no results)"
     assert 'in the first person ("I")' in text and '"### Try this week"' in text
-    assert "Never claim experiences" in text
-    assert ANSWER_PROMPT_VERSION == 2  # the coach voice: answers saved under version 1 are made again
+    assert "Never claim experiences" in text and "[Post title](URL)" in text  # inline links, for citations
 
 
 # spec: answer-evaluation / Grade each answer (Link with or without www)
