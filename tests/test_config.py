@@ -336,3 +336,54 @@ def test_small_candidates_stay_valid(tmp_path):
     for text in ("search:\n  candidates: 10\n", "search:\n  candidates: 5\n  rerank_top: 5\n"):
         p = write(tmp_path / "config.yaml", text)
         assert load_config(p, tmp_path / ".env", overrides=SITE).search.selection == "posts"
+
+
+# --- local embedding model settings (use-local-embeddings) -------------------------------------
+
+
+# spec: archive-cli / Configuration (Old config keeps Gemini)
+def test_gemini_model_keeps_its_dimension(tmp_path):
+    p = write(tmp_path / "config.yaml", "search:\n  embedding_model: gemini-embedding-2\n")
+    s = load_config(p, tmp_path / ".env").search
+    assert (s.embedding_model, s.embedding_dimension) == ("gemini-embedding-2", 3072)
+
+
+def test_local_model_dimension_is_derived(tmp_path):
+    p = write(tmp_path / "config.yaml", "search:\n  embedding_model: local:qwen3-embedding-0.6b-archive-v5\n")
+    s = load_config(p, tmp_path / ".env").search
+    assert s.embedding_dimension == 1024
+
+
+def test_explicit_dimension_wins(tmp_path):
+    p = write(tmp_path / "config.yaml", "search:\n  embedding_model: local:m\n  embedding_dimension: 768\n")
+    assert load_config(p, tmp_path / ".env").search.embedding_dimension == 768
+
+
+# spec: archive-cli / Configuration (Default model folder)
+def test_local_model_dir_defaults_under_output_dir(tmp_path):
+    p = write(tmp_path / "config.yaml", "output_dir: data\nsearch:\n  embedding_model: local:my-model\n")
+    cfg = load_config(p, tmp_path / ".env")
+    assert cfg.local_model_dir() == tmp_path.resolve() / "data" / "models" / "my-model"
+    assert cfg.local_model_dir("local:other") == tmp_path.resolve() / "data" / "models" / "other"
+
+
+def test_local_model_path_is_relative_to_the_config_file(tmp_path):
+    p = write(
+        tmp_path / "config.yaml", "search:\n  embedding_model: local:m\n  local_model_path: weights/m\n"
+    )
+    cfg = load_config(p, tmp_path / ".env")
+    assert cfg.search.local_model_path == str(tmp_path.resolve() / "weights" / "m")
+    assert cfg.local_model_dir("local:anything") == tmp_path.resolve() / "weights" / "m"
+
+
+@pytest.mark.parametrize("model", ["text-embedding-3", "local:", "local:Has Spaces", "qwen", "local:UPPER"])
+def test_unknown_embedding_model_is_rejected(tmp_path, model):
+    p = write(tmp_path / "config.yaml", f"search:\n  embedding_model: '{model}'\n")
+    with pytest.raises(ConfigError, match="embedding_model must be a Gemini model"):
+        load_config(p, tmp_path / ".env")
+
+
+def test_local_batch_size_must_be_positive(tmp_path):
+    p = write(tmp_path / "config.yaml", "search:\n  local_batch_size: 0\n")
+    with pytest.raises(ConfigError, match="local_batch_size must be > 0"):
+        load_config(p, tmp_path / ".env")

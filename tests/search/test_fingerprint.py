@@ -65,3 +65,31 @@ def test_embedding_model_is_not_part_of_it():
 
 def test_canonical_json():
     assert canonical_json({"b": 1, "a": "é"}) == '{"a":"é","b":1}'
+
+
+# --- per-model input format (use-local-embeddings) ---------------------------------------------
+
+LOCAL = "local:qwen3-embedding-0.6b-archive-v5"
+
+
+def test_gemini_fingerprint_unchanged():
+    """The Gemini payload must stay byte-identical, or the live index would be re-embedded."""
+    from newsletter_archive.search.fingerprint import fingerprint_payload
+
+    payload = fingerprint_payload(POST, SECTIONS, SEARCH)
+    assert payload["embed_input_version"] == 1 and isinstance(payload["embed_input_version"], int)
+    assert post_fingerprint(POST, SECTIONS, SEARCH, "gemini-embedding-2") == fp()
+    # pinned from main before this change: a different value would re-index every live post
+    assert fp() == "3ccce9510f60c03389953150a36068f83db48e69dd164dcee5ec65f5bd3adf7c"
+
+
+def test_local_model_changes_the_fingerprint():
+    local = post_fingerprint(POST, SECTIONS, SEARCH, LOCAL)
+    assert local != fp()
+    assert post_fingerprint(POST, SECTIONS, replace(SEARCH, embedding_model=LOCAL)) == local
+
+
+def test_model_argument_overrides_the_configured_model():
+    """A run writing the live Gemini version keeps Gemini fingerprints while the config names a local model."""
+    configured_local = replace(SEARCH, embedding_model=LOCAL)
+    assert post_fingerprint(POST, SECTIONS, configured_local, "gemini-embedding-2") == fp()

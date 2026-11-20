@@ -102,8 +102,13 @@ class SearchConfig:
     """Settings for indexing and hybrid search. Every field can be set under `search:` in config.yaml."""
 
     enabled: bool = True  # false: `archive run` skips the index stage (archive only)
+    # "gemini-…" embeds through the Gemini API; "local:<name>" runs a local Qwen3-Embedding model
+    # from local_model_path (openspec use-local-embeddings). Left out of config.yaml, the
+    # dimension follows the model: 3,072 for Gemini, 1,024 for a local Qwen3-Embedding-0.6B.
     embedding_model: str = "gemini-embedding-2"
     embedding_dimension: int = 3072
+    local_model_path: str = ""  # the local model's folder; "" = {output_dir}/models/<name>
+    local_batch_size: int = 8  # texts per local forward pass
     embed_batch_size: int = 50
     embed_rpm: int = 300
     embed_tpm: int = 1_000_000
@@ -167,6 +172,22 @@ SEARCH_FIELDS = {f.name for f in fields(SearchConfig)}
 SUMMARY_FIELDS = {f.name for f in fields(SummaryConfig)}
 ANSWERS_FIELDS = {f.name for f in fields(AnswersConfig)}
 SELECTIONS = ("rows", "posts")
+LOCAL_MODEL_PREFIX = "local:"
+LOCAL_MODEL_RE = re.compile(r"^local:[a-z0-9][a-z0-9._-]*$")
+GEMINI_DIMENSION = 3072
+LOCAL_DIMENSION = 1024
+
+
+def is_local_model(name: str) -> bool:
+    """True for a local embedding model name (``local:<name>``)."""
+    return name.startswith(LOCAL_MODEL_PREFIX)
+
+
+def default_dimension(model: str) -> int:
+    """The dimension used when ``search.embedding_dimension`` isn't set."""
+    return LOCAL_DIMENSION if is_local_model(model) else GEMINI_DIMENSION
+
+
 POST_SCORES = ("max", "sum_top3")
 BM25_FIELDS = {"heading", "title", "body"}
 THINKING_LEVELS = ("", "minimal", "low", "medium", "high")
@@ -286,6 +307,14 @@ class Config:
     def lock_path(self) -> Path:
         return self.output_dir / ".lock"
 
+    def local_model_dir(self, name: str | None = None) -> Path:
+        """The folder holding a local embedding model's weights: ``search.local_model_path`` when
+        set, else ``{output_dir}/models/<name without "local:">``."""
+        if self.search.local_model_path:
+            return Path(self.search.local_model_path)
+        model = name or self.search.embedding_model
+        return self.output_dir / "models" / model.removeprefix(LOCAL_MODEL_PREFIX)
+
     def with_overrides(self, **changes: Any) -> Config:
         return _validate(replace(self, **changes))
 
@@ -357,6 +386,9 @@ def _parse_search(raw: Any, env_port: str | None = None) -> SearchConfig:
     weights = values.pop("fusion_weights", None)
     for name, value in values.items():
         values[name] = _coerce(f"search.{name}", value, getattr(defaults, name))
+    if "embedding_dimension" not in values:
+        model = values.get("embedding_model", defaults.embedding_model)
+        values["embedding_dimension"] = default_dimension(model)
     if summaries is not None:
         sv = _section("search.summaries", summaries, defaults.summaries, SUMMARY_FIELDS)
         parsed = {
@@ -409,7 +441,7 @@ def _validate_search(s: SearchConfig) -> None:
         "summary_tpm", "max_embed_tokens_per_run", "circuit_breaker_failures", "cache_retention_days",
         "boilerplate_min_posts", "chunk_words", "mass_delete_min", "candidates", "rerank_top",
         "rerank_timeout_seconds", "query_timeout_seconds", "max_per_post", "default_limit", "max_limit",
-        "db_port",
+        "db_port", "local_batch_size",
     )  # fmt: skip
     for name in positive:
         if getattr(s, name) <= 0:
@@ -439,6 +471,11 @@ def _validate_search(s: SearchConfig) -> None:
         raise ConfigError("search.default_limit must be <= search.max_limit")
     if not s.embedding_model or not s.db_name or not s.db_host:
         raise ConfigError("search.embedding_model, search.db_host and search.db_name must not be empty")
+    if not (s.embedding_model.startswith("gemini-") or LOCAL_MODEL_RE.match(s.embedding_model)):
+        raise ConfigError(
+            "search.embedding_model must be a Gemini model (gemini-…) or a local model (local:<name>, "
+            "lowercase letters, digits, '.', '_' and '-')"
+        )
     if s.summaries.max_tokens_per_run <= 0:
         raise ConfigError("search.summaries.max_tokens_per_run must be > 0")
     if s.summaries.enabled and not s.summaries.model:
@@ -605,6 +642,16 @@ def _validate(cfg: Config) -> Config:
     return cfg
 
 
+def _resolve_model_path(search: SearchConfig, base_dir: Path) -> SearchConfig:
+    """A relative ``local_model_path`` is relative to the config file's folder."""
+    if not search.local_model_path:
+        return search
+    folder = Path(os.path.expanduser(search.local_model_path))
+    if not folder.is_absolute():
+        folder = (base_dir / folder).resolve()
+    return replace(search, local_model_path=str(folder))
+
+
 def load_config(
     path: Path | str = Path("config.yaml"),
     env_file: Path | str = Path(".env"),
@@ -650,7 +697,7 @@ def load_config(
             min_word_count=int(values["min_word_count"]),
             output_dir=output_dir,
             user_agent=str(values["user_agent"]),
-            search=_parse_search(values["search"], read_env(DB_PORT_ENV)),
+            search=_resolve_model_path(_parse_search(values["search"], read_env(DB_PORT_ENV)), base_dir),
             gemini_api_key=Secret(read_env(GEMINI_KEY_ENV)),
             db_writer_password=Secret(read_env(DB_WRITER_PASSWORD_ENV)),
             db_reader_password=Secret(read_env(DB_READER_PASSWORD_ENV)),

@@ -335,3 +335,32 @@ def test_refresh_drops_an_orphan_build_when_nothing_is_live(cfg, conn):
     result = gens(cfg, conn)[0].refresh(IndexOptions())
     assert result.action == "swapped" and statuses(conn) == {1: "active"} and schemas(conn) == {"idx_g1"}
     assert db.active_generation(conn).embedding_model == "fake-model"  # the orphan was dropped, not reused
+
+
+# --- local embedding model (use-local-embeddings) ----------------------------------------------
+
+LOCAL = "local:test-model"
+
+
+def local_model(cfg):
+    return replace(cfg, search=replace(cfg.search, embedding_model=LOCAL, embedding_dimension=4))
+
+
+def test_local_version_uses_the_local_format_and_the_live_one_keeps_its_fingerprints(cfg, conn):
+    """spec search-indexing / Semantic index: each version is written in its own model's format,
+    and a weekly run on the live (Gemini-format) version while a local one waits re-embeds nothing."""
+    recs = first_build(cfg, conn)
+    live_fps = dict(conn.execute("SELECT post_id, fingerprint FROM idx_g1.posts").fetchall())
+    new = local_model(cfg)
+    _, local_embedder, _ = gens(new, conn)
+    gens(new, conn, embedder=local_embedder)[0].refresh(IndexOptions(), swap=False)
+    sent = [t for b in local_embedder.batches for t in b]
+    assert sent and not any(t.startswith("title: ") for t in sent)  # local format: "Title\nheading\ntext"
+    assert sent[0].split("\n")[0] in {r["title"] for r in recs}
+
+    live = FakeEmbedder(model="fake-model", dim=8)
+    report = Indexer(
+        new, conn, lambda m, d: live if m == "fake-model" else None, lambda: FakeSummarizer()
+    ).run(IndexOptions())
+    assert live.batches == [] and report.unchanged == len(recs)
+    assert dict(conn.execute("SELECT post_id, fingerprint FROM idx_g1.posts").fetchall()) == live_fps

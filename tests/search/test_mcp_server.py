@@ -404,7 +404,8 @@ def test_archive_mcp_over_stdio_keeps_stdout_for_the_protocol(cfg, tmp_path, pg_
     (tmp_path / "config.yaml").write_text(
         f"output_dir: {cfg.output_dir}\nsources:\n  - id: main\n    platform: ghost\n"
         "    base_url: https://www.example.com\n    cookie_env: NEWSLETTER_COOKIE\n"
-        f"search:\n  embedding_model: {s.embedding_model}\n  embedding_dimension: {s.embedding_dimension}\n"
+        # a valid model name for the config check; the server searches with the index's own model
+        f"search:\n  embedding_model: gemini-{s.embedding_model}\n  embedding_dimension: {s.embedding_dimension}\n"
         f"  db_port: {s.db_port}\n  db_name: {s.db_name}\n",
         encoding="utf-8",
     )

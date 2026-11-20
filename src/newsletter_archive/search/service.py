@@ -29,7 +29,7 @@ from ..config import Config
 from ..errors import ArchiveError
 from ..runlog import RedactFilter
 from . import db
-from .embeddings import query_input
+from .embeddings import input_format
 from .filters import KIND_VALUES, Filters
 from .fusion import (
     Fused,
@@ -613,7 +613,7 @@ class SearchService:
         embedder = self.embedder_factory(gen.embedding_model, gen.embedding_dim)
         if (embedder.model, embedder.dim) != (gen.embedding_model, gen.embedding_dim):
             raise SearchError(f"query embedder uses {embedder.model}, the index {gen.embedding_model}")
-        return embedder.embed([query_input(query)])[0]
+        return embedder.embed([input_format(gen.embedding_model).query(query)])[0]
 
     def _hydrate(self, conn: psycopg.Connection, schema: str, ids: list[str]) -> dict[str, _Row]:
         if not ids:

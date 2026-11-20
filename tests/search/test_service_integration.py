@@ -310,3 +310,27 @@ def test_gemini_query_embedder_shares_one_client(cfg, monkeypatch):
     a, b = make("fake-model", 8), make("fake-model", 8)
     a.embed(["x"]), b.embed(["y"])
     assert a.client is b.client and a.client.retry_delays == () and made == [cfg.search.query_timeout_seconds]
+
+
+# -- local embedding model (use-local-embeddings) ---------------------------------------------
+
+
+def test_queries_use_the_format_of_the_searched_versions_model(cfg):
+    """spec search-indexing / Semantic index (Store searched with its own model)."""
+    local = replace(
+        cfg, search=replace(cfg.search, embedding_model="local:test-model", embedding_dimension=8)
+    )
+    records = [post("delegation", 1, [("Delegation basics", FILLER + " Delegate outcomes.")], day=1)]
+    write_archive(local, records)
+    with db.connect(local, "writer") as conn:
+        Indexer(
+            local, conn, lambda *_: FakeEmbedder(model="local:test-model", dim=8), lambda: FakeSummarizer()
+        ).run(IndexOptions())
+    seen = FakeEmbedder(model="local:test-model", dim=8)
+    resp = ask(service(local, embedder=seen), "how do I delegate")
+    assert resp.semantic
+    assert seen.batches == [
+        [
+            "Instruct: Given a question, find passages from a leadership newsletter that answer it\nQuery:how do I delegate"
+        ]
+    ]
